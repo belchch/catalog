@@ -1,0 +1,195 @@
+from __future__ import annotations
+
+import json
+from collections.abc import AsyncIterator
+from dataclasses import dataclass
+from typing import Any
+
+import jsonschema
+
+from app.agent.events import (
+    AgentEvent,
+    FinishEvent,
+    StepEvent,
+    TokenEvent,
+    ToolCallEvent,
+    ToolResultEvent,
+)
+from app.agent.registry import ToolRegistry
+from app.agent.trace import Trace, TraceEntry
+from app.llm.base import LLMProvider, Message, ToolCall
+
+
+@dataclass
+class _ToolExecResult:
+    ok: bool
+    payload: Any
+
+
+async def _execute_tool(tools: ToolRegistry, tc: ToolCall) -> _ToolExecResult:
+    """Validate + invoke a tool. Errors are reported back, never raised."""
+    entry = tools.get(tc.name)
+    if entry is None:
+        return _ToolExecResult(False, f"error: unknown tool '{tc.name}'")
+    spec, func = entry
+    try:
+        jsonschema.validate(tc.arguments, spec.parameters)
+    except jsonschema.ValidationError as exc:
+        return _ToolExecResult(False, f"error: invalid args: {exc.message}")
+    try:
+        result = await func(**tc.arguments)
+    except Exception as exc:  # noqa: BLE001 — tool errors are wrapped, not raised
+        return _ToolExecResult(False, f"error: {exc}")
+    return _ToolExecResult(True, result)
+
+
+def _serialize_result(result: Any) -> str:
+    """Serialize a tool result to a string for the message history."""
+    if isinstance(result, (dict, list)):
+        return json.dumps(result, ensure_ascii=False, default=str)
+    return str(result)
+
+
+async def _run_agent_core(
+    *,
+    provider: LLMProvider,
+    model: str,
+    system_prompt: str,
+    messages: list[Message],
+    tools: ToolRegistry,
+    temperature: float,
+    max_iterations: int,
+    use_stream: bool,
+    trace: Trace,
+) -> AsyncIterator[AgentEvent]:
+    """Shared loop: streams events and records ``trace``.
+
+    Both :func:`run_agent` and :func:`run_agent_collect` delegate here so the
+    trace and the event stream always agree.
+    """
+    history: list[Message] = [Message(role="system", content=system_prompt), *messages]
+    last_text: str | None = None
+
+    for i in range(1, max_iterations + 1):
+        yield StepEvent(i)
+        trace.entries.append(TraceEntry("llm", i, {}))
+
+        if use_stream:
+            text = ""
+            async for delta in provider.stream_complete(
+                model, history, tools.specs(), temperature
+            ):
+                text += delta
+                yield TokenEvent(delta)
+            # Stream mode does not parse tool_calls from SSE in this slice;
+            # the run finishes at end of stream.
+            trace.entries[-1].data = {"content": text}
+            history.append(Message(role="assistant", content=text))
+            yield FinishEvent(text, "stop", capped=False, usage={})
+            return
+
+        resp = await provider.complete(model, history, tools.specs(), temperature)
+        trace.entries[-1].data = {
+            "finish_reason": resp.finish_reason,
+            "content": resp.content,
+            "tool_calls": [
+                {"id": tc.id, "name": tc.name, "arguments": tc.arguments}
+                for tc in resp.tool_calls
+            ],
+        }
+        history.append(
+            Message(role="assistant", content=resp.content, tool_calls=resp.tool_calls)
+        )
+        if resp.content is not None:
+            last_text = resp.content
+
+        if not resp.tool_calls:
+            yield FinishEvent(
+                resp.content, resp.finish_reason, capped=False, usage=resp.usage
+            )
+            return
+
+        for tc in resp.tool_calls:
+            trace.entries.append(
+                TraceEntry("tool_call", i, {"name": tc.name, "arguments": tc.arguments})
+            )
+            yield ToolCallEvent(tc.id, tc.name, tc.arguments)
+            res = await _execute_tool(tools, tc)
+            trace.entries.append(
+                TraceEntry(
+                    "tool_result",
+                    i,
+                    {"name": tc.name, "result": res.payload, "ok": res.ok},
+                )
+            )
+            yield ToolResultEvent(tc.id, tc.name, res.ok, res.payload)
+            history.append(
+                Message(
+                    role="tool",
+                    content=_serialize_result(res.payload),
+                    tool_call_id=tc.id,
+                    name=tc.name,
+                )
+            )
+
+    # Loop exhausted without a final answer.
+    yield FinishEvent(last_text, "capped", capped=True, usage={})
+
+
+async def run_agent(
+    *,
+    provider: LLMProvider,
+    model: str,
+    system_prompt: str,
+    messages: list[Message],
+    tools: ToolRegistry,
+    temperature: float = 0.0,
+    max_iterations: int = 8,
+    use_stream: bool = True,
+) -> AsyncIterator[AgentEvent]:
+    """Run the function-calling loop, streaming :data:`AgentEvent` items."""
+    trace = Trace()
+    async for event in _run_agent_core(
+        provider=provider,
+        model=model,
+        system_prompt=system_prompt,
+        messages=messages,
+        tools=tools,
+        temperature=temperature,
+        max_iterations=max_iterations,
+        use_stream=use_stream,
+        trace=trace,
+    ):
+        yield event
+
+
+async def run_agent_collect(
+    *,
+    provider: LLMProvider,
+    model: str,
+    system_prompt: str,
+    messages: list[Message],
+    tools: ToolRegistry,
+    temperature: float = 0.0,
+    max_iterations: int = 8,
+    use_stream: bool = True,
+) -> tuple[str | None, Trace, bool]:
+    """Drain :func:`run_agent` and return ``(final_text, trace, capped)``."""
+    trace = Trace()
+    final_text: str | None = None
+    capped = False
+    async for event in _run_agent_core(
+        provider=provider,
+        model=model,
+        system_prompt=system_prompt,
+        messages=messages,
+        tools=tools,
+        temperature=temperature,
+        max_iterations=max_iterations,
+        use_stream=use_stream,
+        trace=trace,
+    ):
+        if isinstance(event, FinishEvent):
+            final_text = event.text
+            capped = event.capped
+    return final_text, trace, capped
