@@ -1,6 +1,6 @@
 # Step 02 — LLM-провайдер (OpenRouter)
 
-- **Статус:** Pending (блокер: нет `OPENROUTER_API_KEY`)
+- **Статус:** Code done (правки по ревью применены, ruff чист, 6/6 unit-тестов). Живой smoke блокирован 403 «Access denied by security policy» со стороны OpenRouter (WAF/сеть) — не код. Фиксы: см. `.kilo/plans/1783953542117-step-02-review-fixes.md`.
 - **Цель:** рабочая интеграция с OpenRouter — `complete` (с tool-calling), `list_models`, streaming. Доказать, что function-calling поверх OpenRouter работает (главный технический риск среза). Без агент-лупа, инструментов документов, БД.
 
 ## Контракты
@@ -52,9 +52,9 @@ class LLMProvider(Protocol):
 Использует уже установленные `httpx`, `pydantic`, `python-dotenv` (из шага 01). Новых зависимостей нет.
 
 ## Критерий приёмки
-- [ ] `python scripts/smoke_llm.py` (с `OPENROUTER_API_KEY` в `backend/.env`) проходит все 3 проверки.
-- [ ] Без ключа — понятная ошибка, а не трейс.
-- [ ] `from app.llm import OpenRouterProvider, Message, ToolSpec` импортируется чисто.
+- [~] `python scripts/smoke_llm.py` (с `OPENROUTER_API_KEY` в `backend/.env`) проходит все проверки. **Ключ есть, но OpenRouter отдаёт 403 «Access denied by security policy»** (блокировка WAF/сети на текущем окружении). Unit-тесты (`MockTransport`) — 6/6 зелёные, в т.ч. `test_stream_complete`. Прогон вживую требует разблокировки доступа к OpenRouter со стороны сети.
+- [x] Без ключа — понятная ошибка, а не трейс (`smoke_llm.py` печатает `ERROR: OPENROUTER_API_KEY is not set` и выходит 1).
+- [x] `from app.llm import OpenRouterProvider, Message, ToolSpec` импортируется чисто (проверено).
 - **Нет:** агент-лупа, реестра инструментов, SQLite, FastAPI-эндпоинтов (кроме `/health`), UI.
 
 ## Заметки

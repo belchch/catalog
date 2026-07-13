@@ -1,0 +1,28 @@
+DEBUG asyncio Using selector: KqueueSelector
+DEBUG app.llm HTTP GET https://openrouter.ai/api/v1/models body=
+DEBUG httpcore.connection connect_tcp.started host='openrouter.ai' port=443 local_address=None timeout=30.0 socket_options=None
+DEBUG httpcore.connection connect_tcp.complete return_value=<httpcore._backends.anyio.AnyIOStream object at 0x108bd4d70>
+DEBUG httpcore.connection start_tls.started ssl_context=<ssl.SSLContext object at 0x108b785f0> server_hostname='openrouter.ai' timeout=30.0
+DEBUG httpcore.connection start_tls.complete return_value=<httpcore._backends.anyio.AnyIOStream object at 0x108ab3890>
+DEBUG httpcore.http11 send_request_headers.started request=<Request [b'GET']>
+DEBUG httpcore.http11 send_request_headers.complete
+DEBUG httpcore.http11 send_request_body.started request=<Request [b'GET']>
+DEBUG httpcore.http11 send_request_body.complete
+DEBUG httpcore.http11 receive_response_headers.started request=<Request [b'GET']>
+DEBUG httpcore.http11 receive_response_headers.complete return_value=(b'HTTP/1.1', 200, b'OK', [(b'Date', b'Mon, 13 Jul 2026 15:25:48 GMT'), (b'Content-Type', b'application/json'), (b'Transfer-Encoding', b'chunked'), (b'Connection', b'keep-alive'), (b'CF-Cache-Status', b'HIT'), (b'Access-Control-Allow-Origin', b'*'), (b'Age', b'231'), (b'Cache-Control', b'public, max-age=300, s-maxage=300, stale-while-revalidate=3600, stale-if-error=3600'), (b'Access-Control-Expose-Headers', b'X-Generation-Id,cf-ray'), (b'Permissions-Policy', b'payment=(self "https://checkout.stripe.com" "https://connect-js.stripe.com" "https://js.stripe.com" "https://*.js.stripe.com" "https://hooks.stripe.com")'), (b'Referrer-Policy', b'no-referrer, strict-origin-when-cross-origin'), (b'X-Content-Type-Options', b'nosniff'), (b'Content-Encoding', b'gzip'), (b'Server', b'cloudflare'), (b'CF-RAY', b'a1a94d67ed27912c-ARN')])
+INFO httpx HTTP Request: GET https://openrouter.ai/api/v1/models "HTTP/1.1 200 OK"
+DEBUG httpcore.http11 receive_response_body.started request=<Request [b'GET']>
+DEBUG httpcore.http11 receive_response_body.complete
+DEBUG httpcore.http11 response_closed.started
+DEBUG httpcore.http11 response_closed.complete
+INFO app.llm list_models: fetched 343 models
+INFO app.llm complete request: model=openrouter/free messages=2 tools=None temperature=0.0
+DEBUG app.llm HTTP POST https://openrouter.ai/api/v1/chat/completions body={"model":"openrouter/free","messages":[{"role":"system","content":"You are a helpful assistant. Reply briefly."},{"role":"user","content":"Say hello in one sentence."}],"temperature":0.0}
+DEBUG httpcore.http11 send_request_headers.started request=<Request [b'POST']>
+DEBUG httpcore.http11 send_request_headers.complete
+DEBUG httpcore.http11 send_request_body.started request=<Request [b'POST']>
+DEBUG httpcore.http11 send_request_body.complete
+DEBUG httpcore.http11 receive_response_headers.started request=<Request [b'POST']>
+DEBUG httpcore.http11 receive_response_headers.complete return_value=(b'HTTP/1.1', 200, b'OK', [(b'Date', b'Mon, 13 Jul 2026 15:25:48 GMT'), (b'Content-Type', b'application/json'), (b'Transfer-Encoding', b'chunked'), (b'Connection', b'keep-alive'), (b'Access-Control-Allow-Origin', b'*'), (b'X-Generation-Id', b'gen-1783956348-OnAqWNjE0QGfrOWYrKxt'), (b'access-control-expose-headers', b'X-Generation-Id,cf-ray'), (b'Permissions-Policy', b'payment=(self "https://checkout.stripe.com" "https://connect-js.stripe.com" "https://js.stripe.com" "https://*.js.stripe.com" "https://hooks.stripe.com")'), (b'Referrer-Policy', b'no-referrer, strict-origin-when-cross-origin'), (b'X-Content-Type-Options', b'nosniff'), (b'Content-Encoding', b'gzip'), (b'Server', b'cloudflare'), (b'CF-RAY', b'a1a94d697e21912c-ARN')])
+INFO httpx HTTP Request: POST https://openrouter.ai/api/v1/chat/completions "HTTP/1.1 200 OK"
+DEBUG httpcore.http11 receive_response_body.started request=<Request [b'POST']>
