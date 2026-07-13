@@ -1,0 +1,1094 @@
+{
+  "version": "orpg.3.0",
+  "title": "нужны комментарии, доп идеи, критика, и",
+  "characters": {
+    "char-1783769842-vON4SMRS0BmjeJlJlBCW": {
+      "id": "char-1783769842-vON4SMRS0BmjeJlJlBCW",
+      "model": "anthropic/claude-opus-4.8",
+      "modelInfo": {
+        "slug": "anthropic/claude-opus-4.8",
+        "hf_slug": null,
+        "updated_at": "2026-06-22T15:27:15.019Z",
+        "created_at": "2026-05-27T18:04:51.937Z",
+        "hf_updated_at": null,
+        "name": "Anthropic: Claude Opus 4.8",
+        "short_name": "Claude Opus 4.8",
+        "author": "anthropic",
+        "author_display_name": "Anthropic",
+        "description": "Claude Opus 4.8 is Anthropic's most capable generally available model in the Opus family. It supports text, image, and file inputs with text output, with reasoning support and a 1M-token context window. It is suited for highly autonomous agents, long-horizon agentic work, knowledge work, and memory-driven tasks where coherence over extended sessions matters.\n\nIt is particularly strong on multi-step reasoning, complex coding, and end-to-end project orchestration - large codebases, multi-stage debugging, and long-running asynchronous agent pipelines. Beyond coding, it handles knowledge work such as drafting documents, building presentations, and analyzing data, maintaining quality across very long outputs.",
+        "model_version_group_id": "b98cca06-1cff-4829-90c2-ef03ddfefb7d",
+        "context_length": 1000000,
+        "input_modalities": [
+          "text",
+          "image",
+          "file"
+        ],
+        "output_modalities": [
+          "text"
+        ],
+        "has_text_output": true,
+        "group": "Claude",
+        "instruct_type": null,
+        "default_system": null,
+        "default_stops": [],
+        "hidden": false,
+        "router": null,
+        "warning_message": null,
+        "promotion_message": null,
+        "routing_error_message": null,
+        "is_private": false,
+        "permaslug": "anthropic/claude-4.8-opus-20260528",
+        "supports_reasoning": true,
+        "reasoning_config": {
+          "start_token": null,
+          "end_token": null,
+          "is_mandatory_reasoning": false,
+          "supports_reasoning_effort": true,
+          "supports_reasoning_max_tokens": false,
+          "supported_reasoning_efforts": [
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ]
+        },
+        "features": {
+          "reasoning_config": {
+            "start_token": null,
+            "end_token": null,
+            "is_mandatory_reasoning": false,
+            "supports_reasoning_effort": true,
+            "supports_reasoning_max_tokens": false,
+            "supported_reasoning_efforts": [
+              "low",
+              "medium",
+              "high",
+              "xhigh",
+              "max"
+            ]
+          },
+          "chat_template_config": {}
+        },
+        "default_parameters": {
+          "temperature": null,
+          "top_p": null,
+          "top_k": null,
+          "frequency_penalty": null,
+          "presence_penalty": null,
+          "repetition_penalty": null
+        },
+        "default_order": [
+          "anthropic/2",
+          "amazon-bedrock/us",
+          "google-vertex/global",
+          "anthropic",
+          "amazon-bedrock/eu-west-1",
+          "google-vertex/europe"
+        ],
+        "quick_start_example_type": "reasoning",
+        "is_trainable_text": null,
+        "is_trainable_image": null,
+        "knowledge_cutoff": null,
+        "limit_rpm": 0,
+        "limit_rpd": 0,
+        "supported_tts_voices": null,
+        "endpoint": {
+          "id": "c2bb6b96-c319-4e78-b0ea-42308136dd67",
+          "name": "Azure | anthropic/claude-4.8-opus-20260528",
+          "context_length": 1000000,
+          "model": {
+            "slug": "anthropic/claude-opus-4.8",
+            "hf_slug": null,
+            "updated_at": "2026-06-22T15:27:15.019902+00:00",
+            "created_at": "2026-05-27T18:04:51.937403+00:00",
+            "hf_updated_at": null,
+            "name": "Anthropic: Claude Opus 4.8",
+            "short_name": "Claude Opus 4.8",
+            "author": "anthropic",
+            "author_display_name": "Anthropic",
+            "description": "Claude Opus 4.8 is Anthropic's most capable generally available model in the Opus family. It supports text, image, and file inputs with text output, with reasoning support and a 1M-token context window. It is suited for highly autonomous agents, long-horizon agentic work, knowledge work, and memory-driven tasks where coherence over extended sessions matters.\n\nIt is particularly strong on multi-step reasoning, complex coding, and end-to-end project orchestration - large codebases, multi-stage debugging, and long-running asynchronous agent pipelines. Beyond coding, it handles knowledge work such as drafting documents, building presentations, and analyzing data, maintaining quality across very long outputs.",
+            "model_version_group_id": "b98cca06-1cff-4829-90c2-ef03ddfefb7d",
+            "context_length": 1000000,
+            "input_modalities": [
+              "text",
+              "image",
+              "file"
+            ],
+            "output_modalities": [
+              "text"
+            ],
+            "has_text_output": true,
+            "group": "Claude",
+            "instruct_type": null,
+            "default_system": null,
+            "default_stops": [],
+            "hidden": false,
+            "router": null,
+            "warning_message": null,
+            "promotion_message": null,
+            "routing_error_message": null,
+            "is_private": false,
+            "permaslug": "anthropic/claude-4.8-opus-20260528",
+            "supports_reasoning": true,
+            "reasoning_config": {
+              "start_token": null,
+              "end_token": null,
+              "is_mandatory_reasoning": false,
+              "supports_reasoning_effort": true,
+              "supports_reasoning_max_tokens": false,
+              "supported_reasoning_efforts": [
+                "low",
+                "medium",
+                "high",
+                "xhigh",
+                "max"
+              ]
+            },
+            "features": {
+              "reasoning_config": {
+                "start_token": null,
+                "end_token": null,
+                "is_mandatory_reasoning": false,
+                "supports_reasoning_effort": true,
+                "supports_reasoning_max_tokens": false,
+                "supported_reasoning_efforts": [
+                  "low",
+                  "medium",
+                  "high",
+                  "xhigh",
+                  "max"
+                ]
+              },
+              "chat_template_config": {}
+            },
+            "default_parameters": {
+              "temperature": null,
+              "top_p": null,
+              "top_k": null,
+              "frequency_penalty": null,
+              "presence_penalty": null,
+              "repetition_penalty": null
+            },
+            "default_order": [
+              "anthropic/2",
+              "amazon-bedrock/us",
+              "google-vertex/global",
+              "anthropic",
+              "amazon-bedrock/eu-west-1",
+              "google-vertex/europe"
+            ],
+            "quick_start_example_type": "reasoning",
+            "is_trainable_text": null,
+            "is_trainable_image": null,
+            "knowledge_cutoff": null,
+            "limit_rpm": 0,
+            "limit_rpd": 0,
+            "supported_tts_voices": null
+          },
+          "model_variant_slug": "anthropic/claude-opus-4.8",
+          "model_variant_permaslug": "anthropic/claude-4.8-opus-20260528",
+          "adapter_name": "InternalStreamAzureAnthropicAdapter",
+          "provider_name": "Azure",
+          "provider_info": {
+            "name": "Azure",
+            "displayName": "Azure",
+            "slug": "azure",
+            "baseUrl": "https://openrouter-east-us-2.openai.azure.com/openai",
+            "dataPolicy": {
+              "training": false,
+              "trainingOpenRouter": false,
+              "retainsPrompts": false,
+              "canPublish": false,
+              "termsOfServiceURL": "https://www.microsoft.com/en-us/legal/terms-of-use?oneroute=true",
+              "privacyPolicyURL": "https://www.microsoft.com/en-us/privacy/privacystatement"
+            },
+            "headquarters": "US",
+            "hasChatCompletions": true,
+            "hasCompletions": false,
+            "isAbortable": true,
+            "moderationRequired": false,
+            "editors": [
+              "{}"
+            ],
+            "owners": [
+              "{}"
+            ],
+            "adapterName": "AzureOpenAIAdapter",
+            "statusPageUrl": "https://status.azure.com/",
+            "byokEnabled": true,
+            "icon": {
+              "url": "/images/icons/Azure.svg"
+            },
+            "sendClientIp": false,
+            "pricingStrategy": "anthropic"
+          },
+          "provider_display_name": "Azure",
+          "provider_slug": "azure/us-east-2",
+          "provider_model_id": "claude-opus-4-8",
+          "quantization": "unknown",
+          "variant": "standard",
+          "is_free": false,
+          "can_abort": true,
+          "max_prompt_tokens": null,
+          "max_completion_tokens": 128000,
+          "max_tokens_per_image": null,
+          "supported_parameters": [
+            "reasoning",
+            "include_reasoning",
+            "structured_outputs",
+            "max_tokens",
+            "temperature",
+            "max_completion_tokens",
+            "tools",
+            "tool_choice",
+            "response_format",
+            "verbosity",
+            "stop"
+          ],
+          "excluded_parameters": [
+            "top_k",
+            "top_p"
+          ],
+          "is_byok": false,
+          "moderation_required": false,
+          "data_policy": {
+            "training": false,
+            "trainingOpenRouter": false,
+            "retainsPrompts": true,
+            "canPublish": false,
+            "termsOfServiceURL": "https://www.microsoft.com/en-us/legal/terms-of-use?oneroute=true",
+            "privacyPolicyURL": "https://www.microsoft.com/en-us/privacy/privacystatement"
+          },
+          "pricing": {
+            "prompt": "0.000005",
+            "completion": "0.000025",
+            "input_cache_read": "0.0000005",
+            "input_cache_write": "0.00000625",
+            "input_cache_write_1h": "0.00001",
+            "web_search": "0.01",
+            "discount": 0,
+            "display_pricing": [
+              {
+                "kind": "token",
+                "sku_label": "Input Price",
+                "price": "0.000005",
+                "displayMultiplier": 1000000,
+                "unitLabel": "/M tokens"
+              },
+              {
+                "kind": "token",
+                "sku_label": "Output Price",
+                "price": "0.000025",
+                "displayMultiplier": 1000000,
+                "unitLabel": "/M tokens"
+              },
+              {
+                "kind": "token",
+                "sku_label": "Cache Read",
+                "price": "0.0000005",
+                "displayMultiplier": 1000000,
+                "unitLabel": "/M tokens"
+              },
+              {
+                "kind": "token",
+                "sku_label": "Cache Write",
+                "price": "0.00000625",
+                "displayMultiplier": 1000000,
+                "unitLabel": "/M tokens"
+              },
+              {
+                "kind": "token",
+                "sku_label": "Cache Write (1h)",
+                "price": "0.00001",
+                "displayMultiplier": 1000000,
+                "unitLabel": "/M tokens"
+              }
+            ]
+          },
+          "display_pricing": [
+            {
+              "kind": "token",
+              "sku_label": "Input Price",
+              "price": "0.000005",
+              "displayMultiplier": 1000000,
+              "unitLabel": "/M tokens"
+            },
+            {
+              "kind": "token",
+              "sku_label": "Output Price",
+              "price": "0.000025",
+              "displayMultiplier": 1000000,
+              "unitLabel": "/M tokens"
+            },
+            {
+              "kind": "token",
+              "sku_label": "Cache Read",
+              "price": "0.0000005",
+              "displayMultiplier": 1000000,
+              "unitLabel": "/M tokens"
+            },
+            {
+              "kind": "token",
+              "sku_label": "Cache Write",
+              "price": "0.00000625",
+              "displayMultiplier": 1000000,
+              "unitLabel": "/M tokens"
+            },
+            {
+              "kind": "token",
+              "sku_label": "Cache Write (1h)",
+              "price": "0.00001",
+              "displayMultiplier": 1000000,
+              "unitLabel": "/M tokens"
+            }
+          ],
+          "pricing_json": {
+            "anthropic:prompt_tokens": "0.000005",
+            "anthropic:web_search_calls": "0.01",
+            "anthropic:cache_read_tokens": "0.0000005",
+            "anthropic:completion_tokens": "0.000025",
+            "anthropic:cache_write_1h_tokens": "0.00001",
+            "anthropic:cache_write_5m_tokens": "0.00000625"
+          },
+          "pricing_version_id": "b08a6a79-e1fb-4aa4-bf0b-2a1348000da1",
+          "is_hidden": false,
+          "is_private": false,
+          "is_byok_only": false,
+          "is_deranked": false,
+          "is_disabled": false,
+          "supports_tool_parameters": true,
+          "supports_reasoning": true,
+          "supports_multipart": true,
+          "limit_rpm": null,
+          "limit_rpd": null,
+          "limit_rpm_cf": null,
+          "has_completions": false,
+          "has_chat_completions": true,
+          "features": {
+            "supports_native_web_search": false,
+            "supports_tool_choice": {
+              "literal_none": true,
+              "literal_auto": true,
+              "literal_required": true,
+              "type_function": true
+            },
+            "supported_parameters": {
+              "structured_outputs": true
+            }
+          },
+          "supported_video_parameters": null,
+          "supported_image_parameters": null,
+          "provider_region": "us-east-2",
+          "deprecation_date": null,
+          "allowed_passthrough_parameters": [],
+          "capacity_tpm": null,
+          "created_at": "2026-07-06T23:01:12.889Z",
+          "status": 0,
+          "status_heuristics": {
+            "success": 57,
+            "derankableError": 0,
+            "rateLimited": 0
+          },
+          "status_heuristics_5m": {
+            "success": 22,
+            "derankableError": 0,
+            "rateLimited": 0
+          },
+          "status_heuristics_1d": {
+            "success": 2121,
+            "derankableError": 1,
+            "rateLimited": 0
+          },
+          "fortuna": {
+            "beta_alpha": 51.427193747624685,
+            "beta_beta": 0.01210402122482912,
+            "capacity_score": 1,
+            "capacity_ceiling_rpm": null,
+            "recent_peak_rpm": 7
+          }
+        },
+        "searchKeywords": [
+          "anthropic",
+          "claude",
+          "opus",
+          "4.8"
+        ]
+      },
+      "description": "",
+      "includeDefaultSystemPrompt": true,
+      "isStreaming": true,
+      "samplingParameters": {},
+      "chatMemory": 8,
+      "isDisabled": false,
+      "isRemoved": false,
+      "createdAt": "2026-07-11T11:37:22.990Z",
+      "updatedAt": "2026-07-11T11:37:22.990Z",
+      "plugins": []
+    }
+  },
+  "messages": {
+    "msg-1783769843-CPd1eWvtOPBU7a7yIsMA": {
+      "id": "msg-1783769843-CPd1eWvtOPBU7a7yIsMA",
+      "characterId": "USER",
+      "contentType": "text",
+      "context": "main-chat",
+      "createdAt": "2026-07-11T11:37:23.040Z",
+      "updatedAt": "2026-07-11T11:37:23.040Z",
+      "isRetrying": false,
+      "isEdited": false,
+      "isCollapsed": false,
+      "type": "user",
+      "items": [
+        {
+          "id": "item-1783769843-O9dY6L7CnDMU7WD8IcRb",
+          "type": "message"
+        }
+      ]
+    },
+    "msg-1783769843-2FmkxPFV7KEuPOtNxLvb": {
+      "id": "msg-1783769843-2FmkxPFV7KEuPOtNxLvb",
+      "characterId": "char-1783769842-vON4SMRS0BmjeJlJlBCW",
+      "contentType": "text",
+      "context": "main-chat",
+      "parentMessageId": "msg-1783769843-CPd1eWvtOPBU7a7yIsMA",
+      "createdAt": "2026-07-11T11:37:23.041Z",
+      "updatedAt": "2026-07-11T11:39:15.846Z",
+      "isRetrying": false,
+      "isEdited": false,
+      "isCollapsed": false,
+      "type": "assistant",
+      "isGenerating": false,
+      "metadata": {
+        "plugins": [],
+        "variantSlug": "anthropic/claude-4.8-opus-20260528",
+        "serverTools": {
+          "webSearchEngine": "auto",
+          "webFetchEngine": "auto"
+        },
+        "generationId": "gen-1783769904-DqYNgTvGwXcBK5Qx1VBH",
+        "duration": 109430,
+        "tokensCount": 6068,
+        "tokensPerSecond": 55.45097322489262,
+        "cost": "0.19671",
+        "routerMetadata": {
+          "requested": "anthropic/claude-opus-4.8",
+          "strategy": "direct",
+          "region": "FRA",
+          "summary": "available=5, selected=Anthropic",
+          "attempt": 1,
+          "is_byok": false,
+          "endpoints": {
+            "total": 7,
+            "available": [
+              {
+                "provider": "Anthropic",
+                "model": "anthropic/claude-4.8-opus-20260528",
+                "selected": true
+              },
+              {
+                "provider": "Amazon Bedrock",
+                "model": "anthropic/claude-4.8-opus-20260528",
+                "selected": false
+              },
+              {
+                "provider": "Google",
+                "model": "anthropic/claude-4.8-opus-20260528",
+                "selected": false
+              },
+              {
+                "provider": "Anthropic",
+                "model": "anthropic/claude-4.8-opus-20260528",
+                "selected": false
+              },
+              {
+                "provider": "Azure",
+                "model": "anthropic/claude-4.8-opus-20260528",
+                "selected": false
+              }
+            ]
+          },
+          "pipeline": [
+            {
+              "type": "guardrail",
+              "name": "moderation",
+              "summary": "Content passed OpenAI moderation",
+              "data": {
+                "engine": "openai-moderations",
+                "flagged": false,
+                "moderator_ids": [
+                  "OpenAIOmniModerator"
+                ]
+              }
+            },
+            {
+              "type": "server_tools",
+              "name": "server-tools",
+              "summary": "Server tools invoked (native): openrouter:web_search, openrouter:web_fetch",
+              "data": {
+                "mode": "native",
+                "tools": [
+                  "openrouter:web_search",
+                  "openrouter:web_fetch"
+                ]
+              }
+            }
+          ]
+        }
+      },
+      "items": [
+        {
+          "id": "msg_tmp_h0vg3acu079",
+          "outputIndex": 0,
+          "type": "message",
+          "sequenceIndex": 0
+        }
+      ]
+    },
+    "msg-1783772317-A6EXBQ3EUcig9vHBFdIP": {
+      "id": "msg-1783772317-A6EXBQ3EUcig9vHBFdIP",
+      "characterId": "USER",
+      "contentType": "text",
+      "context": "main-chat",
+      "createdAt": "2026-07-11T12:18:37.802Z",
+      "updatedAt": "2026-07-11T12:18:37.802Z",
+      "isRetrying": false,
+      "isEdited": false,
+      "isCollapsed": false,
+      "type": "user",
+      "items": [
+        {
+          "id": "item-1783772317-MaPNIls5xFi4dDxTVrX3",
+          "type": "message"
+        }
+      ]
+    },
+    "msg-1783772317-3VnFnhLMdbiXJtTh3qkY": {
+      "id": "msg-1783772317-3VnFnhLMdbiXJtTh3qkY",
+      "characterId": "char-1783769842-vON4SMRS0BmjeJlJlBCW",
+      "contentType": "text",
+      "context": "main-chat",
+      "parentMessageId": "msg-1783772317-A6EXBQ3EUcig9vHBFdIP",
+      "createdAt": "2026-07-11T12:18:37.803Z",
+      "updatedAt": "2026-07-11T12:18:40.723Z",
+      "isRetrying": false,
+      "isEdited": false,
+      "isCollapsed": false,
+      "type": "assistant",
+      "isGenerating": false,
+      "metadata": {
+        "plugins": [],
+        "variantSlug": "anthropic/claude-opus-4.8",
+        "serverTools": {
+          "webSearchEngine": "auto",
+          "webFetchEngine": "auto"
+        }
+      },
+      "items": []
+    },
+    "msg-1783772349-r0n0EnG4wJNqK9abfbSc": {
+      "id": "msg-1783772349-r0n0EnG4wJNqK9abfbSc",
+      "characterId": "USER",
+      "contentType": "text",
+      "context": "main-chat",
+      "createdAt": "2026-07-11T12:19:09.084Z",
+      "updatedAt": "2026-07-11T12:19:09.084Z",
+      "isRetrying": false,
+      "isEdited": false,
+      "isCollapsed": false,
+      "type": "user",
+      "items": [
+        {
+          "id": "item-1783772349-WsQbgLUAq6n4hoc1WNGv",
+          "type": "message"
+        }
+      ]
+    },
+    "msg-1783772349-UXhdjTw01oBuEdCHMzhB": {
+      "id": "msg-1783772349-UXhdjTw01oBuEdCHMzhB",
+      "characterId": "char-1783769842-vON4SMRS0BmjeJlJlBCW",
+      "contentType": "text",
+      "context": "main-chat",
+      "parentMessageId": "msg-1783772349-r0n0EnG4wJNqK9abfbSc",
+      "createdAt": "2026-07-11T12:19:09.085Z",
+      "updatedAt": "2026-07-11T12:21:04.701Z",
+      "isRetrying": false,
+      "isEdited": false,
+      "isCollapsed": false,
+      "type": "assistant",
+      "isGenerating": false,
+      "metadata": {
+        "plugins": [],
+        "variantSlug": "anthropic/claude-4.8-opus-20260528",
+        "serverTools": {
+          "webSearchEngine": "auto",
+          "webFetchEngine": "auto"
+        },
+        "generationId": "gen-1783772409-oByZlJ5jmYaMEnlWJbMA",
+        "duration": 113597,
+        "tokensCount": 6623,
+        "tokensPerSecond": 58.302596019261074,
+        "cost": "0.25234",
+        "routerMetadata": {
+          "requested": "anthropic/claude-opus-4.8",
+          "strategy": "direct",
+          "region": "AMS",
+          "summary": "available=5, selected=Anthropic",
+          "attempt": 1,
+          "is_byok": false,
+          "endpoints": {
+            "total": 7,
+            "available": [
+              {
+                "provider": "Anthropic",
+                "model": "anthropic/claude-4.8-opus-20260528",
+                "selected": true
+              },
+              {
+                "provider": "Amazon Bedrock",
+                "model": "anthropic/claude-4.8-opus-20260528",
+                "selected": false
+              },
+              {
+                "provider": "Google",
+                "model": "anthropic/claude-4.8-opus-20260528",
+                "selected": false
+              },
+              {
+                "provider": "Anthropic",
+                "model": "anthropic/claude-4.8-opus-20260528",
+                "selected": false
+              },
+              {
+                "provider": "Azure",
+                "model": "anthropic/claude-4.8-opus-20260528",
+                "selected": false
+              }
+            ]
+          },
+          "pipeline": [
+            {
+              "type": "guardrail",
+              "name": "moderation",
+              "summary": "Content passed OpenAI moderation",
+              "data": {
+                "engine": "openai-moderations",
+                "flagged": false,
+                "moderator_ids": [
+                  "OpenAIOmniModerator"
+                ]
+              }
+            },
+            {
+              "type": "server_tools",
+              "name": "server-tools",
+              "summary": "Server tools invoked (native): openrouter:web_search, openrouter:web_fetch",
+              "data": {
+                "mode": "native",
+                "tools": [
+                  "openrouter:web_search",
+                  "openrouter:web_fetch"
+                ]
+              }
+            }
+          ]
+        }
+      },
+      "items": [
+        {
+          "id": "msg_tmp_oul6tr9rrmd",
+          "outputIndex": 0,
+          "type": "message",
+          "sequenceIndex": 0
+        }
+      ]
+    },
+    "msg-1783774439-avYNm8b2RWwYu1ZQpcFU": {
+      "id": "msg-1783774439-avYNm8b2RWwYu1ZQpcFU",
+      "characterId": "USER",
+      "contentType": "text",
+      "context": "main-chat",
+      "createdAt": "2026-07-11T12:53:59.425Z",
+      "updatedAt": "2026-07-11T12:53:59.425Z",
+      "isRetrying": false,
+      "isEdited": false,
+      "isCollapsed": false,
+      "type": "user",
+      "items": [
+        {
+          "id": "item-1783774439-sO4xkS06ByflVOOGDdQx",
+          "type": "message"
+        }
+      ]
+    },
+    "msg-1783774439-ITNwVh9oaFjoNI5HvvDn": {
+      "id": "msg-1783774439-ITNwVh9oaFjoNI5HvvDn",
+      "characterId": "char-1783769842-vON4SMRS0BmjeJlJlBCW",
+      "contentType": "text",
+      "context": "main-chat",
+      "parentMessageId": "msg-1783774439-avYNm8b2RWwYu1ZQpcFU",
+      "createdAt": "2026-07-11T12:53:59.426Z",
+      "updatedAt": "2026-07-11T12:55:01.813Z",
+      "isRetrying": false,
+      "isEdited": false,
+      "isCollapsed": false,
+      "type": "assistant",
+      "isGenerating": false,
+      "metadata": {
+        "plugins": [],
+        "variantSlug": "anthropic/claude-4.8-opus-20260528",
+        "serverTools": {
+          "webSearchEngine": "auto",
+          "webFetchEngine": "auto"
+        },
+        "generationId": "gen-1783774500-pD9FSAS4r0BTccmKKtWQ",
+        "duration": 59084,
+        "tokensCount": 3418,
+        "tokensPerSecond": 57.84984090447498,
+        "cost": "0.20608",
+        "routerMetadata": {
+          "requested": "anthropic/claude-opus-4.8",
+          "strategy": "direct",
+          "region": "AMS",
+          "summary": "available=5, selected=Anthropic",
+          "attempt": 1,
+          "is_byok": false,
+          "endpoints": {
+            "total": 7,
+            "available": [
+              {
+                "provider": "Anthropic",
+                "model": "anthropic/claude-4.8-opus-20260528",
+                "selected": true
+              },
+              {
+                "provider": "Amazon Bedrock",
+                "model": "anthropic/claude-4.8-opus-20260528",
+                "selected": false
+              },
+              {
+                "provider": "Google",
+                "model": "anthropic/claude-4.8-opus-20260528",
+                "selected": false
+              },
+              {
+                "provider": "Anthropic",
+                "model": "anthropic/claude-4.8-opus-20260528",
+                "selected": false
+              },
+              {
+                "provider": "Azure",
+                "model": "anthropic/claude-4.8-opus-20260528",
+                "selected": false
+              }
+            ]
+          },
+          "pipeline": [
+            {
+              "type": "guardrail",
+              "name": "moderation",
+              "summary": "Content passed OpenAI moderation",
+              "data": {
+                "engine": "openai-moderations",
+                "flagged": false,
+                "moderator_ids": [
+                  "OpenAIOmniModerator"
+                ]
+              }
+            },
+            {
+              "type": "server_tools",
+              "name": "server-tools",
+              "summary": "Server tools invoked (native): openrouter:web_search, openrouter:web_fetch",
+              "data": {
+                "mode": "native",
+                "tools": [
+                  "openrouter:web_search",
+                  "openrouter:web_fetch"
+                ]
+              }
+            }
+          ]
+        }
+      },
+      "items": [
+        {
+          "id": "msg_tmp_aqd7cw4u0ie",
+          "outputIndex": 0,
+          "type": "message",
+          "sequenceIndex": 0
+        }
+      ]
+    },
+    "msg-1783776365-yujBQtikLwB8MztYfsj7": {
+      "id": "msg-1783776365-yujBQtikLwB8MztYfsj7",
+      "characterId": "USER",
+      "contentType": "text",
+      "context": "main-chat",
+      "createdAt": "2026-07-11T13:26:05.363Z",
+      "updatedAt": "2026-07-11T13:26:05.363Z",
+      "isRetrying": false,
+      "isEdited": false,
+      "isCollapsed": false,
+      "type": "user",
+      "items": [
+        {
+          "id": "item-1783776365-2F04u44WpaTbl5TQE3zn",
+          "type": "message"
+        }
+      ]
+    },
+    "msg-1783776365-chQL2lxbldoyRHsgYqi6": {
+      "id": "msg-1783776365-chQL2lxbldoyRHsgYqi6",
+      "characterId": "char-1783769842-vON4SMRS0BmjeJlJlBCW",
+      "contentType": "text",
+      "context": "main-chat",
+      "parentMessageId": "msg-1783776365-yujBQtikLwB8MztYfsj7",
+      "createdAt": "2026-07-11T13:26:05.364Z",
+      "updatedAt": "2026-07-11T13:27:41.385Z",
+      "isRetrying": false,
+      "isEdited": false,
+      "isCollapsed": false,
+      "type": "assistant",
+      "isGenerating": false,
+      "metadata": {
+        "plugins": [],
+        "variantSlug": "anthropic/claude-4.8-opus-20260528",
+        "serverTools": {
+          "webSearchEngine": "auto",
+          "webFetchEngine": "auto"
+        },
+        "generationId": "gen-1783776426-5mvmKBE437kfDrqFTVTo",
+        "duration": 92858,
+        "tokensCount": 6155,
+        "tokensPerSecond": 66.28400353227508,
+        "cost": "0.294215",
+        "routerMetadata": {
+          "requested": "anthropic/claude-opus-4.8",
+          "strategy": "direct",
+          "region": "AMS",
+          "summary": "available=5, selected=Anthropic",
+          "attempt": 1,
+          "is_byok": false,
+          "endpoints": {
+            "total": 7,
+            "available": [
+              {
+                "provider": "Anthropic",
+                "model": "anthropic/claude-4.8-opus-20260528",
+                "selected": true
+              },
+              {
+                "provider": "Amazon Bedrock",
+                "model": "anthropic/claude-4.8-opus-20260528",
+                "selected": false
+              },
+              {
+                "provider": "Google",
+                "model": "anthropic/claude-4.8-opus-20260528",
+                "selected": false
+              },
+              {
+                "provider": "Anthropic",
+                "model": "anthropic/claude-4.8-opus-20260528",
+                "selected": false
+              },
+              {
+                "provider": "Azure",
+                "model": "anthropic/claude-4.8-opus-20260528",
+                "selected": false
+              }
+            ]
+          },
+          "pipeline": [
+            {
+              "type": "guardrail",
+              "name": "moderation",
+              "summary": "Content passed OpenAI moderation",
+              "data": {
+                "engine": "openai-moderations",
+                "flagged": false,
+                "moderator_ids": [
+                  "OpenAIOmniModerator"
+                ]
+              }
+            },
+            {
+              "type": "server_tools",
+              "name": "server-tools",
+              "summary": "Server tools invoked (native): openrouter:web_search, openrouter:web_fetch",
+              "data": {
+                "mode": "native",
+                "tools": [
+                  "openrouter:web_search",
+                  "openrouter:web_fetch"
+                ]
+              }
+            }
+          ]
+        }
+      },
+      "items": [
+        {
+          "id": "msg_tmp_7c98e9j1nho",
+          "outputIndex": 0,
+          "type": "message",
+          "sequenceIndex": 0
+        }
+      ]
+    }
+  },
+  "items": {
+    "item-1783769843-O9dY6L7CnDMU7WD8IcRb": {
+      "id": "item-1783769843-O9dY6L7CnDMU7WD8IcRb",
+      "messageId": "msg-1783769843-CPd1eWvtOPBU7a7yIsMA",
+      "data": {
+        "type": "message",
+        "role": "user",
+        "content": [
+          {
+            "type": "input_text",
+            "text": "нужны комментарии, доп идеи, критика, и план действий. По проекту \n\n**Задание**  \nРазработать MVP ИИ-агента для аналитика/ архитектора  \n**  \nЗадачи агента**:  \n- поддерживать базу знаний с рабочими артефактами в заданной структуре с возможностью её расширения  \n- выполнять запросы по анализу, сопоставлению, преобразованию артефактов с накоплением истории запросов  \n- повторно использовать логику запросов применительно к новым версиям исходных данных  \n  \n**Артефакты**:  \nОсновные:  \n- документация в формате word, pdf, excel  \n- аннотации к документам в markdown  \nОпциональные:  \n- модели в нотации archimate в формате XML  \n- страницы wiki PlatformV-Works доступные через API  \n  \n**Порядок работы:**  \n1) Аналитик заполняет базу знаний ( Obsidian или аналогичную) имеющимися артефактами в нужной структуре  \n2) Аналитик формулирует запросы по базе знаний:  \n- поиск информации по частично структурированным критериям  \n- сопоставление документов  \n- аннотирование документов  \n- формализация информации из документов в виде таблиц и схем по сформулированным правилам  \n- оформление результатов в виде модели или страницы wiki (опционально)  \n3) Агент предоставляет результат и в диалоге с Аналитиком доводит его до требуемого вида, запоминает финальную логику обработки  \n4) Аналитик меняет, дополняет исходные артефакты и просит повторить ранее выполненную обработку с ними  \n5) Агент сохраняет результаты в заданной структуре, в том числе связи между исходными и результирующими артефактами  \n  \n**Среда выполнения:**  \nMVP реализовать на моем MAC с \"домашним\" интернетом  \nНа следуюшем этапе перенести в корпоративную сеть на компьютер под Windows c ограничениями на выход в интернет и развертывание программ, в чем они состоят я выясню к моменту завешения MVP\n\n\n## Уточнение\nСущность документ. Документы версионируются. У документа могут быть связанные сущности - описание (анотрирование), детерминированные функции  на python для анализа и формирования результата в виде md или специального представления xml  (для арчи как пример). Детерминированная функция может применяться к новым версиям. Выход версии также должно сопровождаться анотированием. \n\nОбсидиан - инструмент для анализа базы знаний. В итоге должен получиться разрастающийся граф\n\nБаза знаний - набор документов. Для работы с базой нужно так же иметь возомжность указывать конкретный документ (поиск документа и ссылка на документ)\n\nЕсть идея выполнять запросы не одной транзакцией вопрос / ответ к моедли. А реализовать цепочку с проверками результата и различными моделями. \nНапример как флоу на картинке \n![[Screenshot 2026-07-11 at 14.29.02 1.png]]\n\n## Контекст\n- Приложение не должно быть привязано к инструментам типа cursor или clode code. \n- Это должна быть переносимая реализация между платформами. \n\n## Как я вижу реализацию\n- Для управления и демонстрации функиональности нужен интерфейс. Просмотр через obsidian. Управление через web app\n\n\n## Функции управления.\n- Поле для ввода промпта\n- Выбор моделей для выполнения\n- ?Возможно настройка цепочек. Или будет встроенная функция\n- Если в результате сесси появляется артифакт (детерминированый python скрипт) он оформляется ввиде кнопки на UI для выполнения (или как команда реализаванная другими графическим компонентами).\n- Поиск и выбор докумнтов для ссылке в промпт \n\n\n## Цели проекта\n- Автоматизация работы одного экспрета и потенциально группы экспертов. Значит должно работать и приностиь пользу \n- Мое портфолио. Значит нужно крассиво и вау эффект\n- Получение опыта разработки агентов. Значит не идем простым путем, а пробуем интересные реалзации \n"
+          },
+          {
+            "type": "input_image",
+            "image_url": "data:image/png;base64,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z6pwT6Ryv05iffv2tU022SSduusIOAKOgCPgCDgCjoAj4AiUPQLFIeHzqfYiiyxiVYHUZrN1wapbYyazj7781N6a+469bpPsiTlP27Ozn7KJs5+3l796zT6a+4lpySqbtsg0e3LyU/b2jLdtbtVMywq7usXf7Nlz7bRTT7Pdd9/dRo0aZXvuuWd09957b7vnnnvsggsusMMPPzySdDr0dPTPO+88O+200yK5Zt0pVrU99tgjWtcOPvhge+655yKZgQjMmD4j5vH3v//dIJ1sKifliEI2m7Xrr7ve9tlnHyM9Olx66aUmKQ40QM5vuP4G++53v2v77rtvXMv6r3/9K5J1yOvpp59ue+21V0y/00472VFHHWWQdfKFlEgBIGv5B5FpTkhP2YRRB2VkmapMwLzW+EnN50s6RFKsA8fERziWZOQL8X333Xft97//vd17773RjziSLBMGVpJArubMmRMGS+oinhZ+6ARGrO9lcCN41f+XGnCVVO/f9ABdyIcBlIceesgYAKmqqrJrrrkmrhmmXK4TLjgShivJaH/oJzXOn7j4k452IinOHpByOln4SQ1piIsE74gVLmU8/PDD9uyzzxr5oCci5dJVBR2JIwVyGQZJSI9IinlIIptIqKlfPPn6j5QL+/o0OuRNnhB/sLx//P02adKkmD5GCH/IHyE/6ogbvI2BAknx2pAP/rgpP9JwLs2rK/4I+RCPunINbrv1tkiwySOF4c6ZPSe2izfeeCO28bFjxxo6UyZpkYsvvti4H7impEFXSUZayqIcXMKSsLljv3790qm7joAj4Ag4Ao6AI+AIOAKOQFkjUHISDoVQIIPKVAXCkbGq4GbrsoEw1NlXwZL9ycdv2eyPnrPZn04I7pM2+dOPbfCAFWxg38Vt0meT7JPqz+yr3jNsTo8aq6vKhDx6mixIpqfttseeduKJJ9p2220XCS6k+Mgjj7T111/fIAd0/tP60apAhLB2f/jhh5GAvPfee7bUUktF8gYx/OUvfxl3bYcsZTKZSFzJ49NPPzUIJeQA8kDY7bffHsn84MGD7eijj46WOUj96NGjQ72yNn78eDv77LMN6z/hbCjFoABCXh999JENGjTIKPN73/ueTZgwwc4666xovYckUQbEoyVp2sIkmSTDok/ehKPvF1O/sA/e/yDWhXp98sknBon+7LPPoh/xOCYdZc2e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",
+            "detail": "auto"
+          }
+        ]
+      }
+    },
+    "msg_tmp_h0vg3acu079": {
+      "id": "msg_tmp_h0vg3acu079",
+      "messageId": "msg-1783769843-2FmkxPFV7KEuPOtNxLvb",
+      "data": {
+        "id": "msg_tmp_h0vg3acu079",
+        "type": "message",
+        "status": "completed",
+        "role": "assistant",
+        "content": [
+          {
+            "type": "output_text",
+            "text": "Отличный проект — амбициозный и с правильными акцентами (портфолио + реальная польза + обучение). Разберу его структурированно: сначала комментарии и критика по замыслу, потом доп. идеи, потом конкретная архитектура и план действий.\n\nСразу оговорюсь: я опираюсь на описание задания и скриншот схемы «THE LOOP». Отдельно уточню один момент про **PlatformV-Works** — это внутренний продукт Сбера, публичной документации по его API у меня нет, так что раздел про wiki-интеграцию оставлю на уровне архитектурных рекомендаций.\n\n---\n\n## 1. Общая оценка и ключевые риски\n\nЗамысел сильный, но есть несколько мест, где легко «утонуть». Главные риски по приоритету:\n\n<details>\n<summary><b>🔴 Риск №1: размытость MVP — слишком много «вау» сразу</b></summary>\n\nУ тебя в одном MVP: база знаний + версионирование + граф + чейны из нескольких моделей + верификация + генерация Python-артефактов + повторное применение + web UI + Obsidian + ArchiMate + wiki API. Это не MVP, это дорожная карта на полгода.\n\n**Рекомендация:** выделить «тонкий вертикальный срез» (один сквозной сценарий от начала до конца) и довести его до блеска, а остальное — за флагами/бэклогом. Вау-эффект даёт **один безупречно работающий сквозной сценарий**, а не десять полурабочих фич.\n</details>\n\n<details>\n<summary><b>🟠 Риск №2: перенос в корп-сеть без интернета — а ты завязан на облачные модели</b></summary>\n\nЭто критично и его надо закладывать в архитектуру **с первого дня**, а не «выясню к концу MVP». Если на 2 этапе нельзя ходить в интернет, значит модели должны быть либо локальные (Ollama/llama.cpp), либо через корпоративный внутренний gateway. Если ты весь MVP построишь на прямых вызовах Anthropic/OpenAI SDK — перенос будет болезненным.\n\n**Рекомендация:** абстрагировать провайдера модели за интерфейсом (`LLMProvider`) с самого начала. Об этом подробнее в разделе архитектуры.\n</details>\n\n<details>\n<summary><b>🟠 Риск №3: «детерминированные Python-функции», сгенерированные LLM = дыра в безопасности</b></summary>\n\nИдея генерировать Python-скрипты, которые потом становятся кнопками и запускаются повторно, — очень красивая, но это выполнение произвольного кода. В корп-среде это будет главный стоп-фактор на security review. Нужна песочница (subprocess с ограничениями / отдельный venv / контейнер / whitelisting импортов) с самого начала, иначе потом придётся переписывать.\n</details>\n\n<details>\n<summary><b>🟡 Риск №4: Obsidian как «БД» — удобно для просмотра, неудобно как источник истины</b></summary>\n\nObsidian отлично рисует граф из markdown+wikilinks, но он не источник истины для версий, связей исходник→результат, истории запросов. Не пытайся хранить состояние в Obsidian. Obsidian — это **проекция/представление** (read-only view), а истина живёт в твоём приложении (файлы + метаданные в SQLite). Иначе получишь рассинхрон.\n</details>\n\n---\n\n## 2. Критика/уточнение по конкретным решениям\n\n**Про «цепочку с проверками вместо одной транзакции» (схема THE LOOP).**\nЭто правильное направление и хорошо ложится на твои цели («не простым путём»). Твоя картинка — это, по сути, классический agentic loop: *Goal → Discovery → Planning → Execution → Verification → (Ship | Iterate)*, с памятью снаружи диалога. Пара замечаний:\n\n- **Memory outside the conversation** — ключевая и правильная идея. Именно она превращает «чат с LLM» в «агента». Это твоя история запросов + финальная логика обработки.\n- **Verification** должен быть настраиваемым: где-то это LLM-судья (self-critique), где-то — детерминированная проверка (валидна ли XML-схема ArchiMate? парсится ли таблица? прошли ли assert'ы в сгенерированном Python?). Не делай верификацию только «ещё одним промптом» — это дёшево и ненадёжно. Комбинируй.\n- **Не переусложняй граф чейнов на MVP.** Дай 2-3 предустановленных чейна, а «конструктор чейнов» — потом. Иначе UI-конструктор съест всё время.\n\n**Про версионирование.**\nТы фактически описываешь Git-модель (сущность версионируется, у версии есть аннотация = коммит-месседж). Не изобретай своё версионирование — есть два пути:\n1. **Git под капотом** (документы = файлы, версии = коммиты) — бесплатно получаешь историю, diff, откат. Минус: бинарные docx/xlsx diff'аются плохо.\n2. **Своя таблица версий в SQLite** — проще контролировать связи и метаданные.\n\nЯ бы взял гибрид: контент-адресуемое хранилище (хэш содержимого → blob) + SQLite для метаданных и связей. Это даёт дедупликацию и понятную модель «версия документа».\n\n**Про «связанные сущности документа».**\nТы хорошо декомпозировал: `Document → {versions, annotations, functions, results}`. Это по сути граф. Тогда SQLite с таблицами и рёбрами — естественный выбор, а Obsidian просто рендерит этот граф.\n\n**Про «не привязываться к Cursor/Claude Code».**\nСогласен и это правильно для портфолио (показывает, что ты умеешь строить агента, а не только пользоваться готовым). Но не отказывайся от идей оттуда: инструментальная петля (tool use), MCP-подобная модель инструментов — это то, что стоит переиспользовать концептуально.\n\n---\n\n## 3. Дополнительные идеи (для вау-эффекта и пользы)\n\n- **Provenance-граф (происхождение артефактов).** Самая «вкусная» фича для аналитика/архитектора: наглядно показать «этот результат получен из документа v3 через функцию X, аннотирован моделью Y, дата Z». Это прямо ложится на твой пункт 5 (связи исходник→результат) и отлично смотрится в графе Obsidian.\n- **Diff-режим при перезапуске логики.** Когда аналитик меняет исходник и просит повторить обработку — показывай **diff результата** (что изменилось в таблице/схеме между v2 и v3). Это огромная реальная польза и очень эффектно.\n- **«Прозрачный» лог рассуждений чейна.** Для портфолио: визуализировать прохождение по THE LOOP (какая модель, какой шаг, verification pass/fail, сколько итераций). Условный «trace viewer». Дёшево делается, выглядит дорого.\n- **Кэш детерминированных функций по хэшу входа.** Если вход не изменился — не гонять заново. Показывает инженерную зрелость.\n- **Библиотека функций-артефактов (skill library).** Накопленные Python-функции = растущая библиотека переиспользуемых «навыков». Это концептуально сильная штука (похоже на Voyager/skill-library подход) и хорошо продаётся как «агент, который учится».\n- **Оценка стоимости/токенов** на каждый чейн — полезно и для корп-среды, и выглядит профессионально.\n- **Разные модели на разные шаги.** Дешёвая/быстрая на discovery, сильная на execution, отдельная на verification. Ты это уже заложил — доведи до явной конфигурации per-step.\n\n---\n\n## 4. Рекомендуемая архитектура (переносимая, платформонезависимая)\n\nКлючевой принцип: **ядро не знает ни про облако, ни про UI, ни про Obsidian.** Всё внешнее — за адаптерами.\n\n```\n┌─────────────────────────────────────────────────────────┐\n│                    UI Layer (Web App)                      │\n│         React/Svelte + FastAPI backend (REST/WS)           │\n└───────────────────────────┬───────────────────────────────┘\n                            │\n┌───────────────────────────▼───────────────────────────────┐\n│                      CORE (Python)                         │\n│  ┌──────────────┐  ┌──────────────┐  ┌────────────────┐   │\n│  │ Orchestrator │  │ Chain Engine │  │ Function Runner │   │\n│  │ (THE LOOP)   │  │ (steps+verify)│  │ (sandbox)      │   │\n│  └──────────────┘  └──────────────┘  └────────────────┘   │\n│  ┌──────────────────────────────────────────────────────┐ │\n│  │   Knowledge Store: SQLite (meta+graph) + blob store   │ │\n│  └──────────────────────────────────────────────────────┘ │\n└───┬─────────────┬─────────────┬──────────────┬────────────┘\n    │             │             │              │\n┌───▼───┐   ┌────▼─────┐  ┌────▼──────┐  ┌────▼────────┐\n│LLM     │   │Ingestors │  │Exporters  │  │Integrations │\n│Provider│   │docx/pdf/ │  │Obsidian/  │  │Wiki API /   │\n│(abstr.)│   │xlsx/md   │  │ArchiMate  │  │ArchiMate    │\n└───┬───┘   └──────────┘  └───────────┘  └─────────────┘\n    │\n ┌──┴──────────────────────┐\n │ Cloud (Anthropic/OpenAI)│  ← MVP, дом\n │ Local (Ollama/llama.cpp)│  ← корп-сеть, этап 2\n │ Corp Gateway            │  ← корп-сеть, этап 2\n └─────────────────────────┘\n```\n\n**Стек, который я бы взял (обоснование — переносимость):**\n\n| Слой | Выбор | Почему |\n|---|---|---|\n| Ядро | Python 3.11+ | экосистема парсеров docx/pdf/xlsx, легко на Mac и Windows |\n| Backend | FastAPI | async, WebSocket для стриминга шагов чейна, OpenAPI из коробки |\n| Хранилище | SQLite + файловый blob-store | zero-config, один файл, переносится копированием, работает офлайн |\n| UI | React или Svelte (Vite) | стандарт для портфолио; можно упаковать в статику |\n| LLM-абстракция | свой тонкий `LLMProvider` интерфейс | развязка облако/локаль; НЕ прибивайся к одному SDK |\n| Локальные модели | Ollama | проще всего для этапа 2 без интернета |\n| Песочница | subprocess + отдельный venv + ограничения | безопасный запуск сгенерированного кода |\n| Парсеры | `python-docx`, `pypdf`/`pdfplumber`, `openpyxl`, `markdown-it` | все кроссплатформенные |\n| Упаковка | Docker (dev) + venv (fallback) | но проверь заранее — в корп-среде Docker могут не дать |\n\n> ⚠️ Важно про этап 2: **уточни ограничения корп-среды заранее** хотя бы по трём пунктам, потому что они меняют архитектуру:\n> 1. Разрешён ли Docker/контейнеры?\n> 2. Есть ли внутренний LLM-gateway или нужен полностью локальный inference (и хватит ли железа Windows-машины на локальную модель)?\n> 3. Можно ли ставить Python и pip-пакеты, или нужен offline-bundle (wheelhouse)?\n>\n> Если ответы «нет Docker, только локальные модели, оффлайн-установка» — это надо закладывать в MVP уже сейчас (например, собирать offline wheelhouse и тестировать Ollama локально).\n\n---\n\n## 5. Модель данных (набросок)\n\n```\nDocument(id, title, path, kind[docx|pdf|xlsx|md|archimate|wiki], created_at)\nDocumentVersion(id, document_id, version_no, content_hash, blob_ref, created_at)\nAnnotation(id, version_id, text_md, generated_by[human|model], model, created_at)\nFunction(id, name, code_ref, input_schema, description, created_at)   # сгенерированный Python\nFunctionRun(id, function_id, input_version_id, output_ref, status, created_at)\nQuery(id, prompt, chain_id, created_at)         # история запросов\nQueryRun(id, query_id, steps_trace, result_ref, model_config, created_at)\nEdge(from_id, to_id, relation)                  # provenance-граф: derived_from, annotates, produced_by, references\n```\n\n`Edge` — это то, что потом рендерится в Obsidian как связи графа и закрывает твой пункт 5 (связи исходник→результат).\n\n---\n\n## 6. Обязательно определить сквозной MVP-сценарий (Vertical Slice)\n\nПредлагаю **один** сценарий, который проходит всю систему и который надо сделать идеально:\n\n> «Аналитик добавляет 2 документа (docx + xlsx) → просит извлечь из них таблицу требований по правилам → агент прогоняет чейн (discovery→plan→execute→verify) → показывает результат + trace → аналитик правит формулировку → агент фиксирует финальную логику как Python-функцию → аналитик заливает новую версию docx → нажимает кнопку \"повторить\" → агент выдаёт новый результат + diff + новую аннотацию → всё это видно как граф в Obsidian.»\n\nЕсли этот один путь работает гладко — у тебя есть и MVP, и портфолио, и демо. Всё остальное (ArchiMate-экспорт, wiki API, конструктор чейнов, группа экспертов) — наращивается сверху.\n\n---\n\n## 7. План действий (по фазам)\n\n**Фаза 0 — Фундамент (заложить переносимость)**\n1. Определить `LLMProvider` интерфейс + реализация под облако (для дома) + заглушка под Ollama.\n2. Поднять SQLite-схему + blob-store + контент-хэширование версий.\n3. Скелет FastAPI + минимальный React UI (поле промпта, выбор модели, список документов).\n4. Ingestors для docx/pdf/xlsx/md (текст + базовые метаданные).\n5. **Сразу** уточнить 3 вопроса про корп-среду (Docker/gateway/оффлайн-установка).\n\n**Фаза 1 — Ядро агента (THE LOOP)**\n6. Chain Engine с шагами и per-step моделью.\n7. Verification-шаг (комбинация LLM-судьи + детерминированных проверок).\n8. Trace/лог прохождения чейна + вывод в UI (WebSocket-стриминг).\n9. История запросов (`Query`/`QueryRun`).\n\n**Фаза 2 — Детерминированные функции + повторное применение**\n10. Генерация Python-функции из финальной логики диалога.\n11. **Sandbox-раннер** (изоляция, whitelist импортов, таймаут).\n12. Кнопка «выполнить функцию» в UI + запуск на новой версии.\n13. Diff результатов между версиями + авто-аннотация новой версии.\n\n**Фаза 3 — Граф и представления**\n14. Экспортер в Obsidian (md + wikilinks + provenance-рёбра).\n15. Поиск/выбор документа и вставка ссылки в промпт.\n\n**Фаза 4 — Опциональное (за флагами)**\n16. Экспорт в ArchiMate XML (валидация схемы = хороший verification-кейс).\n17. Интеграция с wiki API (когда будут доступы/спека).\n18. Конструктор чейнов в UI.\n\n**Фаза 5 — Подготовка к переносу**\n19. Offline wheelhouse + инструкция установки под Windows.\n20. Прогон полностью на локальной модели (Ollama) без интернета — проверка гипотезы этапа 2.\n\n---\n\n## 8. Что бы я сделал по-другому / на что обратить внимание\n\n- **Не делай конструктор чейнов на MVP** — это соблазн, но это отдельный продукт. 2-3 хардкоженных чейна достаточно для демо.\n- **Verification — не только LLM.** Самая частая ошибка в agentic-проектах: «проверка» = ещё один промпт «всё ок?». Для табличных/XML-результатов делай программные проверки.\n- **Безопасность запуска кода — не на потом.** Заложи sandbox сразу, иначе корп-review зарубит.\n- **Obsidian = view, не БД.** Однонаправленная синхронизация (ядро → Obsidian).\n- **Стриминг шагов чейна в UI** — дешёвый способ получить «вау». Люди любят видеть, как агент «думает по шагам».\n\n---\n\nХочешь, на следующем шаге я могу:\n- **(A)** накидать конкретную SQLite-схему + `LLMProvider` интерфейс + скелет FastAPI как стартовый код,\n- **(B)** детально спроектировать Chain Engine под твою схему THE LOOP (структуры шагов, verification, retry-политику),\n- **(C)** или проработать sandbox для безопасного запуска сгенерированных Python-функций.\n\nЧто из этого важнее сделать первым?",
+            "annotations": [],
+            "logprobs": []
+          }
+        ]
+      }
+    },
+    "item-1783772317-MaPNIls5xFi4dDxTVrX3": {
+      "id": "item-1783772317-MaPNIls5xFi4dDxTVrX3",
+      "messageId": "msg-1783772317-A6EXBQ3EUcig9vHBFdIP",
+      "data": {
+        "type": "message",
+        "role": "user",
+        "content": [
+          {
+            "type": "input_text",
+            "text": "Понял насчет объемы. Дестивительно выглядит сразу как огромный бэклог. Результат который я предоставлю - это будет мнимальный mvp который решает проблему специалиста. \nЯ уверен что должен быть ui с промптированием, сессиями и функциями. \n\nА также вместе с готовым mvp я отдам список идей и обязательных доработок в случае интеграции в корп среду. Кстати выбор модели сразу решает вопрос изоляции. Но локальные модели намного слабее как я понимаю. По этому желательно все таки заложить цикл обработки для улучшения показателя качества \n\nНужено тезисно выдать список доработок которые ты видишь. Типа ограничения доступа скрипта к корпоративным функциям. \n\nНасчет obsidian и БД мне нужно поподробнее. Как я понял обсидиан это по сути выгрузка папки для просмотра в обсиден. А реальные данные внутри приложения будут. А что насчет гита. Версионирвать с гитом и работать в ФС. В sqlite хранить данные приложения. Распиши что чему принадлежит \n\nИ еще по поводу работы с данными. Мне на mvp нужен самый быстрый способ реализации. Ты топишь за связи в SQLite. Наверное это не так уж и усложняет реализацию. просто я об этом не подумал. Но тогда тут возможно есть серьезный гап. Git отлично версионирует ФС, а что по поводу SQLite?\n\nMCP интегация обсолютно улучшит маркетинговую ценность. И ценность портфолио. Где ты здесь видишь применение MCP? Я сам думал кончно же не изобретать велосипед, а брать по максимуму из своего опыта с курсором. Что еще ты бы взял из этих инструментов\n\nНужно зафиксировать что док идет из дока с использоанием промпта. И показать это в obsidan. Ты кажется это имел виду под Provenfnce граф\n\nВсе идеи зафиксируй списком \n\n1 Мне нужно определиться с минимальной функциональностью mvp.\n2 Список задач для бэклога. Задачи оформи минимальной формулировкаой для удобного сканирования\n\nтвой план mvp выше в правильном направлении. Выгрузку в archiMate нужно сразу. Для пользователя это важно\nсо стеком сокгласен \nконструктора не будет сразу - 100% согласен\nто есть проверки - это в том числе скрипты? \nбезопасность встроим потом - сначала нужно дойти до реализации потребностей и proof of concetp. Я понимаю что poc это и безопасность в том числе. Но на первом этапе можно просто объяснить как именно мы будем ее встраивать.\nObsidian view не БД - звучит класно. Не вижу пока как БД будет работать с git. выше этот вопрос описан тоже\nДумает по шагам Стриминг шагов - точно берем, если это правда не сложно\nИ это должен быть быстрый MVP за 2 - 7 дней. Агентская разарботка позволяет такое делать быстро по ощущениям и опыту.\n\nИтого с тебя план MVP (ты по сути опсал его уже. не бойся туда встраивать функции которые я хочу. полгода - это ты загнул наверное не учел что это ai first разработка)\n\n"
+          }
+        ]
+      }
+    },
+    "item-1783772349-WsQbgLUAq6n4hoc1WNGv": {
+      "id": "item-1783772349-WsQbgLUAq6n4hoc1WNGv",
+      "messageId": "msg-1783772349-r0n0EnG4wJNqK9abfbSc",
+      "data": {
+        "type": "message",
+        "role": "user",
+        "content": [
+          {
+            "type": "input_text",
+            "text": "Понял насчет объемы. Дестивительно выглядит сразу как огромный бэклог. Результат который я предоставлю - это будет мнимальный mvp который решает проблему специалиста. \nЯ уверен что должен быть ui с промптированием, сессиями и функциями. \n\nА также вместе с готовым mvp я отдам список идей и обязательных доработок в случае интеграции в корп среду. Кстати выбор модели сразу решает вопрос изоляции. Но локальные модели намного слабее как я понимаю. По этому желательно все таки заложить цикл обработки для улучшения показателя качества \n\nНужено тезисно выдать список доработок которые ты видишь. Типа ограничения доступа скрипта к корпоративным функциям. \n\nНасчет obsidian и БД мне нужно поподробнее. Как я понял обсидиан это по сути выгрузка папки для просмотра в обсиден. А реальные данные внутри приложения будут. А что насчет гита. Версионирвать с гитом и работать в ФС. В sqlite хранить данные приложения. Распиши что чему принадлежит \n\nИ еще по поводу работы с данными. Мне на mvp нужен самый быстрый способ реализации. Ты топишь за связи в SQLite. Наверное это не так уж и усложняет реализацию. просто я об этом не подумал. Но тогда тут возможно есть серьезный гап. Git отлично версионирует ФС, а что по поводу SQLite?\n\nMCP интегация обсолютно улучшит маркетинговую ценность. И ценность портфолио. Где ты здесь видишь применение MCP? Я сам думал кончно же не изобретать велосипед, а брать по максимуму из своего опыта с курсором. Что еще ты бы взял из этих инструментов\n\nНужно зафиксировать что док идет из дока с использоанием промпта. И показать это в obsidan. Ты кажется это имел виду под Provenfnce граф\n\nВсе идеи зафиксируй списком \n\n1 Мне нужно определиться с минимальной функциональностью mvp.\n2 Список задач для бэклога. Задачи оформи минимальной формулировкаой для удобного сканирования\n\nтвой план mvp выше в правильном направлении. Выгрузку в archiMate нужно сразу. Для пользователя это важно\nсо стеком сокгласен \nконструктора не будет сразу - 100% согласен\nто есть проверки - это в том числе скрипты? \nбезопасность встроим потом - сначала нужно дойти до реализации потребностей и proof of concetp. Я понимаю что poc это и безопасность в том числе. Но на первом этапе можно просто объяснить как именно мы будем ее встраивать.\nObsidian view не БД - звучит класно. Не вижу пока как БД будет работать с git. выше этот вопрос описан тоже\nДумает по шагам Стриминг шагов - точно берем, если это правда не сложно\nИ это должен быть быстрый MVP за 2 - 7 дней. Агентская разарботка позволяет такое делать быстро по ощущениям и опыту.\n\nИтого с тебя план MVP (ты по сути опсал его уже. не бойся туда встраивать функции которые я хочу. полгода - это ты загнул наверное не учел что это ai first разработка)\n\nа так же все что не вошло - оформи списком для скнирования (короткие формулировк и)"
+          }
+        ]
+      }
+    },
+    "msg_tmp_oul6tr9rrmd": {
+      "id": "msg_tmp_oul6tr9rrmd",
+      "messageId": "msg-1783772349-UXhdjTw01oBuEdCHMzhB",
+      "data": {
+        "id": "msg_tmp_oul6tr9rrmd",
+        "type": "message",
+        "status": "completed",
+        "role": "assistant",
+        "content": [
+          {
+            "type": "output_text",
+            "text": "Отлично, теперь картина сфокусировалась. Даю всё по пунктам: сначала разберу твои вопросы (Git+SQLite, MCP, что чему принадлежит, проверки-скрипты), потом — **план MVP на 2–7 дней**, потом **бэклог короткими формулировками**.\n\nОтвечу на всё из знаний — тут нет ничего, что требует поиска в вебе.\n\n---\n\n## 1. Что чему принадлежит: ФС + Git + SQLite + Obsidian\n\nРаскладываю ответственность по слоям. Это важно понять один раз — дальше всё встанет на места.\n\n| Слой | Что хранит | Роль |\n|---|---|---|\n| **Файловая система (ФС)** | сами артефакты: docx/pdf/xlsx, сгенерированные .md, .py-функции, ArchiMate .xml | источник истины для **контента** |\n| **Git** | версии этих файлов (коммиты) | источник истины для **версий контента** |\n| **SQLite** | метаданные, связи (граф provenance), история промптов/сессий, конфиги чейнов, ссылки на git-коммиты | источник истины для **связей и состояния приложения** |\n| **Obsidian** | сгенерированный vault: .md + wikilinks | **только view**, read-only проекция графа из SQLite+ФС |\n\n**Принцип разделения:** Git версионирует *байты файлов*, SQLite версионирует *смыслы и связи*. Они соединяются через одно поле: SQLite хранит `git_commit_hash` для каждой версии документа.\n\n### Ключевой вопрос: «Git отлично версионирует ФС, а что с SQLite?»\n\nТы нащупал реальный гап. SQLite — это один бинарный файл, Git его версионирует плохо (нельзя смерджить, diff нечитаемый). Но **тебе и не надо версионировать SQLite через Git**. Логика такая:\n\n- **Версионируемые данные (контент)** живут в ФС → версионируются Git'ом. Это твой «архив истины».\n- **SQLite — это не то, что версионируется, а то, что *указывает* на версии.** Он хранит `commit_hash` → и по нему в любой момент достаёт нужную версию файла из Git.\n\nТо есть SQLite — это **индекс поверх Git-истории**, а не конкурент ей. Git = «машина времени для файлов», SQLite = «карта, которая знает, что с чем связано и где какая версия лежит».\n\nСхема потока при добавлении новой версии документа:\n\n```\n1. Пользователь заливает новую версию docx\n2. Файл кладётся в ФС (workspace/docs/req.docx)\n3. git add + git commit → получаем commit_hash\n4. В SQLite: INSERT в DocumentVersion(commit_hash, version_no, ...)\n5. В SQLite: INSERT в Edge(new_version derived_from old_version)\n6. Экспортёр перерисовывает Obsidian vault из SQLite\n```\n\n**Как это не усложняет MVP:** ты не пишешь свою систему версий. `git commit` — одна команда через `subprocess` или `GitPython`. SQLite — просто пара таблиц. Реально это +1 день, не больше.\n\n> На случай если SQLite всё-таки хочется бэкапить в Git-репе рядом: делаешь дамп `sqlite3 db.sqlite .dump > schema.sql` перед коммитом. Но для MVP это не нужно — SQLite восстановима из ФС+Git, если сделать её пересобираемой. На MVP просто держи SQLite вне Git (в `.gitignore`) или бэкапь копированием.\n\n---\n\n## 2. Проверки — это в том числе скрипты? Да.\n\nVerification в твоём THE LOOP — это **набор проверок разного типа**, и скрипты входят в него. Три уровня, от дешёвого к строгому:\n\n1. **Структурные (детерминированные, код):** валиден ли ArchiMate XML по схеме? Парсится ли markdown-таблица? Есть ли обязательные колонки? Проходят ли `assert`'ы? — это самые надёжные и дешёвые.\n2. **LLM-судья (self-critique):** «соответствует ли результат цели и правилам пользователя?» — для семантики, которую кодом не проверить.\n3. **Гибрид:** сначала структурная (быстро отсекает мусор), если прошла — LLM-судья на качество.\n\n**Почему это твой козырь с локальными моделями:** ты прав, что слабую локальную модель надо компенсировать циклом. Схема «сгенерировал → проверил кодом → если fail, вернул ошибку в модель → перегенерировал» позволяет слабой модели догонять по качеству за счёт итераций. Это и есть твой аргумент «зачем цикл, а не одна транзакция».\n\n---\n\n## 3. Где здесь MCP (Model Context Protocol)\n\nMCP — это стандартный протокол, по которому LLM-агент вызывает внешние «инструменты» и «ресурсы». Для тебя это **и архитектурное решение, и маркетинговый буллет**. Применения:\n\n- **Твоя база знаний = MCP-сервер.** Оборачиваешь операции над БЗ (поиск документа, чтение версии, чтение аннотации, запуск функции) как MCP-tools. Тогда:\n  - твой агент дёргает их по стандарту, а не самописными вызовами;\n  - **любой внешний клиент (Claude Desktop, Cursor, IDE) может подключиться к твоей БЗ** — это буквально «мой продукт работает как инструмент внутри их любимого редактора». Сильнейший портфолио-буллет.\n- **MCP-tools как «функции агента»:** `search_documents`, `get_document(version)`, `run_function(id, version)`, `export_archimate`, `annotate`. Это ровно те кнопки/действия, что ты хочешь в UI.\n- **MCP-resources:** документы БЗ выставляются как ресурсы, которые модель может подтягивать в контекст по ссылке (закрывает твой «поиск и ссылка на документ в промпте»).\n\n**Что взять из Cursor/Claude Code концептуально (не сам инструмент):**\n\n- **Tool-use петля** (модель → вызвал инструмент → получил результат → продолжил) — ядро агента.\n- **@-упоминания документов** в промпте → у тебя «поиск и вставка ссылки на документ». Прямая калька UX Cursor.\n- **Diff-review результата** перед принятием (Cursor показывает дифф правок) → твой diff между версиями результата.\n- **Артефакт как переиспользуемая команда** (у Claude Code — команды/скиллы) → твоя «сгенерированная Python-функция становится кнопкой».\n- **Стриминг шагов** («думает по шагам») — да, несложно: FastAPI + WebSocket/SSE, шлёшь события шагов чейна по мере выполнения. Реально пара часов работы.\n\n> MCP на MVP: сделай **тонкий MCP-сервер поверх 3–4 tools**. Не надо покрывать всё. Даже 3 tool'а через MCP = легитимный «MCP-integrated» в портфолио.\n\n---\n\n## 4. Provenance-граф — да, ты понял верно\n\n«Документ идёт из документа с использованием промпта» — это ровно provenance. В SQLite это рёбра `Edge(from, to, relation)`. В Obsidian это рисуется как связи графа. Пример того, что увидит пользователь в графе:\n\n```\n[req_v3.docx] --derived_from--> [req_v2.docx]\n[requirements_table.md] --produced_by--> [extract_reqs.py]\n[extract_reqs.py] --applied_to--> [req_v3.docx]\n[requirements_table.md] --from_prompt--> [session_042]\n[req_v3.docx] --annotated_by--> [annotation_v3.md]\n```\n\nКаждый узел = .md-файл в Obsidian с фронтматтером (метаданные) и wikilinks на связанные узлы. Граф Obsidian рисует это автоматически. **Это визуальный вау-центр всего проекта** — обязательно в MVP.\n\n---\n\n# 📋 РАЗДЕЛ 1: Минимальная функциональность MVP\n\nСквозной сценарий, который должен работать безупречно:\n\n> Аналитик добавляет документы → пишет промпт со ссылкой на документ → агент прогоняет чейн со стримингом шагов и проверкой → отдаёт результат (.md таблица/аннотация + ArchiMate .xml) → аналитик правит в диалоге → финальная логика фиксируется как Python-функция (кнопка) → аналитик заливает новую версию документа → жмёт кнопку → агент выдаёт новый результат + diff + аннотацию → всё видно графом в Obsidian.\n\n**MVP MUST-HAVE (входит в 2–7 дней):**\n\n- [ ] **Web UI:** поле промпта, выбор модели, список/поиск документов, вставка ссылки на документ в промпт (@-стиль)\n- [ ] **Сессии:** история промптов и результатов, привязка к документам\n- [ ] **Ingestors:** docx, pdf, xlsx, md → извлечение текста\n- [ ] **Chain Engine (THE LOOP):** discovery → plan → execute → verify → (ship | iterate), с per-step выбором модели\n- [ ] **Verification:** структурная проверка (код) + опционально LLM-судья; при fail — retry\n- [ ] **Стриминг шагов** в UI (WebSocket/SSE) — «думает по шагам»\n- [ ] **LLMProvider абстракция:** облако (дом) + заглушка/адаптер Ollama (задел на корп)\n- [ ] **Хранилище:** ФС (контент) + Git (версии) + SQLite (метаданные, связи, история)\n- [ ] **Детерминированная Python-функция:** фиксация финальной логики → кнопка в UI\n- [ ] **Повторное применение:** запуск функции на новой версии документа\n- [ ] **Версионирование** документа (git commit + запись в SQLite)\n- [ ] **Diff результата** между версиями\n- [ ] **Авто-аннотация** новой версии результата\n- [ ] **ArchiMate XML экспорт** (по твоему требованию — сразу)\n- [ ] **Provenance Edges** в SQLite\n- [ ] **Obsidian-экспортёр:** .md + wikilinks + фронтматтер → живой граф\n- [ ] **MCP-сервер (тонкий):** 3–4 tools (search_documents, get_document, run_function, export_archimate)\n\n**MVP NON-GOALS (явно НЕ делаем сейчас):**\n- ❌ Конструктор чейнов (только 1–2 хардкод-чейна)\n- ❌ Полноценный sandbox безопасности (только описываем план)\n- ❌ Мультипользовательность / группа экспертов\n- ❌ Wiki PlatformV-Works API\n- ❌ Двусторонняя синхронизация с Obsidian (только экспорт)\n- ❌ Аутентификация/RBAC\n\n---\n\n# 🗓️ РАЗДЕЛ 2: План MVP по дням (AI-first, 2–7 дней)\n\nТы прав — при agentic-разработке сроки другие. Вот план на ~5–7 рабочих дней с буфером.\n\n<details open>\n<summary><b>День 1 — Фундамент и хранилище</b></summary>\n\n- Репозиторий, структура проекта, `workspace/` для ФС, `.gitignore` (SQLite вне git)\n- SQLite-схема (таблицы ниже) + слой доступа\n- Git-обёртка: `commit_file()`, `get_version(commit_hash)` через GitPython/subprocess\n- `LLMProvider` интерфейс + облачный адаптер (+ пустой Ollama-адаптер)\n- FastAPI-скелет, health-check\n</details>\n\n<details open>\n<summary><b>День 2 — Ingest + UI-каркас</b></summary>\n\n- Ingestors: docx (`python-docx`), pdf (`pdfplumber`), xlsx (`openpyxl`), md\n- Загрузка документа → ФС → git commit → запись в SQLite\n- React/Svelte каркас: список документов, поиск, поле промпта, @-вставка ссылки\n- WebSocket-канал (задел под стриминг)\n</details>\n\n<details open>\n<summary><b>День 3 — Chain Engine + стриминг</b></summary>\n\n- Chain Engine: шаги discovery/plan/execute/verify, per-step модель\n- Verification v1: структурные проверки (парсинг результата) + retry-петля\n- Стриминг событий шагов в UI (видно, как агент идёт по THE LOOP)\n- Сохранение сессии и результата в SQLite\n</details>\n\n<details open>\n<summary><b>День 4 — Функции + повторное применение</b></summary>\n\n- Из финальной логики диалога → генерация Python-функции → сохранить в ФС + git + SQLite\n- Функция появляется как кнопка в UI\n- Запуск функции на выбранной версии документа (пока без sandbox — прямой subprocess + таймаут)\n- Diff результата между версиями + авто-аннотация\n</details>\n\n<details open>\n<summary><b>День 5 — Provenance + Obsidian + ArchiMate</b></summary>\n\n- Provenance Edges при каждой операции\n- Obsidian-экспортёр: узлы = .md с фронтматтером + wikilinks → граф оживает\n- ArchiMate XML экспортёр + структурная валидация XML (это же и verification-кейс)\n</details>\n\n<details open>\n<summary><b>День 6 — MCP + шлифовка</b></summary>\n\n- Тонкий MCP-сервер: 3–4 tools поверх БЗ\n- Проверка подключения внешним MCP-клиентом (буллет для портфолио)\n- Полный прогон сквозного сценария, багфикс\n</details>\n\n<details open>\n<summary><b>День 7 — Демо и упаковка</b></summary>\n\n- README, скринкаст демо, диаграмма архитектуры\n- Документ «доработки для корп-среды» (см. бэклог ниже)\n- Тест на Ollama-адаптере: хотя бы один прогон на локальной модели\n</details>\n\n**SQLite-схема (стартовая):**\n```\nDocument(id, title, path, kind, created_at)\nDocumentVersion(id, document_id, version_no, git_commit, created_at)\nAnnotation(id, version_id, text_md, generated_by, model, created_at)\nFunction(id, name, code_path, description, created_at)\nFunctionRun(id, function_id, input_version_id, output_path, status, created_at)\nSession(id, created_at)\nQuery(id, session_id, prompt, chain_id, created_at)\nQueryRun(id, query_id, steps_trace_json, result_path, model_config, created_at)\nEdge(from_id, from_type, to_id, to_type, relation, created_at)\n```\n\n---\n\n# 📌 РАЗДЕЛ 3: Всё, что НЕ вошло в MVP — бэклог (для сканирования)\n\n### A. Безопасность (для корп-интеграции)\n- Sandbox запуска сгенерированного Python (изолированный процесс/контейнер)\n- Whitelist разрешённых импортов и модулей\n- Запрет доступа скрипта к сети и файловой системе вне workspace\n- Ограничение доступа к корпоративным функциям/API из скриптов\n- Ресурсные лимиты: CPU, RAM, таймаут выполнения\n- Статический анализ сгенерированного кода перед запуском (AST-проверка)\n- Ревью/аппрув скрипта человеком перед первым запуском\n- Аудит-лог всех запусков функций (кто, что, когда, над чем)\n- Секрет-менеджмент (ключи моделей вне кода)\n\n### B. Модели и качество\n- Полный Ollama/локальный inference на корп-Windows-машине\n- Адаптер под корпоративный LLM-gateway\n- Расширенный verification-цикл для компенсации слабых локальных моделей\n- LLM-судья с калибровкой порогов качества\n- Автоматический выбор модели под тип шага (роутинг)\n- Учёт стоимости/токенов на чейн\n- Кэш детерминированных функций по хэшу входа\n\n### C. Чейны и агент\n- Визуальный конструктор чейнов в UI\n- Библиотека переиспользуемых чейнов (пресеты)\n- Skill-library: накопление и переиспользование функций-«навыков»\n- Настраиваемые политики retry/эскалации\n- Параллельное выполнение независимых шагов\n- Trace-viewer с деталями каждого шага (расширенный)\n\n### D. Данные и версионирование\n- Пересборка SQLite из ФС+Git (recovery)\n- Дамп SQLite-схемы в Git для истории метаданных\n- Diff бинарных форматов (docx/xlsx) в человекочитаемом виде\n- Ветвление/эксперименты над артефактами (git branches)\n- Контент-адресуемое хранилище с дедупликацией\n\n### E. Интеграции\n- Wiki PlatformV-Works API (чтение/запись страниц)\n- Двусторонняя синхронизация с Obsidian\n- Расширение MCP-tools (полное покрытие операций БЗ)\n- Экспорт в другие нотации (BPMN, C4, PlantUML)\n- Импорт существующих ArchiMate-моделей (не только экспорт)\n\n### F. UX / представление\n- @-упоминания с автодополнением документов\n- Diff-review результата в стиле Cursor перед принятием\n- Расширенная визуализация provenance-графа (вне Obsidian)\n- Мультиформатный экспорт результатов (Confluence, HTML, PDF)\n- Шаблоны промптов / промпт-библиотека\n\n### G. Масштаб и эксплуатация\n- Мультипользовательский режим (группа экспертов)\n- Аутентификация и RBAC\n- Оффлайн-инсталлятор под Windows (wheelhouse)\n- Проверка ограничений корп-среды: Docker, pip, сеть, железо\n- Развёртывание без Docker (fallback на venv)\n- Мониторинг/логирование в проде\n\n---\n\n## Что я бы уточнил у тебя перед стартом\n\n1. **Облачный провайдер для дома** — Anthropic, OpenAI, оба? (влияет на первый адаптер)\n2. **ArchiMate-экспорт** — какой уровень: просто валидный Open Group Exchange XML с элементами+связями, или нужны конкретные слои/вьюхи? (для MVP предлагаю минимальный: элементы + отношения)\n3. **UI-фреймворк** — React или Svelte? (Svelte быстрее для соло-MVP, React привычнее для портфолио)\n\nДальше по твоему выбору могу сразу выдать стартовый код: **SQLite-схема + `LLMProvider` + Git-обёртка + FastAPI-скелет** одним куском, чтобы День 1 закрыть с ходу. Погнали?",
+            "annotations": [],
+            "logprobs": []
+          }
+        ]
+      }
+    },
+    "item-1783774439-sO4xkS06ByflVOOGDdQx": {
+      "id": "item-1783774439-sO4xkS06ByflVOOGDdQx",
+      "messageId": "msg-1783774439-avYNm8b2RWwYu1ZQpcFU",
+      "data": {
+        "type": "message",
+        "role": "user",
+        "content": [
+          {
+            "type": "input_text",
+            "text": "один важный нюанс. Не все пожелания пользователя по работе с доком можно зафиксирвать в виде скрипта. Так же? Тут наверное смесь python скрипта \n\nИ это мне напоминает функциональность скилов. Может прямо так и встроить скилы в приложение?\nНа сколько это правильное решение?\nНа сколько это усложняет реализацию?\nКакие корректировуи в план MVP нужно внести. По мнимому"
+          }
+        ]
+      }
+    },
+    "msg_tmp_aqd7cw4u0ie": {
+      "id": "msg_tmp_aqd7cw4u0ie",
+      "messageId": "msg-1783774439-ITNwVh9oaFjoNI5HvvDn",
+      "data": {
+        "id": "msg_tmp_aqd7cw4u0ie",
+        "type": "message",
+        "status": "completed",
+        "role": "assistant",
+        "content": [
+          {
+            "type": "output_text",
+            "text": "Очень точное наблюдение. Ты нащупал фундаментальную вещь в дизайне агентов — и да, ответ «смесь». Разберу по порядку.\n\n## 1. Правильно ли, что не всё фиксируется скриптом?\n\nДа, абсолютно. Есть два принципиально разных типа логики обработки:\n\n| Тип | Что это | Пример | Детерминизм |\n|---|---|---|---|\n| **Детерминированный (код)** | правило, выразимое алгоритмом | «извлеки все строки таблицы с колонкой Priority=High», «посчитай сумму», «распарси заголовки» | 100% воспроизводимо |\n| **Семантический (LLM)** | суждение, требующее понимания смысла | «выдели ключевые бизнес-требования», «оцени полноту описания», «переформулируй в формате пользователя» | воспроизводимо только через промпт+модель |\n| **Гибрид (смесь)** | код готовит данные → LLM осмысляет → код валидирует/форматирует | «извлеки таблицу кодом → LLM классифицирует требования по типам → код собирает ArchiMate XML» | частично |\n\nБольшинство реальных задач аналитика — **третий тип**. Чистый скрипт покрывает только простые случаи. Поэтому «переиспользуемая логика» = не просто `.py`-файл, а **рецепт из шагов, где шаги бывают code-типа и llm-типа**.\n\nВот тут и возникает твоя идея скиллов — и она правильная.\n\n## 2. Скиллы: правильное ли решение?\n\n**Да, и это концептуально сильнее, чем «сгенерированный Python-файл».** По сути ты уже пришёл к этому сам — просто «функция» была частным случаем скилла.\n\nОпределим скилл так:\n\n```\nSkill = {\n  id, name, description,\n  steps: [                       # упорядоченная цепочка\n    { type: \"code\",  ref: \"extract_table.py\" },\n    { type: \"llm\",   prompt_template: \"...\", model: \"...\" },\n    { type: \"code\",  ref: \"to_archimate.py\" },\n    { type: \"verify\", checks: [...] }\n  ],\n  input_schema,                  # что принимает (какой документ/версия)\n  output_kind                    # md | table | archimate | annotation\n}\n```\n\nКлючевое: **скилл — это и есть \"зафиксированная финальная логика обработки\" из твоего ТЗ**, только честно отражающая, что логика — смесь кода и промптов, а не только код. Когда приходит новая версия документа — ты просто прогоняешь тот же скилл (те же шаги, те же промпты, те же модели) на новом входе. Воспроизводимость сохраняется на уровне «рецепта».\n\n**Почему это правильно именно для твоих целей:**\n- **Польза:** покрывает реальные задачи (гибридные), а не только тривиальные.\n- **Портфолио/вау:** «агент, который учится и накапливает библиотеку навыков» — сильный нарратив (перекликается с skill-library подходами вроде Voyager). Плюс это красиво ложится на MCP: **каждый скилл = MCP-tool**.\n- **Опыт:** ты строишь настоящую агентную абстракцию, а не обёртку над одним промптом.\n\n**Важная тонкость про воспроизводимость.** LLM-шаг недетерминирован по своей природе. Чтобы скилл был «переиспользуемым», зафиксируй в шаге: модель, температуру (0 где можно), промпт-шаблон, и — критично — **verify-шаг после LLM**. Verify (код) отсекает случаи, когда модель «поплыла». Это и есть твой ответ на «локальные модели слабее»: гибридный скилл с проверками стабилизирует слабую модель.\n\n## 3. Насколько усложняет реализацию?\n\nХорошая новость: **почти не усложняет, если ты и так делаешь Chain Engine.** Смотри — у тебя в плане уже есть:\n- Chain Engine с шагами discovery/plan/execute/verify (День 3)\n- Генерация Python-функции + кнопка (День 4)\n\nСкилл — это **то же самое, просто обобщённое**. Вместо двух разных сущностей («чейн для обработки запроса» и «сгенерированная функция») у тебя одна: **скилл = сохранённый чейн из типизированных шагов**. Это даже *упрощает* модель — меньше сущностей.\n\nЧто реально добавляется:\n1. Шаг чейна получает поле `type` (`code` / `llm` / `verify`) — это несколько строк в диспетчере шагов.\n2. Скилл сериализуется (JSON-манифест + связанные `.py` в ФС) — версионируется тем же Git.\n3. LLM-шаги хранят промпт-шаблоны с подстановкой (`{document_content}`).\n\nОценка: **+0.5 дня**, не больше. И то за счёт того, что ты убираешь дублирование «функция vs чейн».\n\nЧто НЕ надо делать на MVP (иначе взорвётся объём):\n- ❌ визуальный редактор скиллов (это тот же «конструктор чейнов», который вы уже отложили)\n- ❌ автоматическую декомпозицию «агент сам решает, где code, где llm» на лету — на MVP пусть агент предлагает шаги, а фиксация в скилл идёт из финального состояния сессии\n- ❌ вложенные скиллы / скиллы, вызывающие скиллы\n- ❌ произвольные схемы входа — фиксируй «на вход документ+версия»\n\n## 4. Корректировки в план MVP\n\nИзменения минимальны — в основном это **переименование и объединение сущностей**, а не новая работа.\n\n**Что меняется концептуально:**\n- «Детерминированная Python-функция» → частный случай **Skill** (скилл из одного code-шага).\n- «Сохранённый чейн запроса» → **Skill** (скилл из нескольких шагов).\n- Одна сущность `Skill` вместо `Function` + отдельной логики чейна.\n\n**Корректировки модели данных (SQLite):**\n```\nSkill(id, name, description, manifest_json, output_kind, created_at)\n   manifest_json = упорядоченные шаги [{type, ref/prompt, model, checks}]\nSkillRun(id, skill_id, input_version_id, output_path, steps_trace_json, status, created_at)\n```\n(заменяет прежние `Function` / `FunctionRun`; `QueryRun` можно оставить для «ad-hoc, ещё не сохранённых в скилл» запросов)\n\n**Корректировки по дням:**\n\n<details open>\n<summary><b>День 3 (Chain Engine) — небольшое обобщение</b></summary>\n\n- Шаг чейна получает `type`: `code` | `llm` | `verify`\n- Диспетчер шагов: единый исполнитель, ветвящийся по типу\n- (это ровно тот движок, что будет исполнять и ad-hoc запрос, и сохранённый скилл)\n</details>\n\n<details open>\n<summary><b>День 4 (было \"Функции\") → теперь \"Скиллы\"</b></summary>\n\n- Фиксация финального состояния сессии как **Skill** (манифест шагов, а не один .py)\n- Сохранение манифеста (JSON) + code-шагов (.py) в ФС → git commit\n- Скилл появляется как кнопка в UI\n- Запуск скилла на новой версии документа (тот же движок из Дня 3)\n- Diff результата + авто-аннотация — без изменений\n</details>\n\n<details open>\n<summary><b>День 6 (MCP) — усиление</b></summary>\n\n- Каждый сохранённый **скилл автоматически экспонируется как MCP-tool**\n- Это делает буллет портфолио сильнее: «БЗ + накопленные навыки доступны любому MCP-клиенту»\n</details>\n\nОстальные дни — без изменений.\n\n**Обновление MVP-скоупа (замена одной строки):**\n- ~~Детерминированная Python-функция → кнопка~~\n- ✅ **Skill (гибрид code+llm+verify шагов) → сохраняется, версионируется, становится кнопкой и MCP-tool, применяется к новым версиям**\n\n**Обновление NON-GOALS (добавить):**\n- ❌ Визуальный редактор скиллов\n- ❌ Вложенные скиллы / композиция скиллов\n- ❌ Автодекомпозиция шагов агентом на лету\n\n**Обновление бэклога (добавить в раздел C «Чейны и агент»):**\n- Визуальный редактор скиллов\n- Композиция скиллов (скилл вызывает скилл)\n- Автоматическая декомпозиция задачи на code/llm-шаги\n- Версионирование самих скиллов + diff манифестов\n- Маркетплейс/шеринг скиллов между экспертами\n- Автоподбор существующего скилла под новый запрос (matching)\n- Параметризуемые скиллы (входные аргументы кроме документа)\n\n## Итог одной фразой\n\nТы не добавляешь фичу — ты **выбираешь более правильную абстракцию**, которая заодно устраняет дублирование. Скилл = «переиспользуемый рецепт из code/llm/verify шагов» — это честнее отражает реальность (не всё фиксируется кодом), концептуально сильнее для портфолио, отлично ложится на MCP, и стоит примерно +0.5 дня за счёт объединения двух сущностей в одну.\n\nОдно уточнение, чтобы не переусложнить: на MVP предлагаю **фиксировать скилл из готовой сессии** (пользователь довёл результат в диалоге → жмёт «сохранить как скилл» → система сериализует шаги), а не давать пользователю собирать скилл руками. Согласен с таким ограничением? И если да — я готов выдать стартовый код Дня 1 с уже заложенной сущностью `Skill` вместо `Function`.",
+            "annotations": [],
+            "logprobs": []
+          }
+        ]
+      }
+    },
+    "item-1783776365-2F04u44WpaTbl5TQE3zn": {
+      "id": "item-1783776365-2F04u44WpaTbl5TQE3zn",
+      "messageId": "msg-1783776365-yujBQtikLwB8MztYfsj7",
+      "data": {
+        "type": "message",
+        "role": "user",
+        "content": [
+          {
+            "type": "input_text",
+            "text": "Отвечаю на ранее заданные вопросы\n1 Провайдер openrouter api key. Если есть способ выбора модили из списка будет круто. Кстати нужно не забыть что у модели есть роль в цепочки. не все действия выполняет одна модель\n\n2 ArchiMate минималка\n\n3 React\n\nСкилы фиксируются в конце сессии. Если сессия отменена ни чего не происходит\n\nДелаем на скилах. Есть вопросы\n1 Функция это - кроме промпта и скрипта, скила по сути. Это еще и модель + температура. Так?\n2 На сколько это будет детерминировано в итоге. Может пользователю предлагать выбирать между 100% повторяемым и умным результатом (но это на будущие если вообще нужно)\n3 Как мы будем их хранить? В бд? \n4 Скилы позволяют в том чилсе выполнять их не по кнопке а по запросу. И передавать описания всех скилов в системный промпт. Похоже тут есть куда развиваться и добавляетя огромный пласт функциональности. так же скилы могут вызывать другие скилый. Нужно провести черту на MVP. Думаю это просто кнопка. Выполнить скил по кномпке. Не будет ли противоречить выполнение скила по кнопке концепции заложенной в скилы\n\n\nИтого - ответь на вопросы дай финалку mvp (учти что все это будет читать модель. Хочу попробовать z.ai на этом проекте исключительно)\nИ финальный бэк лог в формате как ты делал\n"
+          }
+        ]
+      }
+    },
+    "msg_tmp_7c98e9j1nho": {
+      "id": "msg_tmp_7c98e9j1nho",
+      "messageId": "msg-1783776365-chQL2lxbldoyRHsgYqi6",
+      "data": {
+        "id": "msg_tmp_7c98e9j1nho",
+        "type": "message",
+        "status": "completed",
+        "role": "assistant",
+        "content": [
+          {
+            "type": "output_text",
+            "text": "Отвечаю на вопросы, потом даю финальный MVP и бэклог в формате, оптимизированном под чтение моделью-исполнителем (z.ai / GLM). Учту, что документ = спека для кодогенерирующего агента, поэтому формулировки будут точными и однозначными.\n\n---\n\n## Ответы на вопросы\n\n**1. Функция/скилл = промпт + скрипт + модель + температура?**\n\nДа, но точнее так: эти параметры живут **на уровне шага, а не всего скилла**. Каждый шаг несёт свою конфигурацию:\n\n```\ncode-шаг:   { type, script_ref, timeout }\nllm-шаг:    { type, prompt_template, model, temperature, role }\nverify-шаг: { type, checks[], on_fail: retry|abort }\n```\n\nЭто прямо закрывает твоё «у модели есть роль в цепочке»: разные llm-шаги = разные модели/роли (например, `planner` на дешёвой модели, `executor` на сильной, `judge` на отдельной). Скилл = упорядоченный список таких шагов + метаданные.\n\n**2. Насколько это детерминировано? Давать выбор пользователю?**\n\nРазложим честно:\n- **code-шаги** — 100% детерминированы.\n- **llm-шаги** — недетерминированы в принципе. `temperature=0` приближает к повторяемости, но не гарантирует (провайдер, версия модели, семплинг всё равно вносят вариативность).\n- **verify-шаги** — детерминированы и служат «стабилизатором»: отсекают отклонившиеся результаты и запускают retry.\n\nИтого: скилл **не может быть 100% детерминирован, если содержит хоть один llm-шаг**. Он «воспроизводим по рецепту», но не «побитово воспроизводим».\n\nПро выбор пользователю «100% повторяемый vs умный» — **правильная интуиция, но не на MVP.** На MVP просто ставь `temperature=0` по умолчанию для llm-шагов (максимум повторяемости из возможного) и клади это в бэклог. Переусложнять UI сейчас не нужно.\n\n**3. Как хранить скиллы?**\n\nГибрид — ровно как весь остальной контент:\n- **Манифест скилла** (список шагов, промпты, модели, температуры, checks) → JSON-файл в ФС → версионируется Git.\n- **Code-шаги** (`.py`) → отдельные файлы в ФС → тот же Git.\n- **В SQLite** → только запись `Skill(id, name, manifest_path, git_commit, ...)` + `SkillRun(...)` для истории запусков и provenance.\n\nПочему не «весь скилл в БД»: скилл — это контент (код + промпты), а значит подчиняется тому же принципу, что документы — ФС+Git источник истины, SQLite = индекс и связи. Консистентно, версионируемо, diff'абельно.\n\n**4. Кнопка vs запрос vs скиллы, вызывающие скиллы. Где черта MVP? Не противоречит ли кнопка концепции?**\n\nНет, не противоречит — наоборот. Разберём уровни зрелости вызова скилла:\n\n| Уровень | Как вызывается | MVP? |\n|---|---|---|\n| L1 | Кнопка «выполнить скилл на версии X» | ✅ MVP |\n| L2 | Агент сам выбирает скилл по описанию (скиллы в системном промпте как tools) | ❌ бэклог |\n| L3 | Скилл вызывает другой скилл (композиция) | ❌ бэклог |\n\n**Почему кнопка НЕ противоречит концепции скиллов:** концепция скилла — это «переиспользуемый рецепт обработки». Способ *запуска* (кнопка / агент / другой скилл) — ортогонален самому рецепту. Кнопка — это просто ручной триггер L1. Внутри всё равно исполняется тот же движок с теми же типизированными шагами. Ты ничего не теряешь: L2/L3 добавятся сверху позже без переписывания ядра, потому что «скилл как MCP-tool» ты уже заложишь на Дне 6 — а это ровно та абстракция, через которую потом агент научится вызывать скиллы сам.\n\nТак что черта MVP: **кнопка (L1) + скилл экспонируется как MCP-tool** (техническая готовность к L2, но без автовызова). Это честная граница.\n\n---\n\n# 🎯 ФИНАЛЬНЫЙ MVP — Спецификация\n\n> Документ-спека для исполняющего агента. Стек зафиксирован. Формулировки — императивные и конкретные.\n\n## Цель MVP\nОдин сквозной сценарий, работающий безупречно:\n> Аналитик загружает документы → пишет промпт со ссылкой на документ → агент прогоняет цепочку шагов (со стримингом в UI) с проверкой результата → отдаёт результат (`.md` таблица/аннотация + минимальный ArchiMate `.xml`) → аналитик правит в диалоге → в конце сессии финальная логика фиксируется как **Skill** (кнопка в UI + MCP-tool) → аналитик загружает новую версию документа → жмёт кнопку скилла → агент выдаёт новый результат + diff + авто-аннотацию → вся история связей видна графом в Obsidian.\n\n## Стек (зафиксировано)\n| Слой | Технология |\n|---|---|\n| Ядро | Python 3.11+ |\n| Backend | FastAPI + WebSocket (стриминг шагов) |\n| Frontend | React (Vite) |\n| LLM-провайдер | **OpenRouter API** (единая точка, выбор модели из списка) |\n| Хранилище контента | Файловая система (`workspace/`) |\n| Версионирование | Git (GitPython/subprocess) |\n| Метаданные/связи/история | SQLite |\n| Просмотр графа | Obsidian (read-only экспорт) |\n| Парсеры | python-docx, pdfplumber, openpyxl, markdown-it |\n| Интеграционный протокол | MCP-сервер (тонкий, поверх скиллов + операций БЗ) |\n\n## Ключевые абстракции\n\n**LLMProvider (обязательно абстрагировать сразу):**\n```\nLLMProvider.complete(model, messages, temperature) -> text\n  реализация: OpenRouterProvider (читает OPENROUTER_API_KEY)\n  метод list_models() -> подтягивает доступные модели для UI-селектора\n```\n\n**Skill (единая сущность вместо «функция» и «чейн»):**\n```\nSkill = {\n  id, name, description, output_kind[md|table|archimate|annotation],\n  steps: [\n    { type:\"code\",   script_ref, timeout },\n    { type:\"llm\",    prompt_template, model, temperature=0, role },\n    { type:\"verify\", checks[], on_fail:[retry|abort], max_retries }\n  ]\n}\n```\n- Скилл сериализуется: манифест JSON + `.py` шаги → ФС → Git.\n- Фиксируется **только в конце успешной сессии**. Отмена сессии = ничего не сохраняется.\n- Запуск на MVP: **кнопка** (L1). Дополнительно экспонируется как **MCP-tool** (готовность к автовызову позже, но без него).\n\n**Разделение хранилищ (зафиксировано):**\n| Хранилище | Что хранит |\n|---|---|\n| ФС | документы, `.md` результаты, `.py` шаги, ArchiMate `.xml`, манифесты скиллов |\n| Git | версии всего вышеперечисленного (commit = версия) |\n| SQLite | метаданные, provenance-рёбра, сессии, история запросов/запусков, ссылки на git_commit |\n| Obsidian | генерируемый vault: `.md` + wikilinks + фронтматтер (только view) |\n\nSQLite вне Git (в `.gitignore`), пересобираема из ФС+Git; связь с версиями через поле `git_commit`.\n\n## SQLite-схема\n```\nDocument(id, title, path, kind, created_at)\nDocumentVersion(id, document_id, version_no, git_commit, created_at)\nAnnotation(id, version_id, text_md, generated_by[human|model], model, created_at)\nSkill(id, name, description, manifest_path, output_kind, git_commit, created_at)\nSkillRun(id, skill_id, input_version_id, output_path, steps_trace_json, status, created_at)\nSession(id, status[active|committed|cancelled], created_at)\nQuery(id, session_id, prompt, created_at)\nQueryRun(id, query_id, steps_trace_json, result_path, model_config_json, created_at)\nEdge(from_id, from_type, to_id, to_type, relation, created_at)\n```\n`Edge.relation ∈ {derived_from, produced_by, applied_to, annotated_by, from_prompt}`\n\n## MVP MUST-HAVE\n- [ ] Web UI (React): поле промпта, селектор модели (из OpenRouter list_models), список+поиск документов, @-вставка ссылки на документ в промпт, панель сессии, кнопки скиллов\n- [ ] Сессии: активная/зафиксированная/отменённая; история промптов и результатов\n- [ ] Ingestors: docx, pdf, xlsx, md → извлечение текста + метаданные\n- [ ] Загрузка документа → ФС → git commit → запись в SQLite (версия)\n- [ ] LLMProvider → OpenRouterProvider (complete + list_models)\n- [ ] Chain Engine: единый исполнитель типизированных шагов (code | llm | verify), per-step модель/роль/температура\n- [ ] Verification: структурные проверки кодом + retry-петля (on_fail); опц. LLM-судья\n- [ ] Стриминг шагов в UI через WebSocket («думает по шагам»)\n- [ ] Фиксация Skill в конце успешной сессии (манифест JSON + .py шаги → ФС → git → SQLite)\n- [ ] Отмена сессии = ничего не сохраняется\n- [ ] Кнопка «Выполнить скилл» на выбранной версии документа\n- [ ] Повторное применение скилла к новой версии документа\n- [ ] Версионирование документа (git commit + DocumentVersion)\n- [ ] Diff результата между версиями\n- [ ] Авто-аннотация новой версии результата (llm-шаг)\n- [ ] ArchiMate XML экспорт (минимальный: элементы + отношения) + структурная валидация XML\n- [ ] Provenance Edges при каждой операции\n- [ ] Obsidian-экспортёр: узлы = .md с фронтматтером + wikilinks → живой граф\n- [ ] MCP-сервер (тонкий): tools = search_documents, get_document, run_skill, export_archimate; каждый сохранённый скилл экспонируется как tool\n- [ ] Дефолт `temperature=0` для llm-шагов\n\n## MVP NON-GOALS (явно НЕ делаем)\n- ❌ Визуальный конструктор/редактор скиллов и чейнов\n- ❌ Автовызов скилла агентом (L2) и композиция скиллов (L3)\n- ❌ Sandbox безопасности (пока прямой subprocess + timeout; план защиты — в бэклоге)\n- ❌ Выбор пользователю «100% повторяемый vs умный»\n- ❌ Мультипользовательность / RBAC / auth\n- ❌ Wiki PlatformV-Works API\n- ❌ Двусторонняя синхронизация с Obsidian\n- ❌ Локальные модели (только OpenRouter на MVP; Ollama-адаптер — задел бэклога)\n\n## План по дням (AI-first, ~5–7 дней)\n\n**День 1 — Фундамент:** структура проекта, `workspace/`, `.gitignore`; SQLite-схема + слой доступа; Git-обёртка (`commit_file`, `get_version`); `LLMProvider` + `OpenRouterProvider` (complete + list_models); FastAPI-скелет.\n\n**День 2 — Ingest + UI-каркас:** ingestors (docx/pdf/xlsx/md); загрузка → ФС → git → SQLite; React-каркас (список+поиск документов, поле промпта, @-вставка, селектор модели); WebSocket-канал.\n\n**День 3 — Chain Engine + стриминг:** исполнитель шагов (code|llm|verify) с per-step моделью/ролью/temp; verification v1 (структурные проверки + retry); стриминг событий шагов в UI; сохранение Query/QueryRun.\n\n**День 4 — Скиллы + повторное применение:** фиксация сессии как Skill (манифест+`.py` → ФС → git); кнопка скилла в UI; запуск скилла на версии документа (тот же движок); diff результата + авто-аннотация.\n\n**День 5 — Provenance + Obsidian + ArchiMate:** Edges на каждой операции; Obsidian-экспортёр (.md + фронтматтер + wikilinks); ArchiMate XML экспортёр + валидация (как verify-кейс).\n\n**День 6 — MCP + шлифовка:** тонкий MCP-сервер (4 базовых tools + скиллы как tools); проверка внешним MCP-клиентом; полный прогон сквозного сценария, багфикс.\n\n**День 7 — Демо и упаковка:** README, скринкаст, диаграмма архитектуры; документ «доработки для корп-среды» (из бэклога).\n\n---\n\n# 📌 ФИНАЛЬНЫЙ БЭКЛОГ (для сканирования)\n\n### A. Безопасность (обязательно для корп-интеграции)\n- Sandbox запуска code-шагов (изолированный процесс/контейнер)\n- Whitelist разрешённых импортов и модулей\n- Запрет доступа скрипта к сети и ФС вне workspace\n- Ограничение доступа скриптов к корпоративным функциям/API\n- Ресурсные лимиты: CPU, RAM, timeout\n- AST-анализ сгенерированного кода перед запуском\n- Ревью/аппрув скилла человеком перед первым запуском\n- Аудит-лог всех запусков скиллов (кто/что/когда/над чем)\n- Секрет-менеджмент (ключи вне кода/репозитория)\n\n### B. Модели и качество\n- Ollama/локальный inference на корп-Windows\n- Адаптер под корпоративный LLM-gateway\n- Выбор режима «100% повторяемый vs умный» (temperature/семплинг)\n- LLM-судья с калибровкой порогов качества\n- Автоматический роутинг модели под тип/роль шага\n- Учёт стоимости и токенов на запуск скилла/сессию\n- Кэш результатов code-шагов по хэшу входа\n- Пиннинг версии модели для воспроизводимости скиллов\n\n### C. Скиллы и агент\n- Визуальный редактор скиллов\n- Автовызов скилла агентом по описанию (L2, скиллы в системном промпте)\n- Композиция скиллов: скилл вызывает скилл (L3)\n- Автодекомпозиция задачи на code/llm/verify шаги\n- Параметризуемые скиллы (аргументы помимо документа)\n- Версионирование скиллов + diff манифестов\n- Matching: автоподбор существующего скилла под новый запрос\n- Шеринг/маркетплейс скиллов между экспертами\n- Библиотека пресет-чейнов\n\n### D. Данные и версионирование\n- Пересборка SQLite из ФС+Git (recovery)\n- Дамп SQLite-схемы в Git для истории метаданных\n- Человекочитаемый diff бинарных форматов (docx/xlsx)\n- Ветвление/эксперименты над артефактами (git branches)\n- Контент-адресуемое хранилище с дедупликацией\n\n### E. Интеграции\n- Wiki PlatformV-Works API (чтение/запись)\n- Двусторонняя синхронизация с Obsidian\n- Расширение MCP-tools до полного покрытия операций БЗ\n- Экспорт в BPMN / C4 / PlantUML\n- Импорт существующих ArchiMate-моделей\n- Расширенный ArchiMate: слои, вьюхи, свойства\n\n### F. UX / представление\n- Автодополнение документов в @-упоминаниях\n- Diff-review результата в стиле Cursor перед принятием\n- Расширенная визуализация provenance-графа (вне Obsidian)\n- Trace-viewer с деталями каждого шага\n- Мультиформатный экспорт (Confluence/HTML/PDF)\n- Библиотека/шаблоны промптов\n\n### G. Масштаб и эксплуатация\n- Мультипользовательский режим (группа экспертов)\n- Аутентификация и RBAC\n- Оффлайн-инсталлятор под Windows (wheelhouse)\n- Проверка ограничений корп-среды (Docker/pip/сеть/железо)\n- Развёртывание без Docker (fallback на venv)\n- Мониторинг/логирование в проде\n\n---\n\nСпека готова и самодостаточна для передачи исполняющему агенту. Один момент напоследок: перед стартом кодогенерации убедись, что переменная `OPENROUTER_API_KEY` доступна окружению, и определись со **списком стартовых моделей** для селектора (обычно берут одну сильную для `executor`, одну дешёвую/быструю для `planner`, одну для `judge` — можешь оставить дефолты и менять в UI).\n\nГотов выдать **стартовый код Дня 1** (SQLite-схема + `LLMProvider`/`OpenRouterProvider` + Git-обёртка + FastAPI-скелет) одним куском — скажи, и погнали.",
+            "annotations": [],
+            "logprobs": []
+          }
+        ]
+      }
+    }
+  },
+  "artifacts": {},
+  "artifactFiles": {},
+  "artifactVersions": {},
+  "artifactFileContents": {}
+}
