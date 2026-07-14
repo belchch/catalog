@@ -1,6 +1,8 @@
 ---
 description: Реализует план/шаг, доводит проверки до зелёного, коммитит, пушит ветку, открывает PR (цикл 1) или дописывает коммиты (циклы 2+). Из /chain и /pipeline. Никогда не спрашивает.
 mode: subagent
+model: zai-coding-plan/glm-5.2
+variant: max
 steps: 35
 temperature: 0
 permission:
