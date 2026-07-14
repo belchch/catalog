@@ -21,6 +21,9 @@ dist/
 workspace/*
 !workspace/.gitkeep
 
+# Prompt logs (default under workspace/, but cover a custom PROMPT_LOG_DIR too)
+prompt_logs/
+
 # SQLite databases (local dev/test artifacts)
 *.db
 
