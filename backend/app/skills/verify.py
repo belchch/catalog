@@ -37,6 +37,11 @@ def register_check(check_id: str, fn: CheckFn) -> None:
     _REGISTRY[check_id] = fn
 
 
+def registered_checks() -> list[str]:
+    """Return the ids of all registered checks (for skill-build validation)."""
+    return list(_REGISTRY.keys())
+
+
 def run_verify(text: str, checks: list[VerifyCheck]) -> VerifyResult:
     """Run all ``checks`` over ``text``; fail-closed on unknown ids.
 

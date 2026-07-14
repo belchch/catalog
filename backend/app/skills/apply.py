@@ -64,6 +64,7 @@ async def _apply_core(
     session_id: str | None,
     trace: Trace,
     outcome: _ApplyOutcome,
+    run_id: str | None = None,
 ) -> AsyncIterator[AgentEvent]:
     """Shared apply loop: streams events, fills ``trace`` and ``outcome``.
 
@@ -89,10 +90,11 @@ async def _apply_core(
     # 2. Filter tools (fail-closed on unknown names).
     tools = base_tools.filter(skill.allowed_tools)
 
-    # 3. Create the skill_run row.
-    run_id = create_run(
-        db, skill_id=skill_id, session_id=session_id, input_doc_id=input_doc_id
-    )
+    # 3. Create the skill_run row (or reuse a pre-created one).
+    if run_id is None:
+        run_id = create_run(
+            db, skill_id=skill_id, session_id=session_id, input_doc_id=input_doc_id
+        )
 
     user_msg = Message(
         role="user",
@@ -238,6 +240,7 @@ async def apply_skill(
     input_doc_id: str,
     base_tools: ToolRegistry,
     session_id: str | None = None,
+    run_id: str | None = None,
 ) -> AsyncIterator[AgentEvent]:
     """Run a skill over a document, streaming :data:`AgentEvent` items.
 
@@ -245,6 +248,10 @@ async def apply_skill(
     :class:`VerifyEvent` after each verify pass, plus a final
     :class:`FinishEvent`. Raises :class:`ValueError` for a missing input
     document or an unknown ``allowed_tools`` entry (fail-closed).
+
+    When ``run_id`` is supplied the existing ``skill_run`` row is reused
+    (used by the ``WS /runs/{id}/stream`` endpoint which creates the row in
+    ``POST /skills/{id}/apply``); otherwise a new row is created.
     """
     trace = Trace()
     outcome = _ApplyOutcome()
@@ -259,6 +266,7 @@ async def apply_skill(
         session_id=session_id,
         trace=trace,
         outcome=outcome,
+        run_id=run_id,
     ):
         yield event
 
@@ -273,6 +281,7 @@ async def apply_skill_collect(
     input_doc_id: str,
     base_tools: ToolRegistry,
     session_id: str | None = None,
+    run_id: str | None = None,
 ) -> ApplyResult:
     """Drain :func:`apply_skill` and return the final :class:`ApplyResult`."""
     trace = Trace()
@@ -288,6 +297,7 @@ async def apply_skill_collect(
         session_id=session_id,
         trace=trace,
         outcome=outcome,
+        run_id=run_id,
     ):
         pass
     return ApplyResult(
