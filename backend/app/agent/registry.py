@@ -29,3 +29,19 @@ class ToolRegistry:
 
     def names(self) -> list[str]:
         return list(self._tools.keys())
+
+    def filter(self, allowed_names: list[str]) -> ToolRegistry:
+        """Return a new registry containing only ``allowed_names``.
+
+        Fail-closed: an unknown name raises :class:`ValueError` so a skill
+        referencing a non-existent tool is rejected before any LLM call rather
+        than silently dropping the constraint.
+        """
+        subset = ToolRegistry()
+        for name in allowed_names:
+            entry = self._tools.get(name)
+            if entry is None:
+                raise ValueError(f"unknown tool: {name!r}")
+            spec, func = entry
+            subset.register(spec, func)
+        return subset

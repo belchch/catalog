@@ -21,6 +21,9 @@ dist/
 workspace/*
 !workspace/.gitkeep
 
+# SQLite databases (local dev/test artifacts)
+*.db
+
 # OS
 .DS_Store
 

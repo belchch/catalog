@@ -1,0 +1,293 @@
+"""End-to-end API tests for step 06 (documents, planner WS, skills, runs).
+
+HTTP endpoints are driven via ``TestClient``; WebSocket endpoints via
+``TestClient.websocket_connect`` (see ``conftest.py`` for the approach). The
+provider is a :class:`FakeProvider` whose ``script`` is populated per test.
+"""
+
+from __future__ import annotations
+
+from app.llm.base import CompletionResult, ToolCall
+from app.skills.config import SkillConfig, VerifyCheck
+from app.skills.repo_skill import create_skill, get_skill, update_status
+from app.storage.repo_message import add_message, list_messages
+
+
+def _completion(
+    content: str | None = None, *, tool_calls: list[ToolCall] | None = None
+) -> CompletionResult:
+    """Build a CompletionResult with a 'stop' finish reason."""
+    return CompletionResult(
+        content=content,
+        tool_calls=list(tool_calls or []),
+        finish_reason="stop",
+    )
+
+
+def _build_skill_call(
+    *,
+    name: str = "Summarizer",
+    allowed_tools: list[str] | None = None,
+    verify_checks: list[dict] | None = None,
+) -> ToolCall:
+    """A build_skill tool call with a (by default valid) SkillConfig payload."""
+    return ToolCall(
+        id="build-1",
+        name="build_skill",
+        arguments={
+            "name": name,
+            "description": "Skill built from a planning session.",
+            "system_prompt": "You process the document as instructed.",
+            "allowed_tools": allowed_tools if allowed_tools is not None else ["read_document"],
+            "model": "test/model",
+            "verify_checks": verify_checks if verify_checks is not None else [{"check": "non_empty"}],
+        },
+    )
+
+
+def _seed_committed_skill(
+    db,
+    *,
+    name: str = "Summarizer",
+    allowed_tools: list[str] | None = None,
+    verify_checks: list[VerifyCheck] | None = None,
+    max_retries: int = 2,
+) -> str:
+    """Insert a committed skill directly and return its id (for apply tests)."""
+    config = SkillConfig(
+        name=name,
+        description="test skill",
+        system_prompt="You summarize the document.",
+        allowed_tools=allowed_tools if allowed_tools is not None else ["read_document"],
+        model="test/model",
+        max_iterations=4,
+        max_retries=max_retries,
+        verify_checks=verify_checks if verify_checks is not None else [],
+    )
+    return create_skill(
+        db, name=config.name, description=config.description, config=config, status="committed"
+    )
+
+
+def _upload(client, filename: str, content: bytes) -> str:
+    resp = client.post(
+        "/documents", files={"file": (filename, content, "application/octet-stream")}
+    )
+    assert resp.status_code == 200, resp.text
+    return resp.json()["id"]
+
+
+# --------------------------------------------------------------------------- #
+# Health + documents
+# --------------------------------------------------------------------------- #
+
+
+def test_health(client) -> None:
+    resp = client.get("/health")
+    assert resp.status_code == 200
+    assert resp.json() == {"status": "ok"}
+
+
+def test_upload_and_list_documents(client) -> None:
+    resp = client.post(
+        "/documents", files={"file": ("note.md", b"# Title\n\nbody", "text/markdown")}
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["kind"] == "md"
+    assert data["title"] == "note"
+    assert data["id"]
+    doc_id = data["id"]
+
+    listing = client.get("/documents")
+    assert listing.status_code == 200
+    ids = [d["id"] for d in listing.json()]
+    assert doc_id in ids
+
+
+def test_upload_unsupported_format(client) -> None:
+    resp = client.post(
+        "/documents", files={"file": ("bad.pdf", b"%PDF-1.4", "application/pdf")}
+    )
+    assert resp.status_code == 400
+    assert "unsupported" in resp.json()["detail"].lower()
+
+
+# --------------------------------------------------------------------------- #
+# Planner WebSocket
+# --------------------------------------------------------------------------- #
+
+
+def test_ws_session_planner(client, provider, db) -> None:
+    session_id = client.post("/sessions").json()["id"]
+    provider.script = [_completion("Вот план: разобрать документ по разделам.")]
+
+    with client.websocket_connect(f"/sessions/{session_id}") as ws:
+        ws.send_text("сделай план")
+        frames = []
+        while True:
+            frame = ws.receive_json()
+            frames.append(frame)
+            if frame.get("type") == "finish":
+                break
+
+    types = [f["type"] for f in frames]
+    assert "step" in types
+    assert "token" in types
+    assert frames[-1]["type"] == "finish"
+    assert frames[-1]["status"] == "ok"
+
+    token = next(f for f in frames if f["type"] == "token")
+    assert "план" in token["delta"]
+
+    # Conversation persisted: the user turn and the assistant reply.
+    msgs = list_messages(db, session_id)
+    roles = [m["role"] for m in msgs]
+    assert roles.count("user") >= 1
+    assert roles.count("assistant") >= 1
+
+
+# --------------------------------------------------------------------------- #
+# Skill build / commit / list
+# --------------------------------------------------------------------------- #
+
+
+def test_build_skill_from_session(client, provider, db) -> None:
+    session_id = client.post("/sessions").json()["id"]
+    add_message(db, session_id=session_id, role="user", content="Хочу скилл-саммаризатор.")
+
+    provider.script = [_completion(tool_calls=[_build_skill_call(name="Summarizer")])]
+
+    resp = client.post(f"/sessions/{session_id}/skills")
+    assert resp.status_code == 200, resp.text
+    skill_id = resp.json()["skill_id"]
+
+    skill = get_skill(db, skill_id)
+    assert skill is not None
+    assert skill.status == "draft"
+    assert skill.config.name == "Summarizer"
+    assert skill.config.allowed_tools == ["read_document"]
+    assert [vc.check for vc in skill.config.verify_checks] == ["non_empty"]
+
+
+def test_build_skill_invalid_allowed_tools_returns_422(client, provider, db) -> None:
+    session_id = client.post("/sessions").json()["id"]
+    add_message(db, session_id=session_id, role="user", content="make a skill")
+
+    bad = _completion(
+        tool_calls=[_build_skill_call(allowed_tools=["nonexistent_tool"], verify_checks=[])]
+    )
+    provider.script = [bad, bad, bad]  # 1 initial + 2 retries, all invalid
+
+    resp = client.post(f"/sessions/{session_id}/skills")
+    assert resp.status_code == 422
+
+
+def test_commit_skill(client, db) -> None:
+    skill_id = _seed_committed_skill(db, name="Committed")
+    # Seed as draft to exercise the draft -> committed transition.
+    update_status(db, skill_id, "draft")
+
+    resp = client.post(f"/skills/{skill_id}/commit")
+    assert resp.status_code == 200
+    assert resp.json() == {"id": skill_id, "status": "committed"}
+
+    skill = get_skill(db, skill_id)
+    assert skill is not None
+    assert skill.status == "committed"
+
+
+def test_list_skills(client, db) -> None:
+    first = _seed_committed_skill(db, name="First")
+    _seed_committed_skill(db, name="Second")
+
+    resp = client.get("/skills")
+    assert resp.status_code == 200
+    rows = resp.json()
+    ids = [r["id"] for r in rows]
+    assert first in ids
+    assert len(ids) >= 2
+
+    # Optional status filter.
+    draft_resp = client.get("/skills?status=draft")
+    assert draft_resp.status_code == 200
+    assert all(r["status"] == "draft" for r in draft_resp.json())
+
+
+# --------------------------------------------------------------------------- #
+# Apply (run create / stream / get)
+# --------------------------------------------------------------------------- #
+
+
+def _drain_run_ws(client, run_id: str) -> list[dict]:
+    with client.websocket_connect(f"/runs/{run_id}/stream") as ws:
+        frames: list[dict] = []
+        while True:
+            frame = ws.receive_json()
+            frames.append(frame)
+            if frame.get("type") == "finish":
+                break
+    return frames
+
+
+def test_apply_skill_run(client, provider, db) -> None:
+    doc_id = _upload(client, "input.md", b"source text")
+    skill_id = _seed_committed_skill(
+        db, verify_checks=[VerifyCheck("non_empty")], max_retries=2
+    )
+    provider.script = [_completion("# Result\n\nGreat document.")]
+
+    run_id = client.post(
+        f"/skills/{skill_id}/apply", json={"doc_id": doc_id}
+    ).json()["run_id"]
+
+    frames = _drain_run_ws(client, run_id)
+    finish = frames[-1]
+    assert finish["type"] == "finish"
+    assert finish["status"] == "ok"
+    assert finish["output_doc_id"] is not None
+
+    # A verify frame was emitted and passed.
+    verifies = [f for f in frames if f["type"] == "verify"]
+    assert verifies and verifies[-1]["passed"] is True
+
+    # GET /runs/{id} returns the persisted trace.
+    run = client.get(f"/runs/{run_id}").json()
+    assert run["status"] == "ok"
+    assert run["output_doc_id"] == finish["output_doc_id"]
+    assert run["trace"] is not None
+
+
+def test_apply_skill_failed(client, provider, db) -> None:
+    doc_id = _upload(client, "input.md", b"source text")
+    skill_id = _seed_committed_skill(
+        db,
+        verify_checks=[VerifyCheck("has_section", params={"heading": "Missing"})],
+        max_retries=2,
+    )
+    # 1 initial + 2 retries, none satisfy the verify check.
+    provider.script = [_completion("plain text without the heading")] * 3
+
+    run_id = client.post(
+        f"/skills/{skill_id}/apply", json={"doc_id": doc_id}
+    ).json()["run_id"]
+
+    frames = _drain_run_ws(client, run_id)
+    finish = frames[-1]
+    assert finish["type"] == "finish"
+    assert finish["status"] == "failed"
+    assert finish["output_doc_id"] is None
+
+    # The run row records the failure with a trace.
+    run = client.get(f"/runs/{run_id}").json()
+    assert run["status"] == "failed"
+    assert run["trace"] is not None
+
+
+def test_apply_requires_committed_skill(client, db) -> None:
+    doc_id = _upload(client, "input.md", b"source text")
+    skill_id = _seed_committed_skill(db, name="Draft")
+    update_status(db, skill_id, "draft")
+
+    resp = client.post(f"/skills/{skill_id}/apply", json={"doc_id": doc_id})
+    assert resp.status_code == 409

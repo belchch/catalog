@@ -1,7 +1,12 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    # Type-only import: keeps the agent layer free of a runtime dependency on
+    # the skills layer. ``VerifyResult`` is defined in ``app.skills.verify``.
+    from app.skills.verify import VerifyResult
 
 
 @dataclass
@@ -44,4 +49,16 @@ class FinishEvent:
     usage: dict
 
 
-AgentEvent = TokenEvent | ToolCallEvent | ToolResultEvent | StepEvent | FinishEvent
+@dataclass
+class VerifyEvent:
+    """Emitted after a verify pass over the agent's latest output.
+
+    ``iteration`` is 1-based within the apply retry loop (not the inner
+    agent loop). ``result`` is the :class:`~app.skills.verify.VerifyResult`.
+    """
+
+    iteration: int
+    result: VerifyResult
+
+
+AgentEvent = TokenEvent | ToolCallEvent | ToolResultEvent | StepEvent | FinishEvent | VerifyEvent

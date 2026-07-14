@@ -1,6 +1,8 @@
 ---
 description: Ревьюит PR/шаг против плана, постит GitHub-ревью (request-changes/approve) и саммари. Код не правит. Никогда не спрашивает.
 mode: subagent
+model: zai-coding-plan/glm-5.2
+variant: max
 steps: 22
 temperature: 0
 permission:

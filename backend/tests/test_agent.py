@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from typing import Any
 
 from app.agent.events import (
@@ -389,3 +390,30 @@ def test_registry_specs_and_lookup() -> None:
     assert spec.name == "read_doc"
     assert callable(func)
     assert reg.get("missing") is None
+
+
+def test_serialize_result_truncates_long_payloads() -> None:
+    """_serialize_result bounds the LLM history: oversized payloads are
+    truncated with a marker so a huge read_document cannot overflow the model
+    context, while short payloads (str, dict, list) pass through unchanged."""
+    from app.agent.runner import MAX_TOOL_RESULT_CHARS, _serialize_result
+
+    short_str = "hello world"
+    assert _serialize_result(short_str) == short_str
+
+    small_dict = {"a": 1, "b": [2, 3]}
+    assert _serialize_result(small_dict) == json.dumps(
+        small_dict, ensure_ascii=False, default=str
+    )
+
+    huge = "x" * (MAX_TOOL_RESULT_CHARS * 3)
+    out = _serialize_result(huge)
+    assert out.startswith("x" * MAX_TOOL_RESULT_CHARS)
+    assert "truncated" in out
+    assert str(len(huge)) in out
+
+    huge_list = [{"k": "y" * (MAX_TOOL_RESULT_CHARS + 500)}]
+    full = json.dumps(huge_list, ensure_ascii=False, default=str)
+    out_list = _serialize_result(huge_list)
+    assert len(out_list) < len(full)
+    assert "truncated" in out_list

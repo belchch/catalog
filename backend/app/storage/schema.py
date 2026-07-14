@@ -1,0 +1,38 @@
+"""Single source of truth for the SQLite schema.
+
+All ``CREATE TABLE`` statements are idempotent (``IF NOT EXISTS``). The slice
+is solo with no data, so there is no migration framework: this module is the
+only place the schema is defined. Repositories for ``session``/``message``/
+``skill``/``skill_run`` are added in later steps; the tables are created here
+so the whole schema lives in one place.
+"""
+
+SCHEMA_SQL = """
+CREATE TABLE IF NOT EXISTS document(
+  id TEXT PRIMARY KEY,            -- uuid4 hex
+  title TEXT NOT NULL,
+  path TEXT NOT NULL,             -- relative path inside workspace/
+  kind TEXT NOT NULL,             -- "md" | "docx" | "result_md"
+  created_at TEXT NOT NULL        -- ISO-8601 UTC
+);
+CREATE TABLE IF NOT EXISTS session(
+  id TEXT PRIMARY KEY, status TEXT NOT NULL, created_at TEXT NOT NULL
+);                                -- status: planning|done
+CREATE TABLE IF NOT EXISTS message(
+  id INTEGER PRIMARY KEY AUTOINCREMENT, session_id TEXT NOT NULL,
+  role TEXT NOT NULL, content TEXT, tool_name TEXT, tool_call_id TEXT,
+  created_at TEXT NOT NULL,
+  FOREIGN KEY(session_id) REFERENCES session(id)
+);
+CREATE TABLE IF NOT EXISTS skill(
+  id TEXT PRIMARY KEY, name TEXT NOT NULL, description TEXT,
+  config_json TEXT NOT NULL, status TEXT NOT NULL,            -- draft|committed
+  created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS skill_run(
+  id TEXT PRIMARY KEY, skill_id TEXT NOT NULL, session_id TEXT,
+  input_doc_id TEXT, output_doc_id TEXT,
+  status TEXT NOT NULL,                                         -- running|ok|failed
+  trace_json TEXT, started_at TEXT NOT NULL, ended_at TEXT
+);
+"""

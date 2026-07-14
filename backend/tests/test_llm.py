@@ -13,10 +13,21 @@ BASE = "https://openrouter.ai/api/v1"
 API_KEY = "test-key-123"
 
 
-def _make_provider(handler: httpx.RequestHandler) -> OpenRouterProvider:
+def _make_provider(
+    handler: httpx.RequestHandler,
+    *,
+    max_retries: int = 3,
+    backoff_base: float = 0.5,
+) -> OpenRouterProvider:
     transport = httpx.MockTransport(handler)
     client = httpx.AsyncClient(transport=transport)
-    return OpenRouterProvider(client=client, api_key=API_KEY, base_url=BASE)
+    return OpenRouterProvider(
+        client=client,
+        api_key=API_KEY,
+        base_url=BASE,
+        max_retries=max_retries,
+        backoff_base=backoff_base,
+    )
 
 
 async def _handler_list_models(request: httpx.Request) -> httpx.Response:
@@ -179,12 +190,120 @@ async def _handler_rate_limit(request: httpx.Request) -> httpx.Response:
 
 
 def test_rate_limit_error() -> None:
+    """A persistent 429 exhausts retries then raises a clear RuntimeError."""
+
     async def _run() -> None:
-        provider = _make_provider(_handler_rate_limit)
-        with pytest.raises(RuntimeError, match="Rate limit exceeded"):
+        provider = _make_provider(_handler_rate_limit, max_retries=1, backoff_base=0)
+        with pytest.raises(RuntimeError, match="429"):
             await provider.complete(
                 model="openai/gpt-4",
                 messages=[Message(role="user", content="Hi")],
             )
+
+    asyncio.run(_run())
+
+
+def _ok_response() -> httpx.Response:
+    return httpx.Response(
+        200,
+        json={
+            "choices": [
+                {
+                    "message": {"role": "assistant", "content": "ok"},
+                    "finish_reason": "stop",
+                }
+            ],
+            "usage": {"total_tokens": 1},
+        },
+    )
+
+
+def test_complete_retries_on_429_then_succeeds() -> None:
+    """A single transient 429 is retried and the call succeeds."""
+
+    async def _run() -> None:
+        calls = {"n": 0}
+
+        async def handler(request: httpx.Request) -> httpx.Response:
+            calls["n"] += 1
+            if calls["n"] == 1:
+                return httpx.Response(429, json={"error": "rate"})
+            return _ok_response()
+
+        provider = _make_provider(handler, max_retries=2, backoff_base=0)
+        result = await provider.complete(
+            model="openai/gpt-4",
+            messages=[Message(role="user", content="Hi")],
+        )
+        assert result.content == "ok"
+        assert calls["n"] == 2
+
+    asyncio.run(_run())
+
+
+def test_complete_retries_on_5xx_then_succeeds() -> None:
+    """A transient 503 is retried and the call succeeds."""
+
+    async def _run() -> None:
+        calls = {"n": 0}
+
+        async def handler(request: httpx.Request) -> httpx.Response:
+            calls["n"] += 1
+            if calls["n"] < 3:
+                return httpx.Response(503, json={"error": "down"})
+            return _ok_response()
+
+        provider = _make_provider(handler, max_retries=3, backoff_base=0)
+        result = await provider.complete(
+            model="openai/gpt-4",
+            messages=[Message(role="user", content="Hi")],
+        )
+        assert result.content == "ok"
+        assert calls["n"] == 3
+
+    asyncio.run(_run())
+
+
+def test_complete_retries_on_timeout() -> None:
+    """A transient timeout is retried and the call succeeds."""
+
+    async def _run() -> None:
+        calls = {"n": 0}
+
+        async def handler(request: httpx.Request) -> httpx.Response:
+            calls["n"] += 1
+            if calls["n"] < 3:
+                raise httpx.ReadTimeout("slow", request=request)
+            return _ok_response()
+
+        provider = _make_provider(handler, max_retries=3, backoff_base=0)
+        result = await provider.complete(
+            model="openai/gpt-4",
+            messages=[Message(role="user", content="Hi")],
+        )
+        assert result.content == "ok"
+        assert calls["n"] == 3
+
+    asyncio.run(_run())
+
+
+def test_auth_error_not_retried() -> None:
+    """A 401 is permanent: it surfaces immediately without retrying."""
+
+    async def _run() -> None:
+        calls = {"n": 0}
+
+        async def handler(request: httpx.Request) -> httpx.Response:
+            calls["n"] += 1
+            return httpx.Response(401, json={"error": {"message": "bad key"}})
+
+        provider = _make_provider(handler, max_retries=3, backoff_base=0)
+        with pytest.raises(ValueError, match="Invalid OpenRouter API key"):
+            await provider.complete(
+                model="openai/gpt-4",
+                messages=[Message(role="user", content="Hi")],
+            )
+        # Exactly one attempt — 401 must not be retried.
+        assert calls["n"] == 1
 
     asyncio.run(_run())

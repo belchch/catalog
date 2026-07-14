@@ -26,6 +26,12 @@ class _ToolExecResult:
     payload: Any
 
 
+# Cap on the serialized size of a tool result fed back into the LLM history.
+# Long ``read_document`` outputs (large docx) are truncated to bound context
+# growth; the full payload is still carried in the trace and the ToolResultEvent.
+MAX_TOOL_RESULT_CHARS = 16000
+
+
 async def _execute_tool(tools: ToolRegistry, tc: ToolCall) -> _ToolExecResult:
     """Validate + invoke a tool. Errors are reported back, never raised."""
     entry = tools.get(tc.name)
@@ -44,10 +50,23 @@ async def _execute_tool(tools: ToolRegistry, tc: ToolCall) -> _ToolExecResult:
 
 
 def _serialize_result(result: Any) -> str:
-    """Serialize a tool result to a string for the message history."""
+    """Serialize a tool result to a string for the message history.
+
+    Long results are truncated to :data:`MAX_TOOL_RESULT_CHARS` so a huge
+    ``read_document`` payload cannot overflow the model context. The full
+    payload is still recorded in the trace and emitted via ``ToolResultEvent``;
+    only the copy fed back to the LLM is bounded.
+    """
     if isinstance(result, (dict, list)):
-        return json.dumps(result, ensure_ascii=False, default=str)
-    return str(result)
+        s = json.dumps(result, ensure_ascii=False, default=str)
+    else:
+        s = str(result)
+    if len(s) > MAX_TOOL_RESULT_CHARS:
+        return (
+            s[:MAX_TOOL_RESULT_CHARS]
+            + f"\n…[truncated: {len(s)} chars total, kept first {MAX_TOOL_RESULT_CHARS}]"
+        )
+    return s
 
 
 async def _run_agent_core(
