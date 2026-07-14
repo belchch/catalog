@@ -16,6 +16,7 @@ from app.api.deps import get_db, get_provider, get_settings, get_tools
 from app.api.schemas import CommitOut, SkillBuilt, SkillOut
 from app.config import Settings
 from app.llm.base import LLMProvider, Message, ToolSpec
+from app.llm.log_context import prompt_log_context
 from app.agent.registry import ToolRegistry
 from app.skills.config import SkillConfig, VerifyCheck
 from app.skills.repo_skill import create_skill, get_skill, list_skills, update_status
@@ -131,59 +132,62 @@ async def build_skill_from_session(
     available_tools = base_tools.names()
     available_checks = registered_checks()
 
-    for _attempt in range(MAX_BUILD_ATTEMPTS):
-        resp = await provider.complete(
-            settings.default_model,
-            history,
-            [BUILD_SKILL_TOOL],
-            0.0,
-        )
-        history.append(
-            Message(role="assistant", content=resp.content, tool_calls=resp.tool_calls)
-        )
-
-        tc = next((t for t in resp.tool_calls if t.name == "build_skill"), None)
-        if tc is None:
-            history.append(
-                Message(
-                    role="user",
-                    content="Ты должен вызвать инструмент build_skill. Повтори.",
-                )
+    # Tag every LLM call in the build loop with the session + purpose so the
+    # prompt log can correlate build attempts back to a session.
+    with prompt_log_context(session_id=session_id, run_id=None, purpose="build_skill"):
+        for _attempt in range(MAX_BUILD_ATTEMPTS):
+            resp = await provider.complete(
+                settings.default_model,
+                history,
+                [BUILD_SKILL_TOOL],
+                0.0,
             )
-            continue
-
-        try:
-            config = _args_to_config(tc.arguments, settings.default_model)
-        except (KeyError, TypeError, ValueError) as exc:
             history.append(
-                Message(
-                    role="user",
-                    content=f"Не удалось разобрать конфиг: {exc}. Вызови build_skill заново.",
-                )
+                Message(role="assistant", content=resp.content, tool_calls=resp.tool_calls)
             )
-            continue
 
-        errors = _validate_config(config, available_tools, available_checks)
-        if errors:
-            history.append(
-                Message(
-                    role="user",
-                    content="Конфиг невалиден: "
-                    + "; ".join(errors)
-                    + ". Исправь и вызови build_skill заново.",
+            tc = next((t for t in resp.tool_calls if t.name == "build_skill"), None)
+            if tc is None:
+                history.append(
+                    Message(
+                        role="user",
+                        content="Ты должен вызвать инструмент build_skill. Повтори.",
+                    )
                 )
-            )
-            continue
+                continue
 
-        skill_id = create_skill(
-            db,
-            name=config.name,
-            description=config.description,
-            config=config,
-            status="draft",
-        )
-        update_session_status(db, session_id, "done")
-        return skill_id
+            try:
+                config = _args_to_config(tc.arguments, settings.default_model)
+            except (KeyError, TypeError, ValueError) as exc:
+                history.append(
+                    Message(
+                        role="user",
+                        content=f"Не удалось разобрать конфиг: {exc}. Вызови build_skill заново.",
+                    )
+                )
+                continue
+
+            errors = _validate_config(config, available_tools, available_checks)
+            if errors:
+                history.append(
+                    Message(
+                        role="user",
+                        content="Конфиг невалиден: "
+                        + "; ".join(errors)
+                        + ". Исправь и вызови build_skill заново.",
+                    )
+                )
+                continue
+
+            skill_id = create_skill(
+                db,
+                name=config.name,
+                description=config.description,
+                config=config,
+                status="draft",
+            )
+            update_session_status(db, session_id, "done")
+            return skill_id
 
     raise HTTPException(
         status_code=422,

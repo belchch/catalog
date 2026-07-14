@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import time
 from collections.abc import AsyncIterator
 from typing import Any
 
@@ -14,7 +15,10 @@ from app.llm.base import (
     ModelInfo,
     ToolCall,
     ToolSpec,
+    message_to_dict,
+    tool_specs_to_dicts,
 )
+from app.llm.prompt_log import write_prompt_log
 
 logger = logging.getLogger("app.llm")
 
@@ -34,43 +38,6 @@ async def _log_request(request: httpx.Request) -> None:
 
 def build_debug_hooks() -> dict:
     return {"request": [_log_request]}
-
-
-def _message_to_dict(msg: Message) -> dict[str, Any]:
-    d: dict[str, Any] = {"role": msg.role}
-    if msg.content is not None:
-        d["content"] = msg.content
-    if msg.tool_calls is not None:
-        d["tool_calls"] = [
-            {
-                "id": tc.id,
-                "type": "function",
-                "function": {
-                    "name": tc.name,
-                    "arguments": json.dumps(tc.arguments, ensure_ascii=False),
-                },
-            }
-            for tc in msg.tool_calls
-        ]
-    if msg.tool_call_id is not None:
-        d["tool_call_id"] = msg.tool_call_id
-    if msg.name is not None:
-        d["name"] = msg.name
-    return d
-
-
-def _tools_to_dicts(tools: list[ToolSpec]) -> list[dict[str, Any]]:
-    return [
-        {
-            "type": "function",
-            "function": {
-                "name": t.name,
-                "description": t.description,
-                "parameters": t.parameters,
-            },
-        }
-        for t in tools
-    ]
 
 
 def _parse_tool_calls(raw: list[dict[str, Any]]) -> list[ToolCall]:
@@ -212,11 +179,11 @@ class OpenRouterProvider:
     ) -> CompletionResult:
         body: dict[str, Any] = {
             "model": model,
-            "messages": [_message_to_dict(m) for m in messages],
+            "messages": [message_to_dict(m) for m in messages],
             "temperature": temperature,
         }
         if tools is not None:
-            body["tools"] = _tools_to_dicts(tools)
+            body["tools"] = tool_specs_to_dicts(tools)
             body["tool_choice"] = tool_choice
 
         logger.info(
@@ -227,17 +194,48 @@ class OpenRouterProvider:
             temperature,
         )
 
-        resp = await self._post_with_retry(
-            f"{self._base_url}/chat/completions", body
-        )
+        t0 = time.monotonic()
+        try:
+            resp = await self._post_with_retry(
+                f"{self._base_url}/chat/completions", body
+            )
+        except Exception as exc:
+            latency_ms = round((time.monotonic() - t0) * 1000)
+            await write_prompt_log(
+                provider="openrouter",
+                model=model,
+                messages=messages,
+                tools=tools,
+                temperature=temperature,
+                tool_choice=tool_choice,
+                stream=False,
+                response=None,
+                error=str(exc),
+                latency_ms=latency_ms,
+            )
+            raise
 
         data = resp.json()
         choices = data.get("choices") or []
         if not choices:
-            raise RuntimeError(
+            latency_ms = round((time.monotonic() - t0) * 1000)
+            err = RuntimeError(
                 "OpenRouter returned no choices (finish/error info): "
                 f"{json.dumps(data, ensure_ascii=False)[:1000]}"
             )
+            await write_prompt_log(
+                provider="openrouter",
+                model=model,
+                messages=messages,
+                tools=tools,
+                temperature=temperature,
+                tool_choice=tool_choice,
+                stream=False,
+                response=None,
+                error=str(err),
+                latency_ms=latency_ms,
+            )
+            raise err
         choice = choices[0]
         message = choice["message"]
         content = message.get("content")
@@ -257,6 +255,34 @@ class OpenRouterProvider:
             usage,
         )
 
+        await write_prompt_log(
+            provider="openrouter",
+            model=model,
+            messages=messages,
+            tools=tools,
+            temperature=temperature,
+            tool_choice=tool_choice,
+            stream=False,
+            response={
+                "content": content,
+                "tool_calls": [
+                    {
+                        "id": tc.id,
+                        "type": "function",
+                        "function": {
+                            "name": tc.name,
+                            "arguments": tc.arguments,
+                        },
+                    }
+                    for tc in tool_calls
+                ],
+                "finish_reason": finish_reason,
+                "usage": usage,
+            },
+            error=None,
+            latency_ms=round((time.monotonic() - t0) * 1000),
+        )
+
         return CompletionResult(
             content=content,
             tool_calls=tool_calls,
@@ -273,12 +299,12 @@ class OpenRouterProvider:
     ) -> AsyncIterator[str]:
         body: dict[str, Any] = {
             "model": model,
-            "messages": [_message_to_dict(m) for m in messages],
+            "messages": [message_to_dict(m) for m in messages],
             "temperature": temperature,
             "stream": True,
         }
         if tools is not None:
-            body["tools"] = _tools_to_dicts(tools)
+            body["tools"] = tool_specs_to_dicts(tools)
 
         logger.info(
             "stream_complete request: model=%s messages=%d tools=%s temperature=%.1f",
@@ -288,43 +314,78 @@ class OpenRouterProvider:
             temperature,
         )
 
-        async with self._client.stream(
-            "POST",
-            f"{self._base_url}/chat/completions",
-            headers=self._auth_headers(),
-            json=body,
-        ) as resp:
-            if resp.status_code == 401:
-                raise ValueError(
-                    "Invalid OpenRouter API key — check OPENROUTER_API_KEY in .env"
-                )
-            if resp.status_code == 429:
-                raise RuntimeError("Rate limit exceeded")
-            if resp.status_code >= 400:
-                err_body = (await resp.aread()).decode(errors="replace")
-                logger.warning(
-                    "stream_complete HTTP %d body: %s",
-                    resp.status_code,
-                    err_body[:1000],
-                )
-                resp.raise_for_status()
+        t0 = time.monotonic()
+        assembled_text = ""
+        try:
+            async with self._client.stream(
+                "POST",
+                f"{self._base_url}/chat/completions",
+                headers=self._auth_headers(),
+                json=body,
+            ) as resp:
+                if resp.status_code == 401:
+                    raise ValueError(
+                        "Invalid OpenRouter API key — check OPENROUTER_API_KEY in .env"
+                    )
+                if resp.status_code == 429:
+                    raise RuntimeError("Rate limit exceeded")
+                if resp.status_code >= 400:
+                    err_body = (await resp.aread()).decode(errors="replace")
+                    logger.warning(
+                        "stream_complete HTTP %d body: %s",
+                        resp.status_code,
+                        err_body[:1000],
+                    )
+                    resp.raise_for_status()
 
-            async for line in resp.aiter_lines():
-                line = line.strip()
-                if not line:
-                    continue
-                if not line.startswith("data: "):
-                    continue
-                payload = line[6:]
-                if payload == "[DONE]":
-                    break
-                try:
-                    chunk = json.loads(payload)
-                except json.JSONDecodeError:
-                    logger.debug("stream: skipping unparseable line: %s", line)
-                    continue
-                delta = chunk.get("choices", [{}])[0].get("delta", {})
-                content = delta.get("content")
-                if content:
-                    logger.debug("stream chunk: %s", repr(content[:100]))
-                    yield content
+                async for line in resp.aiter_lines():
+                    line = line.strip()
+                    if not line:
+                        continue
+                    if not line.startswith("data: "):
+                        continue
+                    payload = line[6:]
+                    if payload == "[DONE]":
+                        break
+                    try:
+                        chunk = json.loads(payload)
+                    except json.JSONDecodeError:
+                        logger.debug("stream: skipping unparseable line: %s", line)
+                        continue
+                    delta = chunk.get("choices", [{}])[0].get("delta", {})
+                    content = delta.get("content")
+                    if content:
+                        logger.debug("stream chunk: %s", repr(content[:100]))
+                        assembled_text += content
+                        yield content
+        except Exception as exc:
+            await write_prompt_log(
+                provider="openrouter",
+                model=model,
+                messages=messages,
+                tools=tools,
+                temperature=temperature,
+                tool_choice="auto",
+                stream=True,
+                response={"assembled_text": assembled_text, "usage": {}, "finish_reason": "error"},
+                error=str(exc),
+                latency_ms=round((time.monotonic() - t0) * 1000),
+            )
+            raise
+
+        await write_prompt_log(
+            provider="openrouter",
+            model=model,
+            messages=messages,
+            tools=tools,
+            temperature=temperature,
+            tool_choice="auto",
+            stream=True,
+            response={
+                "assembled_text": assembled_text,
+                "usage": {},
+                "finish_reason": "stop",
+            },
+            error=None,
+            latency_ms=round((time.monotonic() - t0) * 1000),
+        )

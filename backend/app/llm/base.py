@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+import json
 from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
-from typing import Protocol
+from typing import Any, Protocol
 
 
 @dataclass
@@ -62,3 +63,52 @@ class LLMProvider(Protocol):
         tools: list[ToolSpec] | None = None,
         temperature: float = 0.0,
     ) -> AsyncIterator[str]: ...
+
+
+# --- Serialization helpers --------------------------------------------------
+# Shared by the OpenRouter provider (request body) and the prompt logger
+# (capturing the raw request). Kept here so both consume one definition and
+# the logged payload matches what was actually sent over the wire.
+
+
+def message_to_dict(msg: Message) -> dict[str, Any]:
+    """Serialize a :class:`Message` to the OpenRouter chat-completions shape.
+
+    Only set fields are included so the payload matches what the provider sends.
+    ``tool_calls`` arguments are JSON-encoded to a string (API contract).
+    """
+    d: dict[str, Any] = {"role": msg.role}
+    if msg.content is not None:
+        d["content"] = msg.content
+    if msg.tool_calls is not None:
+        d["tool_calls"] = [
+            {
+                "id": tc.id,
+                "type": "function",
+                "function": {
+                    "name": tc.name,
+                    "arguments": json.dumps(tc.arguments, ensure_ascii=False),
+                },
+            }
+            for tc in msg.tool_calls
+        ]
+    if msg.tool_call_id is not None:
+        d["tool_call_id"] = msg.tool_call_id
+    if msg.name is not None:
+        d["name"] = msg.name
+    return d
+
+
+def tool_specs_to_dicts(tools: list[ToolSpec]) -> list[dict[str, Any]]:
+    """Serialize :class:`ToolSpec` items to the OpenRouter ``tools`` shape."""
+    return [
+        {
+            "type": "function",
+            "function": {
+                "name": t.name,
+                "description": t.description,
+                "parameters": t.parameters,
+            },
+        }
+        for t in tools
+    ]

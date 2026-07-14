@@ -18,6 +18,7 @@ from app.agent.events import (
 from app.agent.registry import ToolRegistry
 from app.agent.trace import Trace, TraceEntry
 from app.llm.base import LLMProvider, Message, ToolCall
+from app.llm.log_context import current_iteration
 
 
 @dataclass
@@ -92,6 +93,10 @@ async def _run_agent_core(
     for i in range(1, max_iterations + 1):
         yield StepEvent(i)
         trace.entries.append(TraceEntry("llm", i, {}))
+        # Bind the iteration to the prompt-log context for this turn. The
+        # session_id/run_id/purpose are set by the API layer; only iteration
+        # changes per turn, so it is set directly rather than via the manager.
+        current_iteration.set(i)
 
         if use_stream:
             text = ""

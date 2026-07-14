@@ -22,6 +22,7 @@ from app.api.deps import agent_event_to_frame, get_db
 from app.api.schemas import SessionCreated
 from app.config import Settings
 from app.llm.base import LLMProvider, Message
+from app.llm.log_context import prompt_log_context
 from app.storage.db import Database
 from app.storage.repo_message import add_message, list_messages
 from app.storage.repo_session import create_session, get_session
@@ -91,33 +92,36 @@ async def session_ws(
             final_text: str | None = None
             final_capped = False
 
-            async for event in run_agent(
-                provider=provider,
-                model=settings.default_model,
-                system_prompt=PLANNER_SYSTEM_PROMPT,
-                messages=messages,
-                tools=tools,
-                use_stream=False,
-            ):
-                frame = agent_event_to_frame(event)
-                if frame is not None:
-                    await websocket.send_json(frame)
-                if isinstance(event, ToolResultEvent):
-                    add_message(
-                        db,
-                        session_id=session_id,
-                        role="tool",
-                        content=json.dumps(
-                            {"ok": event.ok, "result": event.result},
-                            ensure_ascii=False,
-                            default=str,
-                        ),
-                        tool_name=event.name,
-                        tool_call_id=event.id,
-                    )
-                if isinstance(event, FinishEvent):
-                    final_text = event.text
-                    final_capped = event.capped
+            # Bind the planner session to the prompt-log context so every LLM
+            # call inside run_agent is tagged with session_id + purpose.
+            with prompt_log_context(session_id=session_id, purpose="planner"):
+                async for event in run_agent(
+                    provider=provider,
+                    model=settings.default_model,
+                    system_prompt=PLANNER_SYSTEM_PROMPT,
+                    messages=messages,
+                    tools=tools,
+                    use_stream=False,
+                ):
+                    frame = agent_event_to_frame(event)
+                    if frame is not None:
+                        await websocket.send_json(frame)
+                    if isinstance(event, ToolResultEvent):
+                        add_message(
+                            db,
+                            session_id=session_id,
+                            role="tool",
+                            content=json.dumps(
+                                {"ok": event.ok, "result": event.result},
+                                ensure_ascii=False,
+                                default=str,
+                            ),
+                            tool_name=event.name,
+                            tool_call_id=event.id,
+                        )
+                    if isinstance(event, FinishEvent):
+                        final_text = event.text
+                        final_capped = event.capped
 
             # Emit the final assistant text as a single token frame (collect
             # mode does not stream tokens incrementally — see module docstring).
