@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 from collections.abc import AsyncIterator
@@ -16,6 +17,12 @@ from app.llm.base import (
 )
 
 logger = logging.getLogger("app.llm")
+
+# Transient HTTP statuses that are safe to retry with backoff (ADR-0009).
+# 401 is NOT here — an invalid key is permanent and must surface immediately.
+_RETRY_STATUS: frozenset[int] = frozenset({429, 500, 502, 503, 504})
+_DEFAULT_MAX_RETRIES = 3
+_DEFAULT_BACKOFF_BASE = 0.5  # seconds; doubled each attempt (0.5, 1.0, 2.0 ...)
 
 
 async def _log_request(request: httpx.Request) -> None:
@@ -94,13 +101,85 @@ class OpenRouterProvider:
         client: httpx.AsyncClient,
         api_key: str,
         base_url: str,
+        *,
+        max_retries: int = _DEFAULT_MAX_RETRIES,
+        backoff_base: float = _DEFAULT_BACKOFF_BASE,
     ) -> None:
         self._client = client
         self._api_key = api_key
         self._base_url = base_url.rstrip("/")
+        self._max_retries = max_retries
+        self._backoff_base = backoff_base
 
     def _auth_headers(self) -> dict[str, str]:
         return {"Authorization": f"Bearer {self._api_key}"}
+
+    def _backoff_delay(self, attempt: int) -> float:
+        """Exponential backoff for ``attempt`` (0-based): base * 2**attempt."""
+        return self._backoff_base * (2**attempt)
+
+    async def _post_with_retry(
+        self, url: str, body: dict[str, Any]
+    ) -> httpx.Response:
+        """POST ``body`` to ``url`` with retry/backoff on transient failures.
+
+        Retries on rate-limit (429), server errors (5xx) and network/timeout
+        exceptions. A 401 surfaces immediately as a :class:`ValueError` (a bad
+        key is permanent). After exhausting retries the last error is raised
+        with a clear, UI-friendly message.
+        """
+        resp: httpx.Response | None = None
+        for attempt in range(self._max_retries + 1):
+            try:
+                resp = await self._client.post(
+                    url, headers=self._auth_headers(), json=body
+                )
+            except (httpx.TimeoutException, httpx.NetworkError) as exc:
+                if attempt < self._max_retries:
+                    logger.warning(
+                        "complete network error (attempt %d/%d): %s",
+                        attempt + 1,
+                        self._max_retries,
+                        exc,
+                    )
+                    await asyncio.sleep(self._backoff_delay(attempt))
+                    continue
+                raise RuntimeError(
+                    f"OpenRouter request failed after {self._max_retries} retries: {exc}"
+                ) from exc
+
+            # 401 is permanent — never retry, surface a clear message.
+            if resp.status_code == 401:
+                raise ValueError(
+                    "Invalid OpenRouter API key — check OPENROUTER_API_KEY in .env"
+                )
+            # Transient status with retries left → back off and try again.
+            if (
+                resp.status_code in _RETRY_STATUS
+                and attempt < self._max_retries
+            ):
+                logger.warning(
+                    "complete HTTP %d (attempt %d/%d), retrying",
+                    resp.status_code,
+                    attempt + 1,
+                    self._max_retries,
+                )
+                await asyncio.sleep(self._backoff_delay(attempt))
+                continue
+            break
+
+        assert resp is not None  # loop runs at least once
+        if resp.status_code >= 400:
+            logger.warning(
+                "complete HTTP %d body: %s", resp.status_code, resp.text[:1000]
+            )
+            if resp.status_code in _RETRY_STATUS:
+                raise RuntimeError(
+                    f"OpenRouter returned HTTP {resp.status_code} after "
+                    f"{self._max_retries} retries"
+                )
+            resp.raise_for_status()
+        return resp
 
     async def list_models(self) -> list[ModelInfo]:
         resp = await self._client.get(
@@ -148,22 +227,9 @@ class OpenRouterProvider:
             temperature,
         )
 
-        resp = await self._client.post(
-            f"{self._base_url}/chat/completions",
-            headers=self._auth_headers(),
-            json=body,
+        resp = await self._post_with_retry(
+            f"{self._base_url}/chat/completions", body
         )
-        if resp.status_code == 401:
-            raise ValueError(
-                "Invalid OpenRouter API key — check OPENROUTER_API_KEY in .env"
-            )
-        if resp.status_code == 429:
-            raise RuntimeError("Rate limit exceeded")
-        if resp.status_code >= 400:
-            logger.warning(
-                "complete HTTP %d body: %s", resp.status_code, resp.text[:1000]
-            )
-            resp.raise_for_status()
 
         data = resp.json()
         choices = data.get("choices") or []

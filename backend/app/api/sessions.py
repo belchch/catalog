@@ -89,6 +89,7 @@ async def session_ws(
 
             messages = _conversation_messages(db, session_id)
             final_text: str | None = None
+            final_capped = False
 
             async for event in run_agent(
                 provider=provider,
@@ -116,6 +117,7 @@ async def session_ws(
                     )
                 if isinstance(event, FinishEvent):
                     final_text = event.text
+                    final_capped = event.capped
 
             # Emit the final assistant text as a single token frame (collect
             # mode does not stream tokens incrementally — see module docstring).
@@ -126,7 +128,11 @@ async def session_ws(
                 )
 
             await websocket.send_json(
-                {"type": "finish", "capped": False, "status": "ok"}
+                {
+                    "type": "finish",
+                    "capped": final_capped,
+                    "status": "capped" if final_capped else "ok",
+                }
             )
     except WebSocketDisconnect:
         pass

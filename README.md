@@ -41,8 +41,11 @@ Catalog/
 
 ## Быстрый старт (после инициализации)
 ```bash
-# backend
+# env (backend): скопируй шаблон и впиши ключи
 cd backend
+cp .env.example .env
+#   OPENROUTER_API_KEY=...        # обязательный ключ OpenRouter
+#   OPENROUTER_DEFAULT_MODEL=...   # tool-capable модель (см. ниже)
 python3 -m venv .venv && source .venv/bin/activate
 pip install -e ".[dev]"
 uvicorn app.main:app --reload      # http://localhost:8000/health
@@ -52,6 +55,15 @@ cd frontend
 pnpm install
 pnpm run dev                       # http://localhost:5173
 ```
+
+> `OPENROUTER_DEFAULT_MODEL` должна уметь в function-calling (tool use) — иначе агент не сможет вызывать инструменты. Для работы с дефолтной модели нужен tool-capable вариант; fallback-модель зашита в `app/config.py`.
+
+## Сквозной прогон (золотой путь)
+```bash
+# из backend/, при настроенном .env — оркестрирует весь цикл на samples/golden*.docx:
+python scripts/golden_run.py
+```
+
 
 ## Ключевые принципы (не нарушать)
 - ФС — источник контента; SQLite — только системные данные/индекс (пересобираемый).
