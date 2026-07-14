@@ -57,10 +57,10 @@ PLANNER_SYSTEM_PROMPT = (
     "markdown-разметкой с обязательной секцией «Тезисы»."
 )
 
-PLAN_MESSAGE = (
-    "Изучи документ через read_document и предложи скилл: выделить ключевые "
-    "тезисы и оформить markdown с секцией «Тезисы». Для скилла задай проверки: "
-    "non_empty, markdown_well_formed и has_section с heading «Тезисы»."
+PLAN_MESSAGE_TEMPLATE = (
+    "Изучи документ {doc_id} через read_document и предложи скилл: выделить "
+    "ключевые тезисы и оформить markdown с секцией «Тезисы». Для скилла задай "
+    "проверки: non_empty, markdown_well_formed и has_section с heading «Тезисы»."
 )
 
 # Acceptance criteria constants (step-08 plan).
@@ -93,14 +93,16 @@ async def run_golden(
     assert doc1.kind == "docx", f"expected kind=docx, got {doc1.kind}"
 
     # 2. Planner turn: read_document + plan, persisted to a session so the
-    #    skill builder can read the conversation.
+    #    skill builder can read the conversation. The user message points the
+    #    planner at the ingested document id so a live run actually reads it.
+    plan_message = PLAN_MESSAGE_TEMPLATE.format(doc_id=doc1.id)
     session_id = create_session(db)
-    add_message(db, session_id=session_id, role="user", content=PLAN_MESSAGE)
+    add_message(db, session_id=session_id, role="user", content=plan_message)
     plan_text, _planner_trace, planner_capped = await run_agent_collect(
         provider=provider,
         model=model,
         system_prompt=PLANNER_SYSTEM_PROMPT,
-        messages=[Message(role="user", content=PLAN_MESSAGE)],
+        messages=[Message(role="user", content=plan_message)],
         tools=tools,
         use_stream=False,
     )
