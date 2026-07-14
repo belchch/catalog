@@ -15,6 +15,8 @@ import re
 from collections.abc import Callable
 from dataclasses import dataclass, field
 
+from app.skills.config import VerifyCheck
+
 
 @dataclass
 class VerifyResult:
@@ -35,10 +37,10 @@ def register_check(check_id: str, fn: CheckFn) -> None:
     _REGISTRY[check_id] = fn
 
 
-def run_verify(text: str, checks: list) -> VerifyResult:  # noqa: ANN001
+def run_verify(text: str, checks: list[VerifyCheck]) -> VerifyResult:
     """Run all ``checks`` over ``text``; fail-closed on unknown ids.
 
-    ``checks`` items are :class:`~app.skills.config.VerifyCheck`-like objects
+    ``checks`` items are :class:`~app.skills.config.VerifyCheck` objects
     exposing ``.check`` and ``.params``.
     """
     failures: list[str] = []
@@ -129,19 +131,23 @@ def _check_markdown_well_formed(text: str, params: dict) -> str | None:
             m = re.match(r"#{1,6}(\s|$)", stripped)
             if m is None:
                 return f"malformed heading: {line!r}"
-    # Check table blocks: the second row of each contiguous |-block must be a
-    # separator (contain dashes).
-    in_table = False
-    block_start = 0
+    # Table blocks: the first row of each contiguous |-block (a line starting
+    # with '|') must be followed by a valid separator row (dashes). This catches
+    # both a separator that lacks dashes and the case where the would-be header
+    # is followed by a non-table line (no '|' prefix) — previously missed
+    # because the old check only fired when the second line itself began '|'.
     for i, line in enumerate(lines):
-        if line.strip().startswith("|"):
-            if not in_table:
-                in_table = True
-                block_start = i
-            elif i == block_start + 1 and "-" not in line:
-                return f"table missing separator row after line {block_start + 1}"
-        else:
-            in_table = False
+        if not line.strip().startswith("|"):
+            continue
+        prev_is_table = i > 0 and lines[i - 1].strip().startswith("|")
+        if prev_is_table:
+            continue  # not the start of a new table block
+        # Block start: the next line must be a valid separator.
+        if i + 1 >= len(lines):
+            return f"table at line {i + 1} has no separator row"
+        sep = lines[i + 1].strip()
+        if not (_TABLE_SEP_RE.match(sep) and "-" in sep):
+            return f"table missing separator row after line {i + 1}"
     return None
 
 
@@ -211,9 +217,11 @@ def _check_table_parses(text: str, params: dict) -> str | None:
     rows = _parse_table(text)
     if rows is None:
         return "no parseable markdown table"
-    min_rows = params.get("min_rows")
+    # Default min_rows=1: a header+separator with zero data rows does not count
+    # as a real table (verification-checks.md: "минимум 1 строка данных").
+    min_rows = params.get("min_rows", 1)
     min_cols = params.get("min_cols")
-    if min_rows is not None and len(rows) < min_rows:
+    if len(rows) < min_rows:
         return f"{len(rows)} data rows < min_rows {min_rows}"
     if min_cols is not None:
         ncols = max((len(r) for r in rows), default=0)

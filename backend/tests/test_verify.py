@@ -123,6 +123,21 @@ def test_markdown_well_formed_good_heading_levels() -> None:
     assert run_verify(text, [_vc("markdown_well_formed")]).passed is True
 
 
+def test_markdown_well_formed_table_missing_separator_nonpipe() -> None:
+    # Header row starts with '|', but the second line is plain text (no '|' /
+    # not a valid separator) -> fail. Previously this slipped through because
+    # the check only fired when the second line itself began with '|'.
+    text = "| Name | Age |\nName and age"
+    r = run_verify(text, [_vc("markdown_well_formed")])
+    assert r.passed is False
+    assert "separator" in r.failures[0]
+
+
+def test_markdown_well_formed_table_valid_separator_passes() -> None:
+    text = "| Name | Age |\n|------|-----|\n| Alice | 30 |"
+    assert run_verify(text, [_vc("markdown_well_formed")]).passed is True
+
+
 # --------------------------------------------------------------------------- #
 # has_section
 # --------------------------------------------------------------------------- #
@@ -206,6 +221,20 @@ def test_table_parses_min_cols_fail() -> None:
     text = "| Name |\n|------|\n| Alice |"
     r = run_verify(text, [_vc("table_parses", min_cols=2)])
     assert r.passed is False
+
+
+def test_table_parses_default_requires_data_row() -> None:
+    # Header + separator but zero data rows: default min_rows=1 -> fail
+    # (verification-checks.md: "минимум 1 строка данных").
+    text = "| Name |\n|------|"
+    r = run_verify(text, [_vc("table_parses")])
+    assert r.passed is False
+    assert "min_rows" in r.failures[0]
+
+
+def test_table_parses_default_one_data_row_passes() -> None:
+    text = "| Name |\n|------|\n| Alice |"
+    assert run_verify(text, [_vc("table_parses")]).passed is True
 
 
 # --------------------------------------------------------------------------- #

@@ -6,11 +6,12 @@ from typing import Any
 
 import pytest
 
+from app.agent.events import FinishEvent, StepEvent, VerifyEvent
 from app.agent.registry import ToolRegistry
 from app.documents.ingest import ingest_file
 from app.documents.tools import build_document_tools
 from app.llm.base import CompletionResult, LLMProvider, Message, ModelInfo, ToolSpec
-from app.skills.apply import apply_skill_collect
+from app.skills.apply import apply_skill, apply_skill_collect
 from app.skills.config import SkillConfig, VerifyCheck
 from app.skills.repo_run import get_run
 from app.skills.repo_skill import create_skill, get_skill
@@ -448,6 +449,72 @@ def test_tool_registry_filter() -> None:
 
     # Empty filter → empty registry.
     assert reg.filter([]).names() == []
+
+
+# --------------------------------------------------------------------------- #
+# Streaming apply_skill (async generator)
+# --------------------------------------------------------------------------- #
+
+
+async def _collect_events(gen: Any) -> list[Any]:
+    return [ev async for ev in gen]
+
+
+def test_apply_skill_streams_inner_events(db: Database, workspace: Path) -> None:
+    """Streaming apply_skill forwards inner run_agent events + verify/finish.
+
+    On a first-try success the stream must contain the agent-loop's own
+    StepEvent/FinishEvent (inner events), the VerifyEvent, and the apply-level
+    FinishEvent — not just the verify/finish bookends.
+    """
+    skill = _make_skill(verify_checks=[VerifyCheck("non_empty")])
+    skill_id = create_skill(
+        db, name=skill.name, description=skill.description, config=skill
+    )
+    input_doc_id = _ingest_input(db, workspace)
+    provider = ScriptProvider([_result("# Summary\n\nGreat document.")])
+
+    events = asyncio.run(
+        _collect_events(
+            apply_skill(
+                provider=provider,
+                db=db,
+                workspace_dir=str(workspace),
+                skill=skill,
+                skill_id=skill_id,
+                input_doc_id=input_doc_id,
+                base_tools=build_document_tools(db, workspace),
+            )
+        )
+    )
+
+    # Inner agent-loop events are forwarded (not swallowed by a collect call).
+    step_events = [e for e in events if isinstance(e, StepEvent)]
+    assert len(step_events) >= 1
+
+    verify_events = [e for e in events if isinstance(e, VerifyEvent)]
+    assert len(verify_events) == 1
+    assert verify_events[0].iteration == 1
+    assert verify_events[0].result.passed is True
+
+    finish_events = [e for e in events if isinstance(e, FinishEvent)]
+    # One inner (agent loop) finish + one apply-level finish.
+    assert len(finish_events) == 2
+    final = finish_events[-1]
+    assert final.text == "# Summary\n\nGreat document."
+    assert final.finish_reason == "stop"
+
+    # Result document persisted + skill_run marked ok.
+    with db.connect() as conn:
+        row = conn.execute(
+            "SELECT status, output_doc_id FROM skill_run WHERE skill_id = ?",
+            (skill_id,),
+        ).fetchone()
+    assert row is not None
+    assert row["status"] == "ok"
+    assert row["output_doc_id"] is not None
+    out_path = workspace / "results" / f"{row['output_doc_id']}.md"
+    assert out_path.exists()
 
 
 async def _noop_tool(**kwargs: Any) -> dict:
