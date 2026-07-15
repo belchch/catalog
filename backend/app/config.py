@@ -17,8 +17,8 @@ APP_DB_PATH = os.getenv("APP_DB_PATH", "catalog.db")
 # Disabled by default; opt-in via PROMPT_LOG_ENABLED=1.
 _TRUTHY = {"1", "true", "yes", "on"}
 PROMPT_LOG_ENABLED = os.getenv("PROMPT_LOG_ENABLED", "").strip().lower() in _TRUTHY
-PROMPT_LOG_DIR = os.getenv(
-    "PROMPT_LOG_DIR", os.path.join(APP_WORKSPACE, "prompt_logs")
+PROMPT_LOG_DIR = os.path.expanduser(
+    os.getenv("PROMPT_LOG_DIR", os.path.join(APP_WORKSPACE, "prompt_logs"))
 )
 
 
