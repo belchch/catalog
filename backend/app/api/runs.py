@@ -15,6 +15,7 @@ from app.agent.registry import ToolRegistry
 from app.api.deps import agent_event_to_frame, get_db
 from app.api.schemas import ApplyRequest, RunCreated, RunOut
 from app.llm.base import LLMProvider
+from app.llm.log_context import prompt_log_context
 from app.skills.apply import apply_skill
 from app.skills.repo_run import create_run, get_run
 from app.skills.repo_skill import get_skill
@@ -99,19 +100,23 @@ async def run_stream_ws(websocket: WebSocket, run_id: str) -> None:
         return
 
     try:
-        async for event in apply_skill(
-            provider=provider,
-            db=db,
-            workspace_dir=workspace,
-            skill=skill.config,
-            skill_id=run["skill_id"],
-            input_doc_id=input_doc_id,
-            base_tools=tools,
-            run_id=run_id,
-        ):
-            frame = agent_event_to_frame(event)
-            if frame is not None:
-                await websocket.send_json(frame)
+        # Bind run_id/purpose so every log line and prompt-log entry for this
+        # apply stream carries the correlation context (iteration is set per
+        # turn inside _run_agent_core).
+        with prompt_log_context(run_id=run_id, session_id=None, purpose="apply_skill"):
+            async for event in apply_skill(
+                provider=provider,
+                db=db,
+                workspace_dir=workspace,
+                skill=skill.config,
+                skill_id=run["skill_id"],
+                input_doc_id=input_doc_id,
+                base_tools=tools,
+                run_id=run_id,
+            ):
+                frame = agent_event_to_frame(event)
+                if frame is not None:
+                    await websocket.send_json(frame)
 
         # Authoritative finish from the persisted run row.
         final = get_run(db, run_id)

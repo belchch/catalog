@@ -15,6 +15,7 @@ from app.agent.events import (
     ToolCallEvent,
     ToolResultEvent,
 )
+from app.agent.logging import log_agent_event
 from app.agent.registry import ToolRegistry
 from app.agent.trace import Trace, TraceEntry
 from app.llm.base import LLMProvider, Message, ToolCall
@@ -91,7 +92,9 @@ async def _run_agent_core(
     last_text: str | None = None
 
     for i in range(1, max_iterations + 1):
-        yield StepEvent(i)
+        step_event = StepEvent(i)
+        yield step_event
+        log_agent_event(step_event)
         trace.entries.append(TraceEntry("llm", i, {}))
         # Bind the iteration to the prompt-log context for this turn. The
         # session_id/run_id/purpose are set by the API layer; only iteration
@@ -109,7 +112,9 @@ async def _run_agent_core(
             # the run finishes at end of stream.
             trace.entries[-1].data = {"content": text}
             history.append(Message(role="assistant", content=text))
-            yield FinishEvent(text, "stop", capped=False, usage={})
+            finish_stream = FinishEvent(text, "stop", capped=False, usage={})
+            yield finish_stream
+            log_agent_event(finish_stream)
             return
 
         resp = await provider.complete(model, history, tools.specs(), temperature)
@@ -128,16 +133,20 @@ async def _run_agent_core(
             last_text = resp.content
 
         if not resp.tool_calls:
-            yield FinishEvent(
+            finish_no_tools = FinishEvent(
                 resp.content, resp.finish_reason, capped=False, usage=resp.usage
             )
+            yield finish_no_tools
+            log_agent_event(finish_no_tools)
             return
 
         for tc in resp.tool_calls:
             trace.entries.append(
                 TraceEntry("tool_call", i, {"name": tc.name, "arguments": tc.arguments})
             )
-            yield ToolCallEvent(tc.id, tc.name, tc.arguments)
+            call_event = ToolCallEvent(tc.id, tc.name, tc.arguments)
+            yield call_event
+            log_agent_event(call_event)
             res = await _execute_tool(tools, tc)
             trace.entries.append(
                 TraceEntry(
@@ -146,7 +155,9 @@ async def _run_agent_core(
                     {"name": tc.name, "result": res.payload, "ok": res.ok},
                 )
             )
-            yield ToolResultEvent(tc.id, tc.name, res.ok, res.payload)
+            result_event = ToolResultEvent(tc.id, tc.name, res.ok, res.payload)
+            yield result_event
+            log_agent_event(result_event)
             history.append(
                 Message(
                     role="tool",
@@ -157,7 +168,9 @@ async def _run_agent_core(
             )
 
     # Loop exhausted without a final answer.
-    yield FinishEvent(last_text, "capped", capped=True, usage={})
+    finish_capped = FinishEvent(last_text, "capped", capped=True, usage={})
+    yield finish_capped
+    log_agent_event(finish_capped)
 
 
 async def run_agent(

@@ -16,12 +16,14 @@ The apply loop (ADR-0001 + ADR-0006 + ADR-0007):
 
 from __future__ import annotations
 
+import logging
 import uuid
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from pathlib import Path
 
 from app.agent.events import AgentEvent, FinishEvent, VerifyEvent
+from app.agent.logging import log_agent_event
 from app.agent.registry import ToolRegistry
 from app.agent.runner import _run_agent_core
 from app.agent.trace import Trace
@@ -31,6 +33,8 @@ from app.skills.repo_run import create_run, finish_run
 from app.skills.verify import run_verify
 from app.storage.db import Database
 from app.storage.repo_document import create_document, get_document
+
+logger = logging.getLogger("app.skills.apply")
 
 
 @dataclass
@@ -96,6 +100,14 @@ async def _apply_core(
             db, skill_id=skill_id, session_id=session_id, input_doc_id=input_doc_id
         )
 
+    logger.info(
+        "apply_skill start skill=%s skill_id=%s input_doc=%s run_id=%s",
+        skill.name,
+        skill_id,
+        input_doc_id,
+        run_id,
+    )
+
     user_msg = Message(
         role="user",
         content=f"Обработай документ {input_doc_id} ({doc.title}).",
@@ -130,6 +142,7 @@ async def _apply_core(
                 trace=trace,
             ):
                 yield event
+                log_agent_event(event)
                 if isinstance(event, FinishEvent):
                     text = event.text
                     capped = event.capped
@@ -138,7 +151,9 @@ async def _apply_core(
             last_capped = capped
 
             result = run_verify(text or "", skill.verify_checks)
-            yield VerifyEvent(iteration=r + 1, result=result)
+            verify_event = VerifyEvent(iteration=r + 1, result=result)
+            yield verify_event
+            log_agent_event(verify_event)
 
             if result.passed:
                 passed = True
@@ -146,6 +161,12 @@ async def _apply_core(
 
             # Feed verify failures back for the next attempt (if any left).
             if r < skill.max_retries:
+                logger.info(
+                    "verify failed, retry %d/%d failures=%s",
+                    r + 1,
+                    skill.max_retries,
+                    list(result.failures),
+                )
                 messages.append(Message(role="assistant", content=text or ""))
                 messages.append(
                     Message(
@@ -174,6 +195,7 @@ async def _apply_core(
                 last_text or "", encoding="utf-8"
             )
             output_doc_id = out_id
+            logger.info("apply_skill persisted output_doc_id=%s", out_id)
 
         status = "ok" if passed else "failed"
 
@@ -191,17 +213,24 @@ async def _apply_core(
         outcome.status = status
         outcome.result_text = last_text
 
+        logger.info(
+            "apply_skill done status=%s output_doc_id=%s", status, output_doc_id
+        )
+
         # 7. Emit finish.
-        yield FinishEvent(
+        finish_apply = FinishEvent(
             text=last_text,
             finish_reason="stop" if passed else ("capped" if last_capped else "verify_failed"),
             capped=(not passed) and last_capped,
             usage={},
         )
+        yield finish_apply
+        log_agent_event(finish_apply)
     except Exception:
         # Provider/agent failure: persist a failed run (trace preserved) so the
         # row is never left 'running', then re-raise — the stream consumer gets
         # the error rather than a silently truncated event sequence.
+        logger.error("apply_skill failed", exc_info=True)
         if not done:
             finish_run(
                 db,
