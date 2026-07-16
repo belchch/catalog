@@ -26,10 +26,12 @@ from app.agent.events import AgentEvent, FinishEvent, VerifyEvent
 from app.agent.logging import log_agent_event
 from app.agent.registry import ToolRegistry
 from app.agent.runner import _run_agent_core
-from app.agent.trace import Trace
+from app.agent.trace import Trace, TraceEntry
+from app.documents.extract import extract_text
 from app.llm.base import LLMProvider, Message
 from app.skills.config import SkillConfig
 from app.skills.repo_run import create_run, finish_run
+from app.skills.script_runner import ScriptRuntimeError, run_script_async
 from app.skills.verify import run_verify
 from app.storage.db import Database
 from app.storage.repo_document import create_document, get_document
@@ -108,12 +110,6 @@ async def _apply_core(
         run_id,
     )
 
-    user_msg = Message(
-        role="user",
-        content=f"Обработай документ {input_doc_id} ({doc.title}).",
-    )
-    messages: list[Message] = [user_msg]
-
     last_text: str | None = None
     last_capped = False
     passed = False
@@ -123,62 +119,102 @@ async def _apply_core(
     done = False
 
     try:
-        # max_retries = number of retries after the first attempt.
-        for r in range(skill.max_retries + 1):
-            text: str | None = None
-            capped = False
-            # Drive the agent loop directly: forward each inner event to the
-            # stream and capture the final text/capped from its FinishEvent,
-            # while _run_agent_core appends to our shared ``trace``.
-            async for event in _run_agent_core(
-                provider=provider,
-                model=skill.model,
-                system_prompt=skill.system_prompt,
-                messages=messages,
-                tools=tools,
-                temperature=skill.temperature,
-                max_iterations=skill.max_iterations,
-                use_stream=False,
-                trace=trace,
-            ):
-                yield event
-                # Inner agent events are already logged by _run_agent_core
-                # (single source of truth); re-logging here would duplicate them.
-                if isinstance(event, FinishEvent):
-                    text = event.text
-                    capped = event.capped
-
-            last_text = text
-            last_capped = capped
-
-            result = run_verify(text or "", skill.verify_checks)
-            verify_event = VerifyEvent(iteration=r + 1, result=result)
-            yield verify_event
-            log_agent_event(verify_event)
-
-            if result.passed:
-                passed = True
-                break
-
-            # Feed verify failures back for the next attempt (if any left).
-            if r < skill.max_retries:
-                logger.info(
-                    "verify failed, retry %d/%d failures=%s",
-                    r + 1,
-                    skill.max_retries,
-                    list(result.failures),
-                )
-                messages.append(Message(role="assistant", content=text or ""))
-                messages.append(
-                    Message(
-                        role="user",
-                        content=(
-                            "verify failed: "
-                            + "; ".join(result.failures)
-                            + ". Исправь и повтори."
-                        ),
+        if skill.kind == "script":
+            # ---- Deterministic script path (ADR-0014) ----
+            # No agent loop, no LLM call at runtime: run the validated script
+            # once over the document text. Retrying is pointless (same input
+            # always yields the same output), so there is a single attempt and
+            # a single verify pass — then the shared persist/finish tail.
+            doc_text = extract_text(str(Path(workspace_dir) / doc.path), doc.kind)
+            try:
+                text = await run_script_async(skill.code, doc_text)
+            except ScriptRuntimeError as exc:
+                trace.entries.append(
+                    TraceEntry(
+                        kind="error",
+                        iteration=1,
+                        data={"script": True, "error": str(exc)},
                     )
                 )
+                raise
+            trace.entries.append(
+                TraceEntry(
+                    kind="script",
+                    iteration=1,
+                    data={"ok": True, "chars": len(text)},
+                )
+            )
+            last_text = text
+
+            result = run_verify(text or "", skill.verify_checks)
+            verify_event = VerifyEvent(iteration=1, result=result)
+            yield verify_event
+            log_agent_event(verify_event)
+            passed = result.passed
+        else:
+            # ---- Agent path (ADR-0001/0002) ----
+            user_msg = Message(
+                role="user",
+                content=f"Обработай документ {input_doc_id} ({doc.title}).",
+            )
+            messages: list[Message] = [user_msg]
+
+            # max_retries = number of retries after the first attempt.
+            for r in range(skill.max_retries + 1):
+                text: str | None = None
+                capped = False
+                # Drive the agent loop directly: forward each inner event to the
+                # stream and capture the final text/capped from its FinishEvent,
+                # while _run_agent_core appends to our shared ``trace``.
+                async for event in _run_agent_core(
+                    provider=provider,
+                    model=skill.model,
+                    system_prompt=skill.system_prompt,
+                    messages=messages,
+                    tools=tools,
+                    temperature=skill.temperature,
+                    max_iterations=skill.max_iterations,
+                    use_stream=False,
+                    trace=trace,
+                ):
+                    yield event
+                    # Inner agent events are already logged by _run_agent_core
+                    # (single source of truth); re-logging here would duplicate them.
+                    if isinstance(event, FinishEvent):
+                        text = event.text
+                        capped = event.capped
+
+                last_text = text
+                last_capped = capped
+
+                result = run_verify(text or "", skill.verify_checks)
+                verify_event = VerifyEvent(iteration=r + 1, result=result)
+                yield verify_event
+                log_agent_event(verify_event)
+
+                if result.passed:
+                    passed = True
+                    break
+
+                # Feed verify failures back for the next attempt (if any left).
+                if r < skill.max_retries:
+                    logger.info(
+                        "verify failed, retry %d/%d failures=%s",
+                        r + 1,
+                        skill.max_retries,
+                        list(result.failures),
+                    )
+                    messages.append(Message(role="assistant", content=text or ""))
+                    messages.append(
+                        Message(
+                            role="user",
+                            content=(
+                                "verify failed: "
+                                + "; ".join(result.failures)
+                                + ". Исправь и повтори."
+                            ),
+                        )
+                    )
 
         # 5. Persist result on success.
         if passed:

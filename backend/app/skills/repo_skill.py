@@ -9,6 +9,7 @@ row). ``get_skill`` returns a dataclass carrying both the persisted metadata
 
 from __future__ import annotations
 
+import json
 import sqlite3
 import uuid
 from dataclasses import dataclass
@@ -79,30 +80,41 @@ def get_skill(db: Database, skill_id: str) -> SkillRecord | None:
 
 
 def list_skills(db: Database, status: str | None = None) -> list[dict]:
-    """List skills, optionally filtered by status (newest first)."""
+    """List skills, optionally filtered by status (newest first).
+
+    Each dict includes ``kind`` (parsed from ``config_json``) so the API can
+    surface the skill type without a separate config fetch.
+    """
     with db.connect() as conn:
         if status is not None:
             rows = conn.execute(
-                "SELECT id, name, description, status, created_at, updated_at "
-                "FROM skill WHERE status = ? ORDER BY created_at DESC",  # noqa: S608
+                "SELECT id, name, description, config_json, status, created_at, "
+                "updated_at FROM skill WHERE status = ? ORDER BY created_at DESC",  # noqa: S608
                 (status,),
             ).fetchall()
         else:
             rows = conn.execute(
-                "SELECT id, name, description, status, created_at, updated_at "
-                "FROM skill ORDER BY created_at DESC"  # noqa: S608
+                "SELECT id, name, description, config_json, status, created_at, "
+                "updated_at FROM skill ORDER BY created_at DESC"  # noqa: S608
             ).fetchall()
-    return [
-        {
-            "id": r["id"],
-            "name": r["name"],
-            "description": r["description"],
-            "status": r["status"],
-            "created_at": r["created_at"],
-            "updated_at": r["updated_at"],
-        }
-        for r in rows
-    ]
+    result: list[dict] = []
+    for r in rows:
+        try:
+            config_kind = json.loads(r["config_json"]).get("kind", "agent")
+        except (ValueError, KeyError):
+            config_kind = "agent"
+        result.append(
+            {
+                "id": r["id"],
+                "name": r["name"],
+                "description": r["description"],
+                "status": r["status"],
+                "created_at": r["created_at"],
+                "updated_at": r["updated_at"],
+                "kind": config_kind,
+            }
+        )
+    return result
 
 
 def update_status(db: Database, skill_id: str, status: str) -> None:

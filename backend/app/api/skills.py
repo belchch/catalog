@@ -20,6 +20,7 @@ from app.llm.log_context import prompt_log_context
 from app.agent.registry import ToolRegistry
 from app.skills.config import SkillConfig, VerifyCheck
 from app.skills.repo_skill import create_skill, get_skill, list_skills, update_status
+from app.skills.script_runner import ScriptValidationError, validate_script
 from app.skills.verify import registered_checks
 from app.storage.db import Database
 from app.storage.repo_message import list_messages
@@ -30,12 +31,19 @@ router = APIRouter()
 MAX_BUILD_ATTEMPTS = 3  # 1 initial + 2 retries (step 06 contract).
 
 BUILD_SKILL_SYSTEM_PROMPT = (
-    "Ты собираешь SkillConfig — замороженный конфиг агента — из истории "
-    "планировочной сессии. Вызови инструмент build_skill с полями конфига: "
-    "name, description, system_prompt, allowed_tools (только из доступных "
-    "инструментов), model, temperature, verify_checks (только из реестра "
-    "проверок). system_prompt должен быть полной инструкцией для агента, "
-    "который будет применять скилл к документу."
+    "Ты собираешь SkillConfig из истории планировочной сессии. "
+    "СНАЧАЛА оцени детерминизм задачи. Если задача сводится к чистой обработке "
+    "текста/данных без суждений и рассуждений (форматирование, подсчёт, "
+    "регулярные преобразования, парсинг, сортировка) — выбери kind=\"script\" "
+    "и напиши валидный Python-код в поле code: без import, без open/eval/exec; "
+    "входной текст документа доступен в переменной document; результат "
+    "возвращается через return из функции main(), через присваивание глобальной "
+    "переменной result или через print. Если задача требует суждений, "
+    "рассуждений или творческой обработки — выбери kind=\"agent\" и ОБЯЗАТЕЛЬНО "
+    "заполни non_determinism_reason объяснением, почему детерминизм невозможен. "
+    "Для agent также заполни system_prompt (полная инструкция агенту), "
+    "allowed_tools (только из доступных инструментов), model, verify_checks "
+    "(только из реестра проверок)."
 )
 
 # JSON-Schema for the build_skill tool arguments, mirroring SkillConfig fields.
@@ -44,6 +52,28 @@ _BUILD_SKILL_PARAMETERS = {
     "properties": {
         "name": {"type": "string"},
         "description": {"type": "string"},
+        "kind": {
+            "type": "string",
+            "enum": ["agent", "script"],
+            "description": (
+                "agent = LLM-driven function-calling loop; "
+                "script = deterministic pure-Python (no LLM at runtime)."
+            ),
+        },
+        "code": {
+            "type": "string",
+            "description": (
+                "Python source for kind=script skills. No import/open/eval/exec; "
+                "input in `document`; output via main()/result/print."
+            ),
+        },
+        "non_determinism_reason": {
+            "type": "string",
+            "description": (
+                "Required when kind=agent: explain why the task is not "
+                "deterministic (needs judgment/reasoning)."
+            ),
+        },
         "system_prompt": {"type": "string"},
         "allowed_tools": {"type": "array", "items": {"type": "string"}},
         "model": {"type": "string"},
@@ -63,7 +93,7 @@ _BUILD_SKILL_PARAMETERS = {
         },
         "output_kind": {"type": "string"},
     },
-    "required": ["name", "description", "system_prompt", "allowed_tools", "model"],
+    "required": ["name", "description", "kind"],
 }
 
 BUILD_SKILL_TOOL = ToolSpec(
@@ -74,7 +104,14 @@ BUILD_SKILL_TOOL = ToolSpec(
 
 
 def _args_to_config(args: dict, default_model: str) -> SkillConfig:
-    """Parse ``build_skill`` tool arguments into a :class:`SkillConfig`."""
+    """Parse ``build_skill`` tool arguments into a :class:`SkillConfig`.
+
+    For ``kind="script"`` the skill is deterministic: ``allowed_tools`` is
+    forced to ``[]`` (no agent loop, no tools) and ``model`` is irrelevant
+    (though still stored for uniformity). For ``kind="agent"`` the classic
+    frozen-agent fields are populated as before.
+    """
+    kind = args.get("kind", "agent")
     verify_checks = [
         VerifyCheck(
             check=vc["check"],
@@ -82,28 +119,47 @@ def _args_to_config(args: dict, default_model: str) -> SkillConfig:
         )
         for vc in (args.get("verify_checks") or [])
     ]
+    if kind == "script":
+        allowed_tools: list[str] = []
+    else:
+        allowed_tools = list(args.get("allowed_tools") or [])
     return SkillConfig(
         name=args["name"],
         description=args["description"],
-        system_prompt=args["system_prompt"],
-        allowed_tools=list(args.get("allowed_tools") or []),
+        system_prompt=args.get("system_prompt") or "",
+        allowed_tools=allowed_tools,
         model=args.get("model") or default_model,
         temperature=float(args.get("temperature", 0.0)),
         max_iterations=int(args.get("max_iterations", 8)),
         max_retries=int(args.get("max_retries", 2)),
         verify_checks=verify_checks,
         output_kind=args.get("output_kind", "md"),
+        kind=kind,
+        code=args.get("code") or "",
     )
 
 
 def _validate_config(
     config: SkillConfig, available_tools: list[str], available_checks: list[str]
 ) -> list[str]:
-    """Return a list of validation errors (empty when the config is valid)."""
+    """Return a list of validation errors (empty when the config is valid).
+
+    For ``kind="script"`` the code is statically validated via
+    :func:`validate_script` (syntax + sandbox policy); ``allowed_tools`` is
+    ignored (always empty). For ``kind="agent"`` the classic tool/check
+    checks apply. Verify-check ids are validated for both kinds.
+    """
     errors: list[str] = []
-    for name in config.allowed_tools:
-        if name not in available_tools:
-            errors.append(f"unknown tool: {name!r}")
+    if config.kind == "script":
+        try:
+            validate_script(config.code)
+        except ScriptValidationError as exc:
+            errors.append(str(exc))
+    else:
+        for name in config.allowed_tools:
+            if name not in available_tools:
+                errors.append(f"unknown tool: {name!r}")
+    # Verify-check ids are validated for both kinds (a script may have checks).
     for vc in config.verify_checks:
         if vc.check not in available_checks:
             errors.append(f"unknown verify check: {vc.check!r}")
@@ -238,6 +294,7 @@ async def list_skills_endpoint(
             description=r["description"],
             status=r["status"],
             created_at=r["created_at"],
+            kind=r.get("kind", "agent"),
         )
         for r in rows
     ]

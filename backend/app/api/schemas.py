@@ -18,6 +18,7 @@ class SkillOut(BaseModel):
     description: str | None
     status: str
     created_at: str
+    kind: str = "agent"
 
 
 class ApplyRequest(BaseModel):

@@ -356,6 +356,72 @@ def test_apply_no_verify_checks_passes(db: Database, workspace: Path) -> None:
     assert result.output_doc_id is not None
 
 
+def test_apply_script_skill(db: Database, workspace: Path) -> None:
+    """A kind=script skill runs its code deterministically — no agent loop.
+
+    The provider has an empty script: if the agent loop were invoked,
+    ``pop(0)`` would raise ``AssertionError``. The script uppercases the
+    document text; the result is persisted as a result_md document and the
+    skill_run is marked ok.
+    """
+    skill = SkillConfig(
+        name="uppercaser",
+        description="uppercase the document",
+        system_prompt="",
+        allowed_tools=[],
+        model="test/model",
+        verify_checks=[VerifyCheck("non_empty")],
+        kind="script",
+        code="result = document.upper()\n",
+    )
+    skill_id = create_skill(
+        db, name=skill.name, description=skill.description, config=skill
+    )
+    input_doc_id = _ingest_input(db, workspace)
+    # Empty script — agent loop must NOT be invoked.
+    provider = ScriptProvider([])
+
+    result = asyncio.run(
+        apply_skill_collect(
+            provider=provider,
+            db=db,
+            workspace_dir=str(workspace),
+            skill=skill,
+            skill_id=skill_id,
+            input_doc_id=input_doc_id,
+            base_tools=build_document_tools(db, workspace),
+        )
+    )
+
+    assert result.status == "ok"
+    assert result.output_doc_id is not None
+    # Deterministic output: "source text" uppercased.
+    assert result.result_text == "SOURCE TEXT"
+
+    # Result document written to disk.
+    out_path = workspace / "results" / f"{result.output_doc_id}.md"
+    assert out_path.exists()
+    assert out_path.read_text(encoding="utf-8") == "SOURCE TEXT"
+
+    # skill_run row reflects success.
+    with db.connect() as conn:
+        row = conn.execute(
+            "SELECT status, output_doc_id FROM skill_run WHERE skill_id = ?",
+            (skill_id,),
+        ).fetchone()
+    assert row is not None
+    assert row["status"] == "ok"
+    assert row["output_doc_id"] == result.output_doc_id
+
+    # The provider was never called (no agent loop).
+    assert provider.seen_tools == []
+
+    # Trace contains a script entry.
+    script_entries = [e for e in result.trace.entries if e.kind == "script"]
+    assert len(script_entries) == 1
+    assert script_entries[0].data["ok"] is True
+
+
 def test_get_skill_returns_config(db: Database) -> None:
     """get_skill returns a record with deserialized config."""
     skill = _make_skill(verify_checks=[VerifyCheck("non_empty")])
@@ -429,6 +495,31 @@ def test_skill_config_json_roundtrip() -> None:
     assert restored.max_retries == skill.max_retries
     assert len(restored.verify_checks) == 2
     assert restored.verify_checks[1].params == {"heading": "X"}
+
+
+def test_skill_config_kind_roundtrip() -> None:
+    """kind/code survive serialization; legacy configs default to agent."""
+    script_skill = SkillConfig(
+        name="upper",
+        description="d",
+        system_prompt="",
+        allowed_tools=[],
+        model="m",
+        kind="script",
+        code="result = document.upper()\n",
+    )
+    restored = SkillConfig.from_json(script_skill.to_json())
+    assert restored.kind == "script"
+    assert restored.code == "result = document.upper()\n"
+
+    # Legacy config without kind/code → defaults.
+    legacy = SkillConfig.from_json(
+        '{"name":"x","description":"d","system_prompt":"","allowed_tools":[],'
+        '"model":"m","temperature":0,"max_iterations":1,"max_retries":0,'
+        '"verify_checks":[],"output_kind":"md"}'
+    )
+    assert legacy.kind == "agent"
+    assert legacy.code == ""
 
 
 def test_tool_registry_filter() -> None:

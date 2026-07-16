@@ -26,7 +26,18 @@ class VerifyCheck:
 
 @dataclass
 class SkillConfig:
-    """Frozen agent configuration consumed by :func:`apply_skill`."""
+    """Frozen skill configuration consumed by :func:`apply_skill`.
+
+    A skill has a ``kind`` (ADR-0014):
+
+    - ``"agent"`` — the classic frozen agent config (ADR-0002): a
+      function-calling loop driven by an LLM over ``allowed_tools``. This is
+      the default for backward compatibility (old ``config_json`` without a
+      ``kind`` deserializes as ``"agent"``).
+    - ``"script"`` — a *deterministic* skill: pure Python source in ``code``
+      executed by the script-runner with no agent loop and no LLM call at
+      runtime. ``allowed_tools``/``model`` are irrelevant for scripts.
+    """
 
     name: str
     description: str
@@ -38,6 +49,10 @@ class SkillConfig:
     max_retries: int = 2
     verify_checks: list[VerifyCheck] = field(default_factory=list)
     output_kind: str = "md"
+    # ``"agent"`` | ``"script"`` (ADR-0014). Default keeps legacy skills agent.
+    kind: str = "agent"
+    # Python source for ``kind="script"`` skills (empty for agent skills).
+    code: str = ""
 
     def to_json(self) -> str:
         """Serialize to a JSON string (stable, utf-8 friendly)."""
@@ -56,13 +71,20 @@ class SkillConfig:
                     for c in self.verify_checks
                 ],
                 "output_kind": self.output_kind,
+                "kind": self.kind,
+                "code": self.code,
             },
             ensure_ascii=False,
         )
 
     @classmethod
     def from_json(cls, s: str) -> SkillConfig:
-        """Deserialize from a JSON string produced by :meth:`to_json`."""
+        """Deserialize from a JSON string produced by :meth:`to_json`.
+
+        Old ``config_json`` written before ``kind``/``code`` existed lacks
+        those keys; they default to ``"agent"`` / ``""`` so legacy skills keep
+        working without a migration.
+        """
         data = json.loads(s)
         return cls(
             name=data["name"],
@@ -80,4 +102,6 @@ class SkillConfig:
                 for vc in data.get("verify_checks", [])
             ],
             output_kind=data.get("output_kind", "md"),
+            kind=data.get("kind", "agent"),
+            code=data.get("code", ""),
         )

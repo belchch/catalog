@@ -45,6 +45,26 @@ def _build_skill_call(
     )
 
 
+def _build_script_skill_call(
+    *,
+    code: str,
+    name: str = "Uppercaser",
+    verify_checks: list[dict] | None = None,
+) -> ToolCall:
+    """A build_skill tool call for a kind=script skill."""
+    return ToolCall(
+        id="build-1",
+        name="build_skill",
+        arguments={
+            "name": name,
+            "description": "A deterministic script skill.",
+            "kind": "script",
+            "code": code,
+            "verify_checks": verify_checks if verify_checks is not None else [],
+        },
+    )
+
+
 def _seed_committed_skill(
     db,
     *,
@@ -181,6 +201,92 @@ def test_build_skill_invalid_allowed_tools_returns_422(client, provider, db) -> 
 
     resp = client.post(f"/sessions/{session_id}/skills")
     assert resp.status_code == 422
+
+
+def test_build_script_skill_valid_code(client, provider, db) -> None:
+    """A kind=script skill with valid Python code is built as draft."""
+    session_id = client.post("/sessions").json()["id"]
+    add_message(db, session_id=session_id, role="user", content="uppercase the doc")
+
+    provider.script = [
+        _completion(
+            tool_calls=[_build_script_skill_call(code="result = document.upper()\n")]
+        )
+    ]
+
+    resp = client.post(f"/sessions/{session_id}/skills")
+    assert resp.status_code == 200, resp.text
+    skill_id = resp.json()["skill_id"]
+
+    skill = get_skill(db, skill_id)
+    assert skill is not None
+    assert skill.status == "draft"
+    assert skill.config.kind == "script"
+    assert skill.config.code == "result = document.upper()\n"
+    # Scripts have no tools.
+    assert skill.config.allowed_tools == []
+
+
+def test_build_script_skill_forbidden_import_returns_422(client, provider, db) -> None:
+    """A kind=script skill with a forbidden import is rejected (422)."""
+    session_id = client.post("/sessions").json()["id"]
+    add_message(db, session_id=session_id, role="user", content="read the filesystem")
+
+    bad = _completion(
+        tool_calls=[_build_script_skill_call(code="import os\nresult = 'x'\n")]
+    )
+    provider.script = [bad, bad, bad]  # all attempts invalid
+
+    resp = client.post(f"/sessions/{session_id}/skills")
+    assert resp.status_code == 422
+
+
+def test_build_script_skill_dangerous_call_returns_422(client, provider, db) -> None:
+    """A kind=script skill with eval() is rejected (422)."""
+    session_id = client.post("/sessions").json()["id"]
+    add_message(db, session_id=session_id, role="user", content="eval stuff")
+
+    bad = _completion(
+        tool_calls=[_build_script_skill_call(code="result = eval('1')\n")]
+    )
+    provider.script = [bad, bad, bad]
+
+    resp = client.post(f"/sessions/{session_id}/skills")
+    assert resp.status_code == 422
+
+
+def test_build_agent_skill_with_non_determinism_reason(client, provider, db) -> None:
+    """When the task is not deterministic the model chooses kind=agent with a reason."""
+    session_id = client.post("/sessions").json()["id"]
+    add_message(db, session_id=session_id, role="user", content="summarize creatively")
+
+    provider.script = [
+        _completion(
+            tool_calls=[
+                ToolCall(
+                    id="build-1",
+                    name="build_skill",
+                    arguments={
+                        "name": "CreativeSummarizer",
+                        "description": "Creative summary.",
+                        "kind": "agent",
+                        "non_determinism_reason": "Needs subjective judgment on tone.",
+                        "system_prompt": "You summarize creatively.",
+                        "allowed_tools": ["read_document"],
+                        "model": "test/model",
+                    },
+                )
+            ]
+        )
+    ]
+
+    resp = client.post(f"/sessions/{session_id}/skills")
+    assert resp.status_code == 200, resp.text
+    skill_id = resp.json()["skill_id"]
+
+    skill = get_skill(db, skill_id)
+    assert skill is not None
+    assert skill.config.kind == "agent"
 
 
 def test_commit_skill(client, db) -> None:

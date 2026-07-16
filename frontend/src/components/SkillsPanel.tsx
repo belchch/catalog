@@ -32,16 +32,28 @@ export function SkillsPanel({ skills, documents, defaultDocId, onApply }: Skills
             <li key={s.id} className="rounded-md border border-slate-800 bg-slate-900/60 p-2">
               <div className="flex items-center justify-between gap-2">
                 <span className="truncate text-xs font-medium text-slate-200">{s.name}</span>
-                <span
-                  className={
-                    'rounded px-1.5 py-0.5 text-[10px] uppercase ' +
-                    (s.status === 'committed'
-                      ? 'bg-emerald-600/30 text-emerald-300'
-                      : 'bg-amber-600/30 text-amber-300')
-                  }
-                >
-                  {s.status}
-                </span>
+                <div className="flex items-center gap-1.5">
+                  {s.kind === 'script' && (
+                    <span className="rounded bg-sky-600/30 px-1.5 py-0.5 text-[10px] uppercase text-sky-300">
+                      script
+                    </span>
+                  )}
+                  {s.kind === 'agent' && (
+                    <span className="rounded bg-fuchsia-600/30 px-1.5 py-0.5 text-[10px] uppercase text-fuchsia-300">
+                      agent
+                    </span>
+                  )}
+                  <span
+                    className={
+                      'rounded px-1.5 py-0.5 text-[10px] uppercase ' +
+                      (s.status === 'committed'
+                        ? 'bg-emerald-600/30 text-emerald-300'
+                        : 'bg-amber-600/30 text-amber-300')
+                    }
+                  >
+                    {s.status}
+                  </span>
+                </div>
               </div>
               {s.description && (
                 <p className="mt-1 text-[11px] text-slate-400">{s.description}</p>

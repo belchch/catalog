@@ -14,6 +14,7 @@ export interface SkillOut {
   description: string | null
   status: string
   created_at: string
+  kind: string
 }
 
 export interface RunOut {
