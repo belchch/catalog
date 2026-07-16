@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 from pathlib import Path
 from typing import Any
 
@@ -30,12 +31,19 @@ from app.agent.runner import run_agent, run_agent_collect
 from app.documents.ingest import ingest_file
 from app.documents.tools import build_document_tools
 from app.llm.base import CompletionResult, LLMProvider, Message, ModelInfo, ToolCall, ToolSpec
-from app.logging_config import ContextFilter
+from app.logging_config import AppFormatter, ContextFilter
 from app.llm.log_context import prompt_log_context
 from app.skills.apply import apply_skill_collect
 from app.skills.config import SkillConfig, VerifyCheck
 from app.skills.repo_skill import create_skill
 from app.storage.db import Database
+
+_ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
+
+
+def _strip_ansi(s: str) -> str:
+    """Strip ANSI color escapes so formatter assertions are color-agnostic."""
+    return _ANSI_RE.sub("", s)
 
 
 # --------------------------------------------------------------------------- #
@@ -263,7 +271,7 @@ def test_apply_logging(
 
 
 def test_context_filter_formats_context() -> None:
-    """ContextFilter renders bound contextvars into record.ctx."""
+    """ContextFilter renders bound contextvars into a compact record.ctx."""
     record = logging.LogRecord(
         name="app.test",
         level=logging.INFO,
@@ -277,12 +285,29 @@ def test_context_filter_formats_context() -> None:
     with prompt_log_context(run_id="R1", purpose="apply_skill"):
         assert flt.filter(record) is True
     ctx = record.ctx
-    assert "run_id=R1" in ctx
+    assert "run=R1" in ctx
     assert "purpose=apply_skill" in ctx
+
+    # A long run_id is truncated to its first 8 chars in the tag; the full id
+    # stays only in the trace / prompt-log / DB.
+    long_record = logging.LogRecord(
+        name="app.test",
+        level=logging.INFO,
+        pathname=__file__,
+        lineno=1,
+        msg="hi",
+        args=(),
+        exc_info=None,
+    )
+    long_id = "0123456789abcdef" * 2  # 32 hex chars
+    with prompt_log_context(run_id=long_id, purpose="apply_skill"):
+        flt.filter(long_record)
+    assert "run=01234567" in long_record.ctx
+    assert long_id not in long_record.ctx
 
 
 def test_context_filter_empty_when_no_context() -> None:
-    """With nothing bound, record.ctx is an empty string (brackets stay [])."""
+    """With nothing bound, record.ctx is an empty string (tag is omitted)."""
     record = logging.LogRecord(
         name="app.test",
         level=logging.INFO,
@@ -295,6 +320,94 @@ def test_context_filter_empty_when_no_context() -> None:
     flt = ContextFilter()
     assert flt.filter(record) is True
     assert record.ctx == ""
+
+
+def test_no_duplicate_logging(
+    db: Database, workspace: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Each agent event is logged exactly once across the full apply path.
+
+    Regression guard for the dedup fix: ``_run_agent_core`` is the single source
+    of truth, so driving ``apply_skill_collect`` (which used to re-log inner
+    events + apply-finish) must emit ``agent iteration 1`` and
+    ``finish reason=stop`` exactly once each for a one-iteration run.
+    """
+    caplog.set_level(logging.INFO, logger="app")
+
+    skill = _apply_skill(verify_checks=[VerifyCheck("non_empty")])
+    skill_id = create_skill(
+        db, name=skill.name, description=skill.description, config=skill
+    )
+    input_doc_id = ingest_file(
+        db, workspace, filename="input.md", content=b"source text"
+    ).id
+    provider = FakeProvider(
+        script=[
+            CompletionResult(
+                content="# Summary\n\nGreat document.",
+                tool_calls=[],
+                finish_reason="stop",
+            )
+        ]
+    )
+
+    result = asyncio.run(
+        apply_skill_collect(
+            provider=provider,
+            db=db,
+            workspace_dir=str(workspace),
+            skill=skill,
+            skill_id=skill_id,
+            input_doc_id=input_doc_id,
+            base_tools=build_document_tools(db, workspace),
+        )
+    )
+
+    assert result.status == "ok"
+
+    messages = [r.getMessage() for r in caplog.records]
+    assert sum(1 for m in messages if m.startswith("agent iteration 1")) == 1, messages
+    assert sum(1 for m in messages if m.startswith("finish reason=stop")) == 1, messages
+
+
+def test_formatter_renders_uvicorn_prefix_and_context() -> None:
+    """AppFormatter renders the uvicorn level prefix + compact tag, nothing else."""
+    flt = ContextFilter()
+    fmt = AppFormatter()
+
+    # With a bound context → compact tag present; no timestamp / logger name.
+    with_ctx = logging.LogRecord(
+        name="app.test",
+        level=logging.INFO,
+        pathname=__file__,
+        lineno=1,
+        msg="hello",
+        args=(),
+        exc_info=None,
+    )
+    with prompt_log_context(run_id="R1", purpose="apply_skill"):
+        flt.filter(with_ctx)
+    rendered = _strip_ansi(fmt.format(with_ctx))
+    assert rendered.startswith("INFO:")  # uvicorn level prefix (stable part)
+    assert "[run=R1 purpose=apply_skill]" in rendered
+    assert rendered.endswith("hello")
+    assert "app.test" not in rendered  # no logger name
+
+    # Without context → no tag at all, still prefix-aligned.
+    no_ctx = logging.LogRecord(
+        name="app.test",
+        level=logging.INFO,
+        pathname=__file__,
+        lineno=1,
+        msg="plain",
+        args=(),
+        exc_info=None,
+    )
+    flt.filter(no_ctx)
+    rendered_plain = _strip_ansi(fmt.format(no_ctx))
+    assert rendered_plain.startswith("INFO:")
+    assert "[" not in rendered_plain
+    assert rendered_plain.endswith("plain")
 
 
 def test_trunc_truncates_long_payloads() -> None:
