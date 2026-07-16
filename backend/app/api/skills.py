@@ -136,6 +136,7 @@ def _args_to_config(args: dict, default_model: str) -> SkillConfig:
         output_kind=args.get("output_kind", "md"),
         kind=kind,
         code=args.get("code") or "",
+        non_determinism_reason=args.get("non_determinism_reason") or "",
     )
 
 
@@ -150,6 +151,9 @@ def _validate_config(
     checks apply. Verify-check ids are validated for both kinds.
     """
     errors: list[str] = []
+    if config.kind not in ("agent", "script"):
+        errors.append(f"unknown skill kind: {config.kind!r} (expected 'agent' or 'script')")
+        return errors
     if config.kind == "script":
         try:
             validate_script(config.code)

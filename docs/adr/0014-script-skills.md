@@ -58,12 +58,19 @@ CATALOG-3 вводит второй тип скила — `kind="script"` — к
 1. **Статическая AST-валидация** (build-time, fail-closed): `ast.parse` +
    запрет `import`/`from-import`, dunder-атрибутов (`__builtins__`,
    `__subclasses__`, …) и опасных builtins (`eval`/`exec`/`compile`/`open`/
-   `breakpoint`/`globals`/…).
+   `breakpoint`/`globals`/…). Динамические помощники атрибутов
+   (`getattr`/`hasattr`/`setattr`/`delattr`) также запрещены: они принимают имя
+   атрибута строкой и потому невидимы для dunder-гарда AST (классический побег
+   `getattr(object, "__subclasses__")()`).
 2. **Ограниченный namespace** (runtime): белый список builtins + кураторский
    набор безопасных stdlib-модулей (`json`, `re`, `math`, `statistics`,
    `collections`), предварительно разрешённых в namespace (без import-machinery).
 3. **Таймаут** (`SIGALRM`/`setitimer`, дефолт 5с).
-4. **Ограничение памяти** (`RLIMIT_AS`, дефолт 256 MiB).
+4. **Ограничение памяти** — **отложено**. In-process `RLIMIT_AS` применялся бы
+   ко всему процессу-хосту (`run_script` выполняется в потоке event-loop) и
+   может вызвать ложный `MemoryError` в постороннем коде / уронить хост. Memory
+   isolation перенесена в subprocess-исполнитель (future work); пока беглый
+   скрипт ограничен wall-clock таймаутом.
 
 Скрипт получает входной текст в переменной `document` (alias `input_text`) и
 возвращает результат через `return` из `main()`, через глобальную `result`
@@ -93,7 +100,8 @@ CATALOG-3 вводит второй тип скила — `kind="script"` — к
 
 - **Subprocess + seccomp (option (b))** — надёжнее, но сложнее и тяжелее для
   MVP. Отложено как future work; текущая defence-in-depth (AST + restricted
-  globals + timeout + memory cap) достаточна для первого среза.
+  globals + timeout) достаточна для первого среза, а memory cap намеренно
+  отсутствует in-process (см. выше) и войдёт вместе с subprocess-изоляцией.
 - **Прокси-исполнитель (option (c))** — скрипт = зарегистрированная
   builtin-функция. Отклонено: слишком негибко, не покрывает пользовательские
   сценарии.

@@ -11,16 +11,18 @@ two cooperating pieces:
   access on dunder names (``__builtins__``, ``__globals__`` …), and calls to
   the usual footguns (``eval``/``exec``/``compile``/``open``/``breakpoint``).
 - :func:`run_script` — runtime execution in a restricted namespace: a tiny
-  allow-list of builtins, a curated set of safe stdlib modules, a wall-clock
-  timeout, and a memory ceiling. The script receives the document text in
+  allow-list of builtins, a curated set of safe stdlib modules, and a wall-clock
+  timeout. The script receives the document text in
   ``document`` (alias ``input_text``) and returns its result either by
   ``return``-ing a string from a ``main()`` function, by assigning a global
   ``result`` variable, or via captured ``print`` output.
 
 This is deliberately a *process-local* sandbox (option (a) of the plan's
 sandbox decision): simple and dependency-free, with defence in depth (AST
-gate + restricted globals + timeout + memory cap). A hardened subprocess +
-seccomp isolation is tracked as future work in ADR-0014.
+gate + restricted globals + wall-clock timeout). A memory cap is intentionally
+NOT applied in-process: ``RLIMIT_AS`` would constrain the whole host process
+(run_script executes on the event-loop thread); memory isolation is deferred to
+the hardened subprocess executor tracked as future work in ADR-0014.
 """
 
 from __future__ import annotations
@@ -49,8 +51,10 @@ _SAFE_BUILTINS: dict[str, Any] = {
     "float": float,
     "format": format,
     "frozenset": frozenset,
-    "getattr": getattr,
-    "hasattr": hasattr,
+    # NOTE: getattr/hasattr/setattr are intentionally EXCLUDED. They take an
+    # attribute name as a *string*, which the AST dunder guard cannot see
+    # (it inspects ast.Attribute, not ast.Constant). Allowing them re-opens the
+    # classic escape `getattr(object, "__subclasses__")()`. See validate_script.
     "hash": hash,
     "hex": hex,
     "int": int,
@@ -73,12 +77,14 @@ _SAFE_BUILTINS: dict[str, Any] = {
     "reversed": reversed,
     "round": round,
     "set": set,
-    "setattr": setattr,
     "slice": slice,
     "sorted": sorted,
     "str": str,
     "sum": sum,
     "tuple": tuple,
+    # NOTE: `type` stays usable for isinstance/issubclass and plain
+    # construction; dunder attribute access on it is blocked by validate_script
+    # (e.g. `type(x).__subclasses__` is rejected as dunder access).
     "type": type,
     "zip": zip,
     "True": True,
@@ -121,7 +127,10 @@ try:  # pragma: no cover
 except ImportError:  # pragma: no cover
     pass
 
-# Names that must never be reachable, used by the AST checker.
+# Names that must never be reachable, used by the AST checker. The dynamic
+# attribute helpers (getattr/hasattr/setattr/delattr) take an attribute name as
+# a string, which the dunder guard cannot inspect — so they are fail-closed
+# forbidden even though they are also omitted from _SAFE_BUILTINS.
 _FORBIDDEN_BUILTINS = {
     "__import__",
     "eval",
@@ -136,6 +145,10 @@ _FORBIDDEN_BUILTINS = {
     "memoryview",
     "exit",
     "quit",
+    "getattr",
+    "hasattr",
+    "setattr",
+    "delattr",
 }
 
 # Default per-run limits.
@@ -278,8 +291,10 @@ def run_script(
     """Execute a validated script over ``doc_text`` and return its result string.
 
     The script is run synchronously in the current process inside a restricted
-    namespace (see module docstring). A wall-clock ``timeout_seconds`` and a
-    memory ceiling ``memory_bytes`` bound runaway scripts.
+    namespace (see module docstring). A wall-clock ``timeout_seconds`` bounds
+    runaway scripts. ``memory_bytes`` is accepted for API stability but is a
+    no-op in-process (memory isolation is deferred to the subprocess executor,
+    see ADR-0014).
 
     Raises :class:`ScriptRuntimeError` on timeout, memory overrun, or any
     exception raised by the script itself.
@@ -292,17 +307,13 @@ def run_script(
     if params:
         namespace["params"] = params
 
-    # Memory ceiling via resource (POSIX). Soft limit raises MemoryError on
-    # overrun; hard limit kills the process — we set both to the same value.
-    import resource
-
-    soft, hard = resource.getrlimit(resource.RLIMIT_AS)
-    try:
-        resource.setrlimit(resource.RLIMIT_AS, (memory_bytes, memory_bytes))
-    except (ValueError, OverflowError):
-        # Some platforms reject the requested value; fall back to no cap rather
-        # than refusing to run. The timeout still bounds wall-clock time.
-        pass
+    # NOTE: no in-process memory cap. RLIMIT_AS would apply to the *whole* host
+    # process (run_script runs in the main event-loop thread), causing spurious
+    # MemoryError in unrelated server code and a risk of crashing the host.
+    # Memory isolation is deferred to the hardened subprocess executor tracked
+    # in ADR-0014; for now a runaway script is bounded by the wall-clock timeout
+    # below. `memory_bytes` is accepted for API stability but is a no-op here.
+    del memory_bytes
 
     old_handler = signal.getsignal(signal.SIGALRM)
     # signal.setitimer accepts fractional seconds (signal.alarm is int-only).
@@ -315,18 +326,13 @@ def run_script(
             f"script exceeded the {timeout_seconds}s time limit"
         ) from exc
     except MemoryError as exc:
-        raise ScriptRuntimeError(
-            f"script exceeded the {memory_bytes} byte memory limit"
-        ) from exc
+        # Unlikely now that we don't set RLIMIT_AS, but surface it deterministically.
+        raise ScriptRuntimeError("script exceeded the memory limit") from exc
     except Exception as exc:  # noqa: BLE001 — surface any script error verbatim
         raise ScriptRuntimeError(f"script raised: {exc}") from exc
     finally:
         signal.setitimer(signal.ITIMER_REAL, 0)
         signal.signal(signal.SIGALRM, old_handler)
-        try:
-            resource.setrlimit(resource.RLIMIT_AS, (soft, hard))
-        except (ValueError, OverflowError):
-            pass
 
     return _extract_result(namespace)
 

@@ -53,6 +53,10 @@ class SkillConfig:
     kind: str = "agent"
     # Python source for ``kind="script"`` skills (empty for agent skills).
     code: str = ""
+    # For ``kind="agent"``: the model's explanation of why the task is not
+    # deterministic (CATALOG-3). Empty for ``script`` skills. Persisted so the
+    # reason is captured alongside the config (DoD requirement).
+    non_determinism_reason: str = ""
 
     def to_json(self) -> str:
         """Serialize to a JSON string (stable, utf-8 friendly)."""
@@ -73,6 +77,7 @@ class SkillConfig:
                 "output_kind": self.output_kind,
                 "kind": self.kind,
                 "code": self.code,
+                "non_determinism_reason": self.non_determinism_reason,
             },
             ensure_ascii=False,
         )
@@ -104,4 +109,5 @@ class SkillConfig:
             output_kind=data.get("output_kind", "md"),
             kind=data.get("kind", "agent"),
             code=data.get("code", ""),
+            non_determinism_reason=data.get("non_determinism_reason", ""),
         )

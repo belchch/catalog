@@ -62,6 +62,28 @@ def test_validate_rejects_dunder_attribute_access() -> None:
         validate_script("result = ''.__class__.__bases__")
 
 
+def test_validate_rejects_dynamic_attribute_helpers() -> None:
+    """getattr/hasattr/setattr/delattr take a string attribute name and bypass
+    the AST dunder guard — they must be rejected (sandbox-escape vectors)."""
+    for code in (
+        "result = getattr(object, '__subclasses__')()",
+        "result = hasattr(object, '__subclasses__')",
+        "setattr(result, 'x', 1)",
+        "delattr(object, 'x')",
+    ):
+        with pytest.raises(ScriptValidationError):
+            validate_script(code)
+
+
+def test_validate_rejects_getattr_subclass_escape() -> None:
+    """The textbook CPython sandbox escape via getattr must be blocked."""
+    with pytest.raises(ScriptValidationError):
+        validate_script(
+            "cls = getattr(object, '__subclasses__')()[0]\n"
+            "result = cls.__name__\n"
+        )
+
+
 def test_validate_accepts_clean_code() -> None:
     validate_script("result = document.upper()")
     validate_script(
