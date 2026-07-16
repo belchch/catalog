@@ -103,14 +103,19 @@ async def _run_agent_core(
 
         if use_stream:
             text = ""
+            reasoning_parts: list[str] = []
             async for delta in provider.stream_complete(
                 model, history, tools.specs(), temperature
             ):
-                text += delta
-                yield TokenEvent(delta)
+                if delta.content:
+                    text += delta.content
+                    yield TokenEvent(delta.content)
+                if delta.reasoning:
+                    reasoning_parts.append(delta.reasoning)
             # Stream mode does not parse tool_calls from SSE in this slice;
             # the run finishes at end of stream.
-            trace.entries[-1].data = {"content": text}
+            reasoning = "".join(reasoning_parts) or None
+            trace.entries[-1].data = {"content": text, "reasoning": reasoning}
             history.append(Message(role="assistant", content=text))
             finish_stream = FinishEvent(text, "stop", capped=False, usage={})
             yield finish_stream
@@ -121,6 +126,7 @@ async def _run_agent_core(
         trace.entries[-1].data = {
             "finish_reason": resp.finish_reason,
             "content": resp.content,
+            "reasoning": resp.reasoning,
             "tool_calls": [
                 {"id": tc.id, "name": tc.name, "arguments": tc.arguments}
                 for tc in resp.tool_calls

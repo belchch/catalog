@@ -27,7 +27,14 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.config import Settings
-from app.llm.base import CompletionResult, LLMProvider, Message, ModelInfo, ToolSpec
+from app.llm.base import (
+    CompletionResult,
+    LLMProvider,
+    Message,
+    ModelInfo,
+    StreamDelta,
+    ToolSpec,
+)
 from app.main import app
 from app.storage.db import Database
 
@@ -74,7 +81,7 @@ class FakeProvider:
         tools: list[ToolSpec] | None = None,
         temperature: float = 0.0,
     ) -> Any:
-        yield ""
+        yield StreamDelta(content="")
 
 
 # Static protocol check: FakeProvider satisfies LLMProvider.

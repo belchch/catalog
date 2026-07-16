@@ -10,7 +10,14 @@ from app.agent.events import FinishEvent, StepEvent, VerifyEvent
 from app.agent.registry import ToolRegistry
 from app.documents.ingest import ingest_file
 from app.documents.tools import build_document_tools
-from app.llm.base import CompletionResult, LLMProvider, Message, ModelInfo, ToolSpec
+from app.llm.base import (
+    CompletionResult,
+    LLMProvider,
+    Message,
+    ModelInfo,
+    StreamDelta,
+    ToolSpec,
+)
 from app.skills.apply import apply_skill, apply_skill_collect
 from app.skills.config import SkillConfig, VerifyCheck
 from app.skills.repo_run import get_run
@@ -50,8 +57,8 @@ class ScriptProvider:
         messages: list[Message],
         tools: list[ToolSpec] | None = None,
         temperature: float = 0.0,
-    ):  # type: ignore[no-untyped-def]
-        yield ""
+    ) -> Any:
+        yield StreamDelta(content="")
 
 
 # Static check: ScriptProvider satisfies the protocol.

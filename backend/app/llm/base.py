@@ -42,6 +42,24 @@ class CompletionResult:
     tool_calls: list[ToolCall]
     finish_reason: str
     usage: dict = field(default_factory=dict)
+    # Chain-of-thought / "thinking" text emitted by reasoning models
+    # (``reasoning_content`` in the z.ai/GLM dialect). ``None`` when the
+    # provider does not emit reasoning for this response. See ADR-0013.
+    reasoning: str | None = None
+
+
+@dataclass
+class StreamDelta:
+    """One chunk from a streaming completion.
+
+    ``content`` is the visible text delta; ``reasoning`` carries the model's
+    chain-of-thought (``reasoning_content`` in the z.ai/GLM dialect) when the
+    provider emits it, otherwise ``None``. A delta may carry only ``content``,
+    only ``reasoning``, or both. See ADR-0013 for the streaming contract.
+    """
+
+    content: str = ""
+    reasoning: str | None = None
 
 
 class LLMProvider(Protocol):
@@ -62,7 +80,7 @@ class LLMProvider(Protocol):
         messages: list[Message],
         tools: list[ToolSpec] | None = None,
         temperature: float = 0.0,
-    ) -> AsyncIterator[str]: ...
+    ) -> AsyncIterator[StreamDelta]: ...
 
 
 # --- Serialization helpers --------------------------------------------------

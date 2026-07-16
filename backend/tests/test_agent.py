@@ -13,7 +13,15 @@ from app.agent.events import (
 )
 from app.agent.registry import ToolRegistry
 from app.agent.runner import run_agent, run_agent_collect
-from app.llm.base import CompletionResult, LLMProvider, Message, ModelInfo, ToolCall, ToolSpec
+from app.llm.base import (
+    CompletionResult,
+    LLMProvider,
+    Message,
+    ModelInfo,
+    StreamDelta,
+    ToolCall,
+    ToolSpec,
+)
 
 
 class FakeProvider:
@@ -46,9 +54,9 @@ class FakeProvider:
         messages: list[Message],
         tools: list[ToolSpec] | None = None,
         temperature: float = 0.0,
-    ):  # type: ignore[no-untyped-def]
+    ) -> Any:
         for chunk in self.stream_script:
-            yield chunk
+            yield StreamDelta(content=chunk)
 
 
 # Static check: FakeProvider satisfies the protocol.
