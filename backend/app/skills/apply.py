@@ -142,7 +142,8 @@ async def _apply_core(
                 trace=trace,
             ):
                 yield event
-                log_agent_event(event)
+                # Inner agent events are already logged by _run_agent_core
+                # (single source of truth); re-logging here would duplicate them.
                 if isinstance(event, FinishEvent):
                     text = event.text
                     capped = event.capped
@@ -225,7 +226,9 @@ async def _apply_core(
             usage={},
         )
         yield finish_apply
-        log_agent_event(finish_apply)
+        # apply-finish is not re-logged here: the agent FinishEvent was already
+        # logged once by _run_agent_core, and "apply_skill done" is the
+        # authoritative completion line for the apply layer.
     except Exception:
         # Provider/agent failure: persist a failed run (trace preserved) so the
         # row is never left 'running', then re-raise — the stream consumer gets
