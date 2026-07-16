@@ -39,7 +39,7 @@ permission:
 1. Прочитай PLAN и критерии приёмки.
 2. Дифф для ревью:
    - Если задан DIFF_BASE → git diff <DIFF_BASE>...HEAD (изменения конкретного шага в pipeline).
-   - Иначе → gh pr diff <PR> (или git diff master...HEAD).
+   - Иначе → gh pr diff <PR> (или git diff main...HEAD).
    Проверки (ruff check ., pytest, pnpm run build/lint/typecheck) ВСЕГДА по всему коду.
 3. Сравни с планом/ADR: баги, отклонения, нарушения конвенций.
 4. Запости ревью в PR одной командой (только если PR существует):

@@ -14,7 +14,7 @@ permission:
 
 ## Вход (передаёт /pipeline)
 - STEP — путь к файлу-описанию шага.
-- BRANCH — общая ветка pipeline (напр. pipeline/steps), уже активна. База master.
+- BRANCH — общая ветка pipeline (напр. pipeline/steps), уже активна. База main.
 - PR_URL / PR_NUMBER — PR pipeline (или «нет» на первом шаге).
 - BASE_SHA — git HEAD до начала шага (baseline ревью этого шага).
 - CYCLES_MAX = 5.
@@ -39,7 +39,7 @@ ISSUES = «нет». Для CYCLE = 1..CYCLES_MAX:
 
 ## PR pipeline (один на весь pipeline)
 Если открытого PR для <BRANCH> ещё нет (gh pr list --head <BRANCH> --state open --json number,url пусто) и уже есть хоть один коммит шага:
-gh pr create --base master --head <BRANCH> --title "Pipeline: <slug папки шагов>" --body "Шаги в этой ветке — см. .kilo/.pipeline-state.json". Иначе переиспользуй существующий. PR создаётся ОДИН раз.
+gh pr create --base main --head <BRANCH> --title "Pipeline: <slug папки шагов>" --body "Шаги в этой ветке — см. .kilo/.pipeline-state.json". Иначе переиспользуй существующий. PR создаётся ОДИН раз.
 
 ## Вернуть (ровно этот блок в конце)
 ===STEP===
@@ -57,7 +57,7 @@ ISSUES:
 
 ## Правила
 - НЕ задавай вопросов.
-- Работай ТОЛЬКО в общей ветке BRANCH; не checkout master, не создавай новых веток.
+- Работай ТОЛЬКО в общей ветке BRANCH; не checkout main, не создавай новых веток.
 - Правки кода — только через generator; сам код не правишь.
 - PR создаётся ОДИН раз на весь pipeline.
 - Не мерджи. Не трогай чужие ветки/PR.
