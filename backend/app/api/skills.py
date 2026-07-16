@@ -299,6 +299,7 @@ async def list_skills_endpoint(
             status=r["status"],
             created_at=r["created_at"],
             kind=r.get("kind", "agent"),
+            tags=r.get("tags", []),
         )
         for r in rows
     ]

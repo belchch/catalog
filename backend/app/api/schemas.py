@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class DocumentOut(BaseModel):
@@ -19,6 +19,9 @@ class SkillOut(BaseModel):
     status: str
     created_at: str
     kind: str = "agent"
+    # Derived capability tags (CATALOG-8): "python" (deterministic code) and/or
+    # "ai" (LLM-driven). Computed from the config by the skills endpoint.
+    tags: list[str] = Field(default_factory=list)
 
 
 class ApplyRequest(BaseModel):

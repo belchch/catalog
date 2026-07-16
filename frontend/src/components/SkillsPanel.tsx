@@ -33,16 +33,19 @@ export function SkillsPanel({ skills, documents, defaultDocId, onApply }: Skills
               <div className="flex items-center justify-between gap-2">
                 <span className="truncate text-xs font-medium text-slate-200">{s.name}</span>
                 <div className="flex items-center gap-1.5">
-                  {s.kind === 'script' && (
-                    <span className="rounded bg-sky-600/30 px-1.5 py-0.5 text-[10px] uppercase text-sky-300">
-                      script
+                  {s.tags.map((tag) => (
+                    <span
+                      key={tag}
+                      className={
+                        'rounded px-1.5 py-0.5 text-[10px] uppercase ' +
+                        (tag === 'python'
+                          ? 'bg-amber-600/30 text-amber-300'
+                          : 'bg-fuchsia-600/30 text-fuchsia-300')
+                      }
+                    >
+                      {tag}
                     </span>
-                  )}
-                  {s.kind === 'agent' && (
-                    <span className="rounded bg-fuchsia-600/30 px-1.5 py-0.5 text-[10px] uppercase text-fuchsia-300">
-                      agent
-                    </span>
-                  )}
+                  ))}
                   <span
                     className={
                       'rounded px-1.5 py-0.5 text-[10px] uppercase ' +

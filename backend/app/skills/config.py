@@ -111,3 +111,32 @@ class SkillConfig:
             code=data.get("code", ""),
             non_determinism_reason=data.get("non_determinism_reason", ""),
         )
+
+
+def compute_tags(config: SkillConfig) -> list[str]:
+    """Derive capability tags from a skill config (CATALOG-8).
+
+    The tags are a *derived*, user-facing view of what a skill can do:
+
+    - ``"python"`` — the skill contains deterministic Python code
+      (``kind == "script"`` or non-empty ``code``).
+    - ``"ai"`` — the skill is LLM-driven / non-deterministic
+      (``kind == "agent"`` or a non-empty ``system_prompt`` on a non-script
+      skill).
+
+    A genuinely mixed skill (e.g. an agent that also carries ``code``) gets
+    both tags; the result is a list, not a mutually-exclusive enum.
+
+    ``model`` is intentionally *not* used as a signal: it is always populated
+    (even ``kind="script"`` skills store the default model for config
+    uniformity — see ``_args_to_config``), so it cannot distinguish an agent
+    from a script and would mis-tag pure scripts as ``"ai"``.
+    """
+    tags: list[str] = []
+    if config.kind == "script" or bool(config.code):
+        tags.append("python")
+    if config.kind == "agent" or (
+        bool(config.system_prompt) and config.kind != "script"
+    ):
+        tags.append("ai")
+    return tags

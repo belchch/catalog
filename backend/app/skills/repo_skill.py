@@ -9,13 +9,12 @@ row). ``get_skill`` returns a dataclass carrying both the persisted metadata
 
 from __future__ import annotations
 
-import json
 import sqlite3
 import uuid
 from dataclasses import dataclass
 from datetime import datetime, timezone
 
-from app.skills.config import SkillConfig
+from app.skills.config import SkillConfig, compute_tags
 from app.storage.db import Database
 
 
@@ -82,8 +81,9 @@ def get_skill(db: Database, skill_id: str) -> SkillRecord | None:
 def list_skills(db: Database, status: str | None = None) -> list[dict]:
     """List skills, optionally filtered by status (newest first).
 
-    Each dict includes ``kind`` (parsed from ``config_json``) so the API can
-    surface the skill type without a separate config fetch.
+    Each dict includes ``kind`` and ``tags`` (parsed from ``config_json``) so
+    the API can surface the skill type and capability tags (CATALOG-8) without
+    a separate config fetch.
     """
     with db.connect() as conn:
         if status is not None:
@@ -100,9 +100,14 @@ def list_skills(db: Database, status: str | None = None) -> list[dict]:
     result: list[dict] = []
     for r in rows:
         try:
-            config_kind = json.loads(r["config_json"]).get("kind", "agent")
+            config = SkillConfig.from_json(r["config_json"])
+            config_kind = config.kind
+            config_tags = compute_tags(config)
         except (ValueError, KeyError):
+            # Unparseable/legacy config: degrade to the agent defaults so the
+            # row still renders on the UI with an ``ai`` tag.
             config_kind = "agent"
+            config_tags = ["ai"]
         result.append(
             {
                 "id": r["id"],
@@ -112,6 +117,7 @@ def list_skills(db: Database, status: str | None = None) -> list[dict]:
                 "created_at": r["created_at"],
                 "updated_at": r["updated_at"],
                 "kind": config_kind,
+                "tags": config_tags,
             }
         )
     return result

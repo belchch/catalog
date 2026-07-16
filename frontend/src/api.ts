@@ -15,6 +15,9 @@ export interface SkillOut {
   status: string
   created_at: string
   kind: string
+  // Derived capability tags (CATALOG-8): "python" (deterministic code) and/or
+  // "ai" (LLM-driven). Computed by the backend from the skill config.
+  tags: string[]
 }
 
 export interface RunOut {

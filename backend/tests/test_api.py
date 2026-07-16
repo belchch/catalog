@@ -8,7 +8,7 @@ provider is a :class:`FakeProvider` whose ``script`` is populated per test.
 from __future__ import annotations
 
 from app.llm.base import CompletionResult, ToolCall
-from app.skills.config import SkillConfig, VerifyCheck
+from app.skills.config import SkillConfig, VerifyCheck, compute_tags
 from app.skills.repo_skill import create_skill, get_skill, update_status
 from app.storage.repo_message import add_message, list_messages
 
@@ -318,6 +318,87 @@ def test_list_skills(client, db) -> None:
     draft_resp = client.get("/skills?status=draft")
     assert draft_resp.status_code == 200
     assert all(r["status"] == "draft" for r in draft_resp.json())
+
+
+# --------------------------------------------------------------------------- #
+# Capability tags (CATALOG-8)
+# --------------------------------------------------------------------------- #
+
+
+def test_compute_tags_agent_script_mixed_legacy() -> None:
+    """compute_tags derives python/ai from the config (CATALOG-8 rules)."""
+    # Pure agent: prompt, no code -> ["ai"].
+    agent = SkillConfig(
+        name="a",
+        description="d",
+        system_prompt="You do the task.",
+        allowed_tools=[],
+        model="test/model",
+        kind="agent",
+    )
+    assert compute_tags(agent) == ["ai"]
+
+    # Pure script: code, no prompt -> ["python"].
+    script = SkillConfig(
+        name="s",
+        description="d",
+        system_prompt="",
+        allowed_tools=[],
+        model="test/model",
+        kind="script",
+        code="result = document.upper()\n",
+    )
+    assert compute_tags(script) == ["python"]
+
+    # Mixed: agent kind that also carries code -> both tags.
+    mixed = SkillConfig(
+        name="m",
+        description="d",
+        system_prompt="You do the task.",
+        allowed_tools=[],
+        model="test/model",
+        kind="agent",
+        code="result = 1\n",
+    )
+    assert compute_tags(mixed) == ["python", "ai"]
+
+    # Legacy: no kind -> defaults to "agent" -> ["ai"].
+    legacy = SkillConfig(
+        name="l",
+        description="d",
+        system_prompt="You do the task.",
+        allowed_tools=[],
+        model="test/model",
+    )
+    assert legacy.kind == "agent"
+    assert compute_tags(legacy) == ["ai"]
+
+
+def test_list_skills_endpoint_returns_tags(client, db) -> None:
+    """GET /skills surfaces computed tags per skill (CATALOG-8)."""
+    # An agent skill (the default helper) and a script skill.
+    _seed_committed_skill(db, name="AgentSkill")
+    script_config = SkillConfig(
+        name="ScriptSkill",
+        description="deterministic script",
+        system_prompt="",
+        allowed_tools=[],
+        model="test/model",
+        kind="script",
+        code="result = document.upper()\n",
+    )
+    create_skill(
+        db,
+        name=script_config.name,
+        description=script_config.description,
+        config=script_config,
+        status="committed",
+    )
+
+    rows = client.get("/skills").json()
+    by_name = {r["name"]: r for r in rows}
+    assert by_name["AgentSkill"]["tags"] == ["ai"]
+    assert by_name["ScriptSkill"]["tags"] == ["python"]
 
 
 # --------------------------------------------------------------------------- #
