@@ -57,6 +57,10 @@ class SkillConfig:
     # deterministic (CATALOG-3). Empty for ``script`` skills. Persisted so the
     # reason is captured alongside the config (DoD requirement).
     non_determinism_reason: str = ""
+    # Expected number of input documents (CATALOG-4): ``1``, ``2``, ... or
+    # ``None`` for an arbitrary-length list. ``None`` (the default) keeps the
+    # legacy "any number >= 1" behaviour, so old configs deserialize unchanged.
+    input_arity: int | None = None
 
     def to_json(self) -> str:
         """Serialize to a JSON string (stable, utf-8 friendly)."""
@@ -78,6 +82,7 @@ class SkillConfig:
                 "kind": self.kind,
                 "code": self.code,
                 "non_determinism_reason": self.non_determinism_reason,
+                "input_arity": self.input_arity,
             },
             ensure_ascii=False,
         )
@@ -110,6 +115,7 @@ class SkillConfig:
             kind=data.get("kind", "agent"),
             code=data.get("code", ""),
             non_determinism_reason=data.get("non_determinism_reason", ""),
+            input_arity=data.get("input_arity"),
         )
 
 

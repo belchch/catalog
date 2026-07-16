@@ -43,7 +43,8 @@ BUILD_SKILL_SYSTEM_PROMPT = (
     "заполни non_determinism_reason объяснением, почему детерминизм невозможен. "
     "Для agent также заполни system_prompt (полная инструкция агенту), "
     "allowed_tools (только из доступных инструментов), model, verify_checks "
-    "(только из реестра проверок)."
+    "(только из реестра проверок). Укажи input_arity — сколько входных "
+    "документов ожидает скил (1, 2, …), либо опусти/null если число любое."
 )
 
 # JSON-Schema for the build_skill tool arguments, mirroring SkillConfig fields.
@@ -65,6 +66,13 @@ _BUILD_SKILL_PARAMETERS = {
             "description": (
                 "Python source for kind=script skills. No import/open/eval/exec; "
                 "input in `document`; output via main()/result/print."
+            ),
+        },
+        "input_arity": {
+            "type": ["integer", "null"],
+            "description": (
+                "How many input documents this skill expects (CATALOG-4): "
+                "1, 2, ... or null for an arbitrary-length list. Omit/null = any >=1."
             ),
         },
         "non_determinism_reason": {
@@ -137,6 +145,7 @@ def _args_to_config(args: dict, default_model: str) -> SkillConfig:
         kind=kind,
         code=args.get("code") or "",
         non_determinism_reason=args.get("non_determinism_reason") or "",
+        input_arity=args.get("input_arity"),
     )
 
 

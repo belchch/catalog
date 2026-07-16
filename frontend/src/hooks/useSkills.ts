@@ -8,7 +8,7 @@ export interface UseSkillsResult {
   error: string | null
   refresh: () => Promise<void>
   commit: (skillId: string) => Promise<void>
-  apply: (skillId: string, docId: string) => Promise<string>
+  apply: (skillId: string, docIds: string[]) => Promise<string>
 }
 
 export function useSkills(): UseSkillsResult {
@@ -35,8 +35,8 @@ export function useSkills(): UseSkillsResult {
     )
   }, [])
 
-  const apply = useCallback(async (skillId: string, docId: string) => {
-    const { run_id } = await applySkill(skillId, docId)
+  const apply = useCallback(async (skillId: string, docIds: string[]) => {
+    const { run_id } = await applySkill(skillId, docIds)
     return run_id
   }, [])
 

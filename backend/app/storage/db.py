@@ -4,7 +4,7 @@ import sqlite3
 from collections.abc import Iterator
 from contextlib import contextmanager
 
-from app.storage.schema import SCHEMA_SQL
+from app.storage.schema import ADDITIVE_MIGRATIONS, SCHEMA_SQL
 
 
 class Database:
@@ -25,9 +25,24 @@ class Database:
             self._mem_conn.row_factory = sqlite3.Row
 
     def init_schema(self) -> None:
-        """Create all tables (idempotent)."""
+        """Create all tables (idempotent) and apply additive migrations.
+
+        ``CREATE TABLE IF NOT EXISTS`` only covers fresh databases; columns
+        added after the initial release are applied via guarded
+        ``ALTER TABLE`` (see ``ADDITIVE_MIGRATIONS``). Each ALTER is wrapped so
+        a "duplicate column" error on an already-migrated database is treated
+        as success.
+        """
         with self.connect() as conn:
             conn.executescript(SCHEMA_SQL)
+            for _table, _column, ddl in ADDITIVE_MIGRATIONS:
+                try:
+                    conn.execute(ddl)
+                except sqlite3.OperationalError as exc:
+                    # SQLite raises "duplicate column name" when the column
+                    # already exists — that is the idempotent success case.
+                    if "duplicate column" not in str(exc).lower():
+                        raise
 
     @contextmanager
     def connect(self) -> Iterator[sqlite3.Connection]:

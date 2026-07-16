@@ -154,7 +154,7 @@ async def run_golden(
         workspace_dir=workspace_dir,
         skill=skill.config,
         skill_id=skill_id,
-        input_doc_id=doc2.id,
+        input_doc_ids=[doc2.id],
         base_tools=tools,
     )
     assert result.status == "ok", f"apply status={result.status}"

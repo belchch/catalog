@@ -24,6 +24,7 @@ export interface RunOut {
   id: string
   skill_id: string
   input_doc_id: string | null
+  input_doc_ids: string[] | null
   output_doc_id: string | null
   status: string
   trace: unknown[] | null
@@ -91,11 +92,11 @@ export function listSkills(status?: string): Promise<SkillOut[]> {
   return jsonFetch<SkillOut[]>(`/skills${qs}`)
 }
 
-export function applySkill(skillId: string, docId: string): Promise<RunCreated> {
+export function applySkill(skillId: string, docIds: string[]): Promise<RunCreated> {
   return jsonFetch<RunCreated>(`/skills/${skillId}/apply`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ doc_id: docId }),
+    body: JSON.stringify({ doc_ids: docIds }),
   })
 }
 

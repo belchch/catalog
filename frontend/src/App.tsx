@@ -57,10 +57,10 @@ export default function App() {
   }, [sessionId, skillsHook])
 
   const handleApply = useCallback(
-    async (skillId: string, docId: string) => {
+    async (skillId: string, docIds: string[]) => {
       setNotice(null)
       try {
-        const runId = await skillsHook.apply(skillId, docId)
+        const runId = await skillsHook.apply(skillId, docIds)
         setActiveRunId(runId)
       } catch (e) {
         setNotice(e instanceof Error ? e.message : String(e))

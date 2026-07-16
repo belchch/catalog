@@ -478,3 +478,55 @@ def test_apply_requires_committed_skill(client, db) -> None:
 
     resp = client.post(f"/skills/{skill_id}/apply", json={"doc_id": doc_id})
     assert resp.status_code == 409
+
+
+def test_apply_multi_doc_via_api(client, provider, db) -> None:
+    """POST /skills/{id}/apply accepts doc_ids (list); GET /runs returns the list."""
+    doc_a = _upload(client, "a.md", b"first source")
+    doc_b = _upload(client, "b.md", b"second source")
+    skill_id = _seed_committed_skill(
+        db, verify_checks=[VerifyCheck("non_empty")], max_retries=2
+    )
+    provider.script = [_completion("# Result\n\nMulti-doc output.")]
+
+    run_id = client.post(
+        f"/skills/{skill_id}/apply", json={"doc_ids": [doc_a, doc_b]}
+    ).json()["run_id"]
+
+    frames = _drain_run_ws(client, run_id)
+    assert frames[-1]["type"] == "finish"
+    assert frames[-1]["status"] == "ok"
+
+    run = client.get(f"/runs/{run_id}").json()
+    assert run["status"] == "ok"
+    assert run["input_doc_ids"] == [doc_a, doc_b]
+
+
+def test_apply_arity_mismatch_returns_422(client, db) -> None:
+    """A skill declaring input_arity=2 rejects a single-doc apply with 422."""
+    doc_id = _upload(client, "input.md", b"source text")
+    config = SkillConfig(
+        name="Merger",
+        description="needs exactly two docs",
+        system_prompt="You merge two documents.",
+        allowed_tools=["read_document"],
+        model="test/model",
+        max_iterations=4,
+        max_retries=1,
+        verify_checks=[VerifyCheck("non_empty")],
+        input_arity=2,
+    )
+    skill_id = create_skill(
+        db, name=config.name, description=config.description, config=config, status="committed"
+    )
+
+    resp = client.post(f"/skills/{skill_id}/apply", json={"doc_ids": [doc_id]})
+    assert resp.status_code == 422
+    assert "expects 2 input" in resp.json()["detail"]
+
+
+def test_apply_requires_at_least_one_doc(client, db) -> None:
+    """An empty doc list (no doc_ids and no doc_id) is rejected with 422."""
+    skill_id = _seed_committed_skill(db)
+    resp = client.post(f"/skills/{skill_id}/apply", json={})
+    assert resp.status_code == 422

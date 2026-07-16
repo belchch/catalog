@@ -65,7 +65,7 @@ async def _apply_core(
     workspace_dir: str,
     skill: SkillConfig,
     skill_id: str,
-    input_doc_id: str,
+    input_doc_ids: list[str],
     base_tools: ToolRegistry,
     session_id: str | None,
     trace: Trace,
@@ -87,11 +87,28 @@ async def _apply_core(
     a provider/agent exception marks the run ``failed`` (trace preserved) and
     re-raises, so an abandoned or errored stream never leaves an orphaned
     ``status='running'`` row.
+
+    CATALOG-4: ``input_doc_ids`` carries one or more input documents. They are
+    all loaded here (any missing → ``ValueError``); a skill declaring
+    ``input_arity`` rejects a count mismatch (→ ``ValueError``); the agent start
+    message lists every input.
     """
-    # 1. Load input document.
-    doc = get_document(db, input_doc_id)
-    if doc is None:
-        raise ValueError(f"input document not found: {input_doc_id}")
+    # 1. Load ALL input documents (fail early if any is missing).
+    if not input_doc_ids:
+        raise ValueError("apply requires at least one input document")
+    docs = []
+    for doc_id in input_doc_ids:
+        d = get_document(db, doc_id)
+        if d is None:
+            raise ValueError(f"input document not found: {doc_id}")
+        docs.append(d)
+
+    # Arity check (CATALOG-4): a skill may declare how many inputs it expects.
+    if skill.input_arity is not None and len(input_doc_ids) != skill.input_arity:
+        raise ValueError(
+            f"skill expects {skill.input_arity} input document(s), "
+            f"got {len(input_doc_ids)}"
+        )
 
     # 2. Filter tools (fail-closed on unknown names).
     tools = base_tools.filter(skill.allowed_tools)
@@ -99,14 +116,14 @@ async def _apply_core(
     # 3. Create the skill_run row (or reuse a pre-created one).
     if run_id is None:
         run_id = create_run(
-            db, skill_id=skill_id, session_id=session_id, input_doc_id=input_doc_id
+            db, skill_id=skill_id, session_id=session_id, input_doc_ids=input_doc_ids
         )
 
     logger.info(
-        "apply_skill start skill=%s skill_id=%s input_doc=%s run_id=%s",
+        "apply_skill start skill=%s skill_id=%s input_docs=%d run_id=%s",
         skill.name,
         skill_id,
-        input_doc_id,
+        len(input_doc_ids),
         run_id,
     )
 
@@ -125,7 +142,12 @@ async def _apply_core(
             # once over the document text. Retrying is pointless (same input
             # always yields the same output), so there is a single attempt and
             # a single verify pass — then the shared persist/finish tail.
-            doc_text = extract_text(str(Path(workspace_dir) / doc.path), doc.kind)
+            doc_texts = [
+                extract_text(str(Path(workspace_dir) / d.path), d.kind) for d in docs
+            ]
+            # Single document → its text verbatim. Multiple → joined with a
+            # separator so the script sees all input content.
+            doc_text = doc_texts[0] if len(doc_texts) == 1 else "\n\n---\n\n".join(doc_texts)
             try:
                 text = await run_script_async(skill.code, doc_text)
             except ScriptRuntimeError as exc:
@@ -153,10 +175,17 @@ async def _apply_core(
             passed = result.passed
         else:
             # ---- Agent path (ADR-0001/0002) ----
-            user_msg = Message(
-                role="user",
-                content=f"Обработай документ {input_doc_id} ({doc.title}).",
-            )
+            # Build the start message listing every input document (CATALOG-4).
+            if len(docs) == 1:
+                start_content = (
+                    f"Обработай документ {input_doc_ids[0]} ({docs[0].title})."
+                )
+            else:
+                listing = ", ".join(
+                    f"{did} ({d.title})" for did, d in zip(input_doc_ids, docs)
+                )
+                start_content = f"Обработай документы: {listing}."
+            user_msg = Message(role="user", content=start_content)
             messages: list[Message] = [user_msg]
 
             # max_retries = number of retries after the first attempt.
@@ -219,9 +248,13 @@ async def _apply_core(
         # 5. Persist result on success.
         if passed:
             out_id = uuid.uuid4().hex
+            if len(docs) == 1:
+                result_title = f"{skill.name} — {docs[0].title}"
+            else:
+                result_title = f"{skill.name} — {docs[0].title} (+{len(docs) - 1})"
             create_document(
                 db,
-                title=f"{skill.name} — {doc.title}",
+                title=result_title,
                 path=f"results/{out_id}.md",
                 kind="result_md",
                 doc_id=out_id,
@@ -305,17 +338,18 @@ async def apply_skill(
     # id of the committed skill row. Carrying it on SkillConfig would couple
     # the frozen config to a specific DB row.
     skill_id: str,
-    input_doc_id: str,
+    input_doc_ids: list[str],
     base_tools: ToolRegistry,
     session_id: str | None = None,
     run_id: str | None = None,
 ) -> AsyncIterator[AgentEvent]:
-    """Run a skill over a document, streaming :data:`AgentEvent` items.
+    """Run a skill over one or more documents, streaming :data:`AgentEvent` items.
 
     Emits the agent-loop events (step/tool/finish) interleaved with
     :class:`VerifyEvent` after each verify pass, plus a final
     :class:`FinishEvent`. Raises :class:`ValueError` for a missing input
-    document or an unknown ``allowed_tools`` entry (fail-closed).
+    document, an arity mismatch, or an unknown ``allowed_tools`` entry
+    (fail-closed).
 
     When ``run_id`` is supplied the existing ``skill_run`` row is reused
     (used by the ``WS /runs/{id}/stream`` endpoint which creates the row in
@@ -329,7 +363,7 @@ async def apply_skill(
         workspace_dir=workspace_dir,
         skill=skill,
         skill_id=skill_id,
-        input_doc_id=input_doc_id,
+        input_doc_ids=input_doc_ids,
         base_tools=base_tools,
         session_id=session_id,
         trace=trace,
@@ -346,7 +380,7 @@ async def apply_skill_collect(
     workspace_dir: str,
     skill: SkillConfig,
     skill_id: str,
-    input_doc_id: str,
+    input_doc_ids: list[str],
     base_tools: ToolRegistry,
     session_id: str | None = None,
     run_id: str | None = None,
@@ -360,7 +394,7 @@ async def apply_skill_collect(
         workspace_dir=workspace_dir,
         skill=skill,
         skill_id=skill_id,
-        input_doc_id=input_doc_id,
+        input_doc_ids=input_doc_ids,
         base_tools=base_tools,
         session_id=session_id,
         trace=trace,

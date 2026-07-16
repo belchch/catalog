@@ -38,8 +38,18 @@ async def apply_endpoint(
             status_code=409,
             detail="skill must be committed before apply",
         )
+    # Arity check (CATALOG-4): a skill may declare how many inputs it expects.
+    doc_ids = req.doc_ids
+    if skill.config.input_arity is not None and len(doc_ids) != skill.config.input_arity:
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                f"skill expects {skill.config.input_arity} input document(s), "
+                f"got {len(doc_ids)}"
+            ),
+        )
     run_id = create_run(
-        db, skill_id=skill_id, session_id=None, input_doc_id=req.doc_id
+        db, skill_id=skill_id, session_id=None, input_doc_ids=doc_ids
     )
     return RunCreated(run_id=run_id)
 
@@ -58,6 +68,7 @@ async def get_run_endpoint(run_id: str, db: Database = Depends(get_db)) -> RunOu
         id=row["id"],
         skill_id=row["skill_id"],
         input_doc_id=row["input_doc_id"],
+        input_doc_ids=row["input_doc_ids"],
         output_doc_id=row["output_doc_id"],
         status=row["status"],
         trace=trace,
@@ -91,8 +102,8 @@ async def run_stream_ws(websocket: WebSocket, run_id: str) -> None:
         await websocket.close()
         return
 
-    input_doc_id = run["input_doc_id"]
-    if not input_doc_id:
+    input_doc_ids = run["input_doc_ids"]
+    if not input_doc_ids:
         await websocket.send_json(
             {"type": "error", "message": "run has no input document"}
         )
@@ -110,7 +121,7 @@ async def run_stream_ws(websocket: WebSocket, run_id: str) -> None:
                 workspace_dir=workspace,
                 skill=skill.config,
                 skill_id=run["skill_id"],
-                input_doc_id=input_doc_id,
+                input_doc_ids=input_doc_ids,
                 base_tools=tools,
                 run_id=run_id,
             ):

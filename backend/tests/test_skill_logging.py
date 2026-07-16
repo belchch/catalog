@@ -251,7 +251,7 @@ def test_apply_logging(
             workspace_dir=str(workspace),
             skill=skill,
             skill_id=skill_id,
-            input_doc_id=input_doc_id,
+            input_doc_ids=[input_doc_id],
             base_tools=build_document_tools(db, workspace),
         )
     )
@@ -263,7 +263,7 @@ def test_apply_logging(
     joined = "\n".join(messages)
 
     assert any(
-        m.startswith("apply_skill start") and f"skill_id={skill_id}" in m and f"input_doc={input_doc_id}" in m
+        m.startswith("apply_skill start") and f"skill_id={skill_id}" in m and "input_docs=1" in m
         for m in messages
     ), joined
     assert any(
@@ -366,7 +366,7 @@ def test_no_duplicate_logging(
             workspace_dir=str(workspace),
             skill=skill,
             skill_id=skill_id,
-            input_doc_id=input_doc_id,
+            input_doc_ids=[input_doc_id],
             base_tools=build_document_tools(db, workspace),
         )
     )

@@ -130,7 +130,7 @@ def test_apply_success_first_try(db: Database, workspace: Path) -> None:
             workspace_dir=str(workspace),
             skill=skill,
             skill_id=skill_id,
-            input_doc_id=input_doc_id,
+            input_doc_ids=[input_doc_id],
             base_tools=build_document_tools(db, workspace),
         )
     )
@@ -181,7 +181,7 @@ def test_apply_retry_then_success(db: Database, workspace: Path) -> None:
             workspace_dir=str(workspace),
             skill=skill,
             skill_id=skill_id,
-            input_doc_id=input_doc_id,
+            input_doc_ids=[input_doc_id],
             base_tools=build_document_tools(db, workspace),
         )
     )
@@ -221,7 +221,7 @@ def test_apply_verify_never_passes(db: Database, workspace: Path) -> None:
             workspace_dir=str(workspace),
             skill=skill,
             skill_id=skill_id,
-            input_doc_id=input_doc_id,
+            input_doc_ids=[input_doc_id],
             base_tools=build_document_tools(db, workspace),
         )
     )
@@ -264,7 +264,7 @@ def test_apply_filters_tools(db: Database, workspace: Path) -> None:
             workspace_dir=str(workspace),
             skill=skill,
             skill_id=skill_id,
-            input_doc_id=input_doc_id,
+            input_doc_ids=[input_doc_id],
             base_tools=build_document_tools(db, workspace),
         )
     )
@@ -296,7 +296,7 @@ def test_apply_unknown_allowed_tool(db: Database, workspace: Path) -> None:
                 workspace_dir=str(workspace),
                 skill=skill,
                 skill_id=skill_id,
-                input_doc_id=input_doc_id,
+                input_doc_ids=[input_doc_id],
                 base_tools=build_document_tools(db, workspace),
             )
         )
@@ -325,7 +325,7 @@ def test_apply_missing_input_doc_raises(db: Database, workspace: Path) -> None:
                 workspace_dir=str(workspace),
                 skill=skill,
                 skill_id=skill_id,
-                input_doc_id="nonexistent",
+                input_doc_ids=["nonexistent"],
                 base_tools=build_document_tools(db, workspace),
             )
         )
@@ -347,7 +347,7 @@ def test_apply_no_verify_checks_passes(db: Database, workspace: Path) -> None:
             workspace_dir=str(workspace),
             skill=skill,
             skill_id=skill_id,
-            input_doc_id=input_doc_id,
+            input_doc_ids=[input_doc_id],
             base_tools=build_document_tools(db, workspace),
         )
     )
@@ -388,7 +388,7 @@ def test_apply_script_skill(db: Database, workspace: Path) -> None:
             workspace_dir=str(workspace),
             skill=skill,
             skill_id=skill_id,
-            input_doc_id=input_doc_id,
+            input_doc_ids=[input_doc_id],
             base_tools=build_document_tools(db, workspace),
         )
     )
@@ -420,6 +420,102 @@ def test_apply_script_skill(db: Database, workspace: Path) -> None:
     script_entries = [e for e in result.trace.entries if e.kind == "script"]
     assert len(script_entries) == 1
     assert script_entries[0].data["ok"] is True
+
+
+def _ingest_named(db: Database, workspace: Path, filename: str, content: bytes) -> str:
+    row = ingest_file(db, workspace, filename=filename, content=content)
+    return row.id
+
+
+def test_apply_multi_doc(db: Database, workspace: Path) -> None:
+    """A skill applied to several documents loads them all and persists a result."""
+    skill = _make_skill(verify_checks=[VerifyCheck("non_empty")])
+    skill_id = create_skill(
+        db, name=skill.name, description=skill.description, config=skill
+    )
+    doc_a = _ingest_named(db, workspace, "a.md", b"first document")
+    doc_b = _ingest_named(db, workspace, "b.md", b"second document")
+
+    provider = ScriptProvider([_result("# Summary\n\nBoth documents.")])
+    result = asyncio.run(
+        apply_skill_collect(
+            provider=provider,
+            db=db,
+            workspace_dir=str(workspace),
+            skill=skill,
+            skill_id=skill_id,
+            input_doc_ids=[doc_a, doc_b],
+            base_tools=build_document_tools(db, workspace),
+        )
+    )
+
+    assert result.status == "ok"
+    assert result.output_doc_id is not None
+    # The start message listed both documents (provider saw the user message).
+    assert provider.seen_tools is not None
+
+    # skill_run row records both input ids.
+    with db.connect() as conn:
+        import json as _json
+
+        row = conn.execute(
+            "SELECT input_doc_ids FROM skill_run WHERE skill_id = ?",
+            (skill_id,),
+        ).fetchone()
+    assert _json.loads(row["input_doc_ids"]) == [doc_a, doc_b]
+
+
+def test_apply_arity_mismatch(db: Database, workspace: Path) -> None:
+    """A skill declaring input_arity=2 rejects a single-document apply."""
+    skill = _make_skill(verify_checks=[VerifyCheck("non_empty")])
+    skill.input_arity = 2
+    skill_id = create_skill(
+        db, name=skill.name, description=skill.description, config=skill
+    )
+    doc_a = _ingest_input(db, workspace)
+    provider = ScriptProvider([_result("ok")])
+
+    with pytest.raises(ValueError, match="expects 2 input"):
+        asyncio.run(
+            apply_skill_collect(
+                provider=provider,
+                db=db,
+                workspace_dir=str(workspace),
+                skill=skill,
+                skill_id=skill_id,
+                input_doc_ids=[doc_a],
+                base_tools=build_document_tools(db, workspace),
+            )
+        )
+
+    # No run should have been persisted (validated before create_run).
+    with db.connect() as conn:
+        row = conn.execute(
+            "SELECT COUNT(*) as n FROM skill_run WHERE skill_id = ?",
+            (skill_id,),
+        ).fetchone()
+    assert row["n"] == 0
+
+
+def test_skill_config_input_arity_roundtrip() -> None:
+    """input_arity survives serialization; legacy configs default to None."""
+    skill = SkillConfig(
+        name="x",
+        description="d",
+        system_prompt="",
+        allowed_tools=[],
+        model="m",
+        input_arity=2,
+    )
+    restored = SkillConfig.from_json(skill.to_json())
+    assert restored.input_arity == 2
+
+    legacy = SkillConfig.from_json(
+        '{"name":"x","description":"d","system_prompt":"","allowed_tools":[],'
+        '"model":"m","temperature":0,"max_iterations":1,"max_retries":0,'
+        '"verify_checks":[],"output_kind":"md"}'
+    )
+    assert legacy.input_arity is None
 
 
 def test_get_skill_returns_config(db: Database) -> None:
@@ -455,7 +551,7 @@ def test_get_run_returns_row(db: Database, workspace: Path) -> None:
             workspace_dir=str(workspace),
             skill=skill,
             skill_id=skill_id,
-            input_doc_id=input_doc_id,
+            input_doc_ids=[input_doc_id],
             base_tools=build_document_tools(db, workspace),
         )
     )
@@ -580,7 +676,7 @@ def test_apply_skill_streams_inner_events(db: Database, workspace: Path) -> None
                 workspace_dir=str(workspace),
                 skill=skill,
                 skill_id=skill_id,
-                input_doc_id=input_doc_id,
+                input_doc_ids=[input_doc_id],
                 base_tools=build_document_tools(db, workspace),
             )
         )
