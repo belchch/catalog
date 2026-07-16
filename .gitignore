@@ -33,3 +33,7 @@ prompt_logs/
 # IDE
 .idea/
 .vscode/
+
+# Kilo local state (plans may contain secrets like API tokens)
+.kilo/plans/
+.kilo/worktrees/
