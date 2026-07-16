@@ -17,6 +17,7 @@
 | [0009](0009-openrouter-provider.md) | LLM через OpenRouter (selector + pin + streaming) | Accepted |
 | [0010](0010-first-slice-scope.md) | Скоуп первого среза и non-goals | Accepted |
 | [0011](0011-frontend-stack-tailwind.md) | Фронтенд-стек: React (Vite) + TypeScript + Tailwind | Accepted |
+| [0012](0012-data-root-and-git-repos.md) | Data-root вне репо исходников + два app-owned git-репозитория | Accepted |
 
 ## Связанные материалы
 - Исходные транскрипции: `../pre-design/` (`opus-chat.json` — фундаментальные решения; `fable-review.json` — критика и уточнения).
