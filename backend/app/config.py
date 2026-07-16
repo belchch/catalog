@@ -13,6 +13,10 @@ OPENROUTER_FALLBACK_MODEL = "google/gemini-2.5-flash"
 APP_WORKSPACE = os.getenv("APP_WORKSPACE", "workspace")
 APP_DB_PATH = os.getenv("APP_DB_PATH", "catalog.db")
 
+# Logging — root level for the ``app`` logger hierarchy (default INFO).
+# Read once at import time so Settings carries a stable value.
+LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
+
 # Prompt logging — raw request/response capture for quality analysis.
 # Disabled by default; opt-in via PROMPT_LOG_ENABLED=1.
 _TRUTHY = {"1", "true", "yes", "on"}
@@ -37,6 +41,7 @@ class Settings:
     default_model: str = OPENROUTER_DEFAULT_MODEL
     prompt_log_enabled: bool = PROMPT_LOG_ENABLED
     prompt_log_dir: str = PROMPT_LOG_DIR
+    log_level: str = LOG_LEVEL
 
 
 def get_settings() -> Settings:

@@ -25,7 +25,13 @@ from app.api import documents, runs, sessions, skills
 from app.config import Settings, get_settings
 from app.documents.tools import build_document_tools
 from app.llm.openrouter import OpenRouterProvider, build_debug_hooks
+from app.logging_config import setup_logging
 from app.storage.db import Database
+
+# Configure stdout logging at import time so every ``app.*`` log line carries
+# the correlation context. Runs once when ``app.main`` is first imported
+# (after uvicorn has set up its own loggers); idempotent on re-import.
+setup_logging(level=get_settings().log_level)
 
 
 @asynccontextmanager
