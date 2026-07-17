@@ -167,11 +167,12 @@ def test_stream_logs_assembled_text(log_dir: Path) -> None:
         client = httpx.AsyncClient(transport=transport)
         provider = OpenRouterProvider(client=client, api_key="k", base_url="https://x/api/v1")
         chunks: list[str] = []
-        async for chunk in provider.stream_complete(
+        async for delta in provider.stream_complete(
             model="openai/gpt-4",
             messages=[Message(role="user", content="Say hi")],
         ):
-            chunks.append(chunk)
+            if delta.content:
+                chunks.append(delta.content)
         assert chunks == ["Hello", " world"]
 
     asyncio.run(_run())

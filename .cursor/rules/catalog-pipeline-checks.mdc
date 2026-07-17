@@ -1,0 +1,14 @@
+---
+description: Проверки/DoD и запрет секретов для работы pipeline (catalog-pipeline, catalog-generator, catalog-reviewer)
+alwaysApply: false
+globs: docs/plan/night-shift/**,backend/**,frontend/**
+---
+
+# Инварианты pipeline-агентов
+
+- **Команды проверок** (гонять по всему коду, не только по диффу):
+  - backend (из `backend/`): `ruff check .`, `pytest`
+  - frontend (из `frontend/`): `pnpm run build`, `pnpm run lint`, `pnpm run typecheck`
+- **Definition of Done шага** = критерии приёмки в файле плана шага (`docs/plan/night-shift/CATALOG-*.md`) + все команды выше зелёные + нет Critical/Medium замечаний ревьюера.
+- **Секреты**: ключи и токены — только через `.env`/переменные окружения (`${env:VAR}` в MCP-конфигах). Никогда не хардкодить в коде, промптах агентов или файлах состояния. Никогда не коммитить `.env*` (кроме `.env.example`), `.cursor/state/*`, `.kilo/plans/*`.
+- Файл состояния пайплайна (`.cursor/state/night-shift*.json`) — только у parent-оркестратора; подагенты (`catalog-generator`, `catalog-reviewer`) его не читают и не пишут.

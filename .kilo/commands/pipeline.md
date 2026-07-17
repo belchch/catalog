@@ -7,11 +7,11 @@ agent: code
 
 ## Подготовка
 1. STEPS_DIR = $1. Если пусто/не существует — выведи диагностику и закончи (это не «остановка посреди», это неверный запуск).
-2. SLUG = basename(STEPS_DIR). BRANCH = pipeline/<SLUG>. База = master.
+2. SLUG = basename(STEPS_DIR). BRANCH = pipeline/<SLUG>. База = main.
 3. STATE = .kilo/.pipeline-state.json. Прочитай, если есть: { branch, pr_url, pr_number, steps{} }.
 4. Общая ветка (одна на весь pipeline):
-   - git fetch origin; git checkout master; (git pull --ff-only origin master если трекается).
-   - git checkout <BRANCH> если существует, иначе git checkout -b <BRANCH> от master.
+   - git fetch origin; git checkout main; (git pull --ff-only origin main если трекается).
+   - git checkout <BRANCH> если существует, иначе git checkout -b <BRANCH> от main.
    - git push -u origin <BRANCH> (при первом пуше).
 5. PR: gh pr list --head <BRANCH> --state open --json number,url. Если есть — запомни PR_NUMBER/PR_URL. Иначе PR создаст step-runner на первом шаге.
 
@@ -34,7 +34,7 @@ agent: code
 
 ## Итог
 После всех шагов:
-- Если PR ещё не создан — создай: gh pr create --base master --head <BRANCH> --title "Pipeline: <SLUG>" --body "Шаги: <список>.".
+- Если PR ещё не создан — создай: gh pr create --base main --head <BRANCH> --title "Pipeline: <SLUG>" --body "Шаги: <список>.".
 - gh pr comment <PR> --body "Pipeline завершён. ✅done:<n>, ⚠️failed:<m>, ⛔error:<k>. Детали: .kilo/.pipeline-state.json".
 - Сообщи: SLUG, BRANCH, PR_URL, таблицу шагов (файл / статус / вердикт / циклы).
 
@@ -46,4 +46,4 @@ agent: code
 - Мусор в STEPS_DIR игнорируй.
 - STATE пиши после КАЖДОГО шага (переживёт рестарт ночью и доработает).
 - .kilo/.pipeline-state.json НИКОГДА не коммить (локальное состояние).
-- Предполагается чистый working tree на master перед запуском.
+- Предполагается чистый working tree на main перед запуском.

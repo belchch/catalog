@@ -17,19 +17,23 @@ The apply loop (ADR-0001 + ADR-0006 + ADR-0007):
 from __future__ import annotations
 
 import logging
+import time
 import uuid
+from asyncio import CancelledError
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from pathlib import Path
 
-from app.agent.events import AgentEvent, FinishEvent, VerifyEvent
+from app.agent.events import AgentEvent, FinishEvent, RunMetaEvent, ScriptEvent, VerifyEvent
 from app.agent.logging import log_agent_event
 from app.agent.registry import ToolRegistry
 from app.agent.runner import _run_agent_core
-from app.agent.trace import Trace
+from app.agent.trace import Trace, TraceEntry
+from app.documents.extract import extract_text
 from app.llm.base import LLMProvider, Message
 from app.skills.config import SkillConfig
 from app.skills.repo_run import create_run, finish_run
+from app.skills.script_runner import ScriptRuntimeError, run_script_async
 from app.skills.verify import run_verify
 from app.storage.db import Database
 from app.storage.repo_document import create_document, get_document
@@ -63,12 +67,13 @@ async def _apply_core(
     workspace_dir: str,
     skill: SkillConfig,
     skill_id: str,
-    input_doc_id: str,
+    input_doc_ids: list[str],
     base_tools: ToolRegistry,
     session_id: str | None,
     trace: Trace,
     outcome: _ApplyOutcome,
     run_id: str | None = None,
+    provider_name: str = "",
 ) -> AsyncIterator[AgentEvent]:
     """Shared apply loop: streams events, fills ``trace`` and ``outcome``.
 
@@ -85,11 +90,28 @@ async def _apply_core(
     a provider/agent exception marks the run ``failed`` (trace preserved) and
     re-raises, so an abandoned or errored stream never leaves an orphaned
     ``status='running'`` row.
+
+    CATALOG-4: ``input_doc_ids`` carries one or more input documents. They are
+    all loaded here (any missing → ``ValueError``); a skill declaring
+    ``input_arity`` rejects a count mismatch (→ ``ValueError``); the agent start
+    message lists every input.
     """
-    # 1. Load input document.
-    doc = get_document(db, input_doc_id)
-    if doc is None:
-        raise ValueError(f"input document not found: {input_doc_id}")
+    # 1. Load ALL input documents (fail early if any is missing).
+    if not input_doc_ids:
+        raise ValueError("apply requires at least one input document")
+    docs = []
+    for doc_id in input_doc_ids:
+        d = get_document(db, doc_id)
+        if d is None:
+            raise ValueError(f"input document not found: {doc_id}")
+        docs.append(d)
+
+    # Arity check (CATALOG-4): a skill may declare how many inputs it expects.
+    if skill.input_arity is not None and len(input_doc_ids) != skill.input_arity:
+        raise ValueError(
+            f"skill expects {skill.input_arity} input document(s), "
+            f"got {len(input_doc_ids)}"
+        )
 
     # 2. Filter tools (fail-closed on unknown names).
     tools = base_tools.filter(skill.allowed_tools)
@@ -97,22 +119,16 @@ async def _apply_core(
     # 3. Create the skill_run row (or reuse a pre-created one).
     if run_id is None:
         run_id = create_run(
-            db, skill_id=skill_id, session_id=session_id, input_doc_id=input_doc_id
+            db, skill_id=skill_id, session_id=session_id, input_doc_ids=input_doc_ids
         )
 
     logger.info(
-        "apply_skill start skill=%s skill_id=%s input_doc=%s run_id=%s",
+        "apply_skill start skill=%s skill_id=%s input_docs=%d run_id=%s",
         skill.name,
         skill_id,
-        input_doc_id,
+        len(input_doc_ids),
         run_id,
     )
-
-    user_msg = Message(
-        role="user",
-        content=f"Обработай документ {input_doc_id} ({doc.title}).",
-    )
-    messages: list[Message] = [user_msg]
 
     last_text: str | None = None
     last_capped = False
@@ -122,70 +138,157 @@ async def _apply_core(
     # path, the exception path, and the finally safety net.
     done = False
 
+    # CATALOG-16: run-level meta is the first event on the wire so the trace
+    # feed can render model/provider/kind/prompt up front instead of only the
+    # iteration bookends.
+    meta_event = RunMetaEvent(
+        model=skill.model,
+        provider=provider_name,
+        skill_kind=skill.kind,
+        system_prompt=skill.system_prompt,
+        input_docs=list(input_doc_ids),
+    )
+    yield meta_event
+    log_agent_event(meta_event)
+
     try:
-        # max_retries = number of retries after the first attempt.
-        for r in range(skill.max_retries + 1):
-            text: str | None = None
-            capped = False
-            # Drive the agent loop directly: forward each inner event to the
-            # stream and capture the final text/capped from its FinishEvent,
-            # while _run_agent_core appends to our shared ``trace``.
-            async for event in _run_agent_core(
-                provider=provider,
-                model=skill.model,
-                system_prompt=skill.system_prompt,
-                messages=messages,
-                tools=tools,
-                temperature=skill.temperature,
-                max_iterations=skill.max_iterations,
-                use_stream=False,
-                trace=trace,
-            ):
-                yield event
-                # Inner agent events are already logged by _run_agent_core
-                # (single source of truth); re-logging here would duplicate them.
-                if isinstance(event, FinishEvent):
-                    text = event.text
-                    capped = event.capped
-
-            last_text = text
-            last_capped = capped
-
-            result = run_verify(text or "", skill.verify_checks)
-            verify_event = VerifyEvent(iteration=r + 1, result=result)
-            yield verify_event
-            log_agent_event(verify_event)
-
-            if result.passed:
-                passed = True
-                break
-
-            # Feed verify failures back for the next attempt (if any left).
-            if r < skill.max_retries:
-                logger.info(
-                    "verify failed, retry %d/%d failures=%s",
-                    r + 1,
-                    skill.max_retries,
-                    list(result.failures),
+        if skill.kind == "script":
+            # ---- Deterministic script path (ADR-0014) ----
+            # No agent loop, no LLM call at runtime: run the validated script
+            # once over the document text. Retrying is pointless (same input
+            # always yields the same output), so there is a single attempt and
+            # a single verify pass — then the shared persist/finish tail.
+            doc_texts = [
+                extract_text(str(Path(workspace_dir) / d.path), d.kind) for d in docs
+            ]
+            # Single document → its text verbatim. Multiple → joined with a
+            # separator so the script sees all input content.
+            doc_text = doc_texts[0] if len(doc_texts) == 1 else "\n\n---\n\n".join(doc_texts)
+            # CATALOG-3/16: surface script execution as granular trace steps
+            # (start/done/error with a code snippet, the return value and the
+            # wall-clock duration) so a script run is not an opaque black box.
+            script_start = ScriptEvent(stage="start", snippet=skill.code)
+            yield script_start
+            log_agent_event(script_start)
+            t0 = time.perf_counter()
+            try:
+                text = await run_script_async(skill.code, doc_text)
+            except ScriptRuntimeError as exc:
+                script_error = ScriptEvent(
+                    stage="error", error=str(exc), duration=time.perf_counter() - t0
                 )
-                messages.append(Message(role="assistant", content=text or ""))
-                messages.append(
-                    Message(
-                        role="user",
-                        content=(
-                            "verify failed: "
-                            + "; ".join(result.failures)
-                            + ". Исправь и повтори."
-                        ),
+                yield script_error
+                log_agent_event(script_error)
+                trace.entries.append(
+                    TraceEntry(
+                        kind="error",
+                        iteration=1,
+                        data={"script": True, "error": str(exc)},
                     )
                 )
+                raise
+            script_done = ScriptEvent(
+                stage="done", return_value=text, duration=time.perf_counter() - t0
+            )
+            yield script_done
+            log_agent_event(script_done)
+            trace.entries.append(
+                TraceEntry(
+                    kind="script",
+                    iteration=1,
+                    data={"ok": True, "chars": len(text)},
+                )
+            )
+            last_text = text
+
+            result = run_verify(text or "", skill.verify_checks)
+            verify_event = VerifyEvent(iteration=1, result=result)
+            yield verify_event
+            log_agent_event(verify_event)
+            passed = result.passed
+        else:
+            # ---- Agent path (ADR-0001/0002) ----
+            # Build the start message listing every input document (CATALOG-4).
+            if len(docs) == 1:
+                start_content = (
+                    f"Обработай документ {input_doc_ids[0]} ({docs[0].title})."
+                )
+            else:
+                listing = ", ".join(
+                    f"{did} ({d.title})" for did, d in zip(input_doc_ids, docs)
+                )
+                start_content = f"Обработай документы: {listing}."
+            user_msg = Message(role="user", content=start_content)
+            messages: list[Message] = [user_msg]
+
+            # max_retries = number of retries after the first attempt.
+            for r in range(skill.max_retries + 1):
+                text: str | None = None
+                capped = False
+                # Drive the agent loop directly: forward each inner event to the
+                # stream and capture the final text/capped from its FinishEvent,
+                # while _run_agent_core appends to our shared ``trace``.
+                async for event in _run_agent_core(
+                    provider=provider,
+                    model=skill.model,
+                    system_prompt=skill.system_prompt,
+                    messages=messages,
+                    tools=tools,
+                    temperature=skill.temperature,
+                    max_iterations=skill.max_iterations,
+                    use_stream=False,
+                    trace=trace,
+                    reasoning=skill.reasoning,
+                ):
+                    yield event
+                    # Inner agent events are already logged by _run_agent_core
+                    # (single source of truth); re-logging here would duplicate them.
+                    if isinstance(event, FinishEvent):
+                        text = event.text
+                        capped = event.capped
+
+                last_text = text
+                last_capped = capped
+
+                result = run_verify(text or "", skill.verify_checks)
+                verify_event = VerifyEvent(iteration=r + 1, result=result)
+                yield verify_event
+                log_agent_event(verify_event)
+
+                if result.passed:
+                    passed = True
+                    break
+
+                # Feed verify failures back for the next attempt (if any left).
+                if r < skill.max_retries:
+                    logger.info(
+                        "verify failed, retry %d/%d failures=%s",
+                        r + 1,
+                        skill.max_retries,
+                        list(result.failures),
+                    )
+                    messages.append(Message(role="assistant", content=text or ""))
+                    messages.append(
+                        Message(
+                            role="user",
+                            content=(
+                                "verify failed: "
+                                + "; ".join(result.failures)
+                                + ". Исправь и повтори."
+                            ),
+                        )
+                    )
 
         # 5. Persist result on success.
         if passed:
             out_id = uuid.uuid4().hex
+            if len(docs) == 1:
+                result_title = f"{skill.name} — {docs[0].title}"
+            else:
+                result_title = f"{skill.name} — {docs[0].title} (+{len(docs) - 1})"
             create_document(
                 db,
-                title=f"{skill.name} — {doc.title}",
+                title=result_title,
                 path=f"results/{out_id}.md",
                 kind="result_md",
                 doc_id=out_id,
@@ -229,6 +332,26 @@ async def _apply_core(
         # apply-finish is not re-logged here: the agent FinishEvent was already
         # logged once by _run_agent_core, and "apply_skill done" is the
         # authoritative completion line for the apply layer.
+    except CancelledError:
+        # CATALOG-11: the apply task was cancelled (user pressed "Stop" in the
+        # UI). Distinguish this from a provider/agent failure: the run is marked
+        # ``cancelled`` (not ``failed``) so the trace feed and the run row
+        # reflect the user's intent. The partial trace is preserved. The
+        # CancelledError is re-raised so the WS handler can send its
+        # authoritative ``finish{status:"cancelled"}`` frame and the standard
+        # asyncio cancellation propagates through the whole stack.
+        logger.info("apply_skill cancelled run_id=%s", run_id)
+        if not done:
+            finish_run(
+                db,
+                run_id,
+                status="cancelled",
+                output_doc_id=None,
+                trace=trace,
+            )
+            done = True
+        outcome.status = "cancelled"
+        raise
     except Exception:
         # Provider/agent failure: persist a failed run (trace preserved) so the
         # row is never left 'running', then re-raise — the stream consumer gets
@@ -269,21 +392,26 @@ async def apply_skill(
     # id of the committed skill row. Carrying it on SkillConfig would couple
     # the frozen config to a specific DB row.
     skill_id: str,
-    input_doc_id: str,
+    input_doc_ids: list[str],
     base_tools: ToolRegistry,
     session_id: str | None = None,
     run_id: str | None = None,
+    provider_name: str = "",
 ) -> AsyncIterator[AgentEvent]:
-    """Run a skill over a document, streaming :data:`AgentEvent` items.
+    """Run a skill over one or more documents, streaming :data:`AgentEvent` items.
 
     Emits the agent-loop events (step/tool/finish) interleaved with
     :class:`VerifyEvent` after each verify pass, plus a final
     :class:`FinishEvent`. Raises :class:`ValueError` for a missing input
-    document or an unknown ``allowed_tools`` entry (fail-closed).
+    document, an arity mismatch, or an unknown ``allowed_tools`` entry
+    (fail-closed).
 
     When ``run_id`` is supplied the existing ``skill_run`` row is reused
     (used by the ``WS /runs/{id}/stream`` endpoint which creates the row in
     ``POST /skills/{id}/apply``); otherwise a new row is created.
+
+    ``provider_name`` (CATALOG-16) is the resolved provider name surfaced via
+    the opening :class:`RunMetaEvent`; empty when unknown.
     """
     trace = Trace()
     outcome = _ApplyOutcome()
@@ -293,12 +421,13 @@ async def apply_skill(
         workspace_dir=workspace_dir,
         skill=skill,
         skill_id=skill_id,
-        input_doc_id=input_doc_id,
+        input_doc_ids=input_doc_ids,
         base_tools=base_tools,
         session_id=session_id,
         trace=trace,
         outcome=outcome,
         run_id=run_id,
+        provider_name=provider_name,
     ):
         yield event
 
@@ -310,10 +439,11 @@ async def apply_skill_collect(
     workspace_dir: str,
     skill: SkillConfig,
     skill_id: str,
-    input_doc_id: str,
+    input_doc_ids: list[str],
     base_tools: ToolRegistry,
     session_id: str | None = None,
     run_id: str | None = None,
+    provider_name: str = "",
 ) -> ApplyResult:
     """Drain :func:`apply_skill` and return the final :class:`ApplyResult`."""
     trace = Trace()
@@ -324,12 +454,13 @@ async def apply_skill_collect(
         workspace_dir=workspace_dir,
         skill=skill,
         skill_id=skill_id,
-        input_doc_id=input_doc_id,
+        input_doc_ids=input_doc_ids,
         base_tools=base_tools,
         session_id=session_id,
         trace=trace,
         outcome=outcome,
         run_id=run_id,
+        provider_name=provider_name,
     ):
         pass
     return ApplyResult(

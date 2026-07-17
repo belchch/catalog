@@ -19,6 +19,9 @@ import pytest
 
 from app.agent.events import (
     FinishEvent,
+    ReasoningEvent,
+    RunMetaEvent,
+    ScriptEvent,
     StepEvent,
     TokenEvent,
     ToolCallEvent,
@@ -30,7 +33,15 @@ from app.agent.registry import ToolRegistry
 from app.agent.runner import run_agent, run_agent_collect
 from app.documents.ingest import ingest_file
 from app.documents.tools import build_document_tools
-from app.llm.base import CompletionResult, LLMProvider, Message, ModelInfo, ToolCall, ToolSpec
+from app.llm.base import (
+    CompletionResult,
+    LLMProvider,
+    Message,
+    ModelInfo,
+    StreamDelta,
+    ToolCall,
+    ToolSpec,
+)
 from app.logging_config import AppFormatter, ContextFilter
 from app.llm.log_context import prompt_log_context
 from app.skills.apply import apply_skill_collect
@@ -72,6 +83,7 @@ class FakeProvider:
         tools: list[ToolSpec] | None = None,
         temperature: float = 0.0,
         tool_choice: str = "auto",
+        reasoning: str = "",
     ) -> CompletionResult:
         return self.script.pop(0)
 
@@ -81,9 +93,10 @@ class FakeProvider:
         messages: list[Message],
         tools: list[ToolSpec] | None = None,
         temperature: float = 0.0,
-    ):  # type: ignore[no-untyped-def]
+        reasoning: str = "",
+    ) -> Any:
         for chunk in self.stream_script:
-            yield chunk
+            yield StreamDelta(content=chunk)
 
 
 # Static check: FakeProvider satisfies the protocol.
@@ -243,7 +256,7 @@ def test_apply_logging(
             workspace_dir=str(workspace),
             skill=skill,
             skill_id=skill_id,
-            input_doc_id=input_doc_id,
+            input_doc_ids=[input_doc_id],
             base_tools=build_document_tools(db, workspace),
         )
     )
@@ -255,7 +268,7 @@ def test_apply_logging(
     joined = "\n".join(messages)
 
     assert any(
-        m.startswith("apply_skill start") and f"skill_id={skill_id}" in m and f"input_doc={input_doc_id}" in m
+        m.startswith("apply_skill start") and f"skill_id={skill_id}" in m and "input_docs=1" in m
         for m in messages
     ), joined
     assert any(
@@ -358,7 +371,7 @@ def test_no_duplicate_logging(
             workspace_dir=str(workspace),
             skill=skill,
             skill_id=skill_id,
-            input_doc_id=input_doc_id,
+            input_doc_ids=[input_doc_id],
             base_tools=build_document_tools(db, workspace),
         )
     )
@@ -427,7 +440,11 @@ def test_trunc_truncates_long_payloads() -> None:
 
 
 def test_log_agent_event_handles_all_event_types(caplog: pytest.LogCaptureFixture) -> None:
-    """Every non-token event type maps to exactly one log line; token is skipped."""
+    """Every non-token event type maps to exactly one log line; token is skipped.
+
+    Covers the CATALOG-16 additions (RunMetaEvent/ScriptEvent/ReasoningEvent)
+    alongside the original agent/apply events.
+    """
     caplog.set_level(logging.INFO, logger="app")
 
     from app.skills.verify import VerifyResult
@@ -437,10 +454,39 @@ def test_log_agent_event_handles_all_event_types(caplog: pytest.LogCaptureFixtur
     log_agent_event(ToolResultEvent("id", "read_doc", True, {"ok": 1}))
     log_agent_event(VerifyEvent(1, VerifyResult(passed=True, failures=[])))
     log_agent_event(FinishEvent("done", "stop", capped=False, usage={}))
+    # CATALOG-16 new types.
+    log_agent_event(
+        RunMetaEvent(
+            model="test/model",
+            provider="zai",
+            skill_kind="agent",
+            system_prompt="You are a summarizer.",
+            input_docs=["d1"],
+        )
+    )
+    log_agent_event(ScriptEvent(stage="start", snippet="result = document.upper()"))
+    log_agent_event(ScriptEvent(stage="done", return_value="OUT", duration=0.12))
+    log_agent_event(ReasoningEvent("thinking hard about the document"))
     # Token must NOT produce a record.
     log_agent_event(TokenEvent("Hel"))
 
     messages = [r.getMessage() for r in caplog.records]
-    assert len(messages) == 5
+    assert len(messages) == 9
     assert messages[0].startswith("agent iteration 1")
-    assert messages[-1].startswith("finish reason=stop")
+    # Token (the last call) adds no record, so reasoning is the final line.
+    assert messages[-1].startswith("reasoning")
+    # New types each render their own structured line.
+    meta_lines = [m for m in messages if m.startswith("run_meta")]
+    assert meta_lines, messages
+    assert "model=test/model" in meta_lines[0]
+    assert "provider=zai" in meta_lines[0]
+    assert "kind=agent" in meta_lines[0]
+    assert "input_docs=1" in meta_lines[0]
+    script_lines = [m for m in messages if m.startswith("script")]
+    assert len(script_lines) == 2, messages
+    assert "stage=start" in script_lines[0]
+    assert "stage=done" in script_lines[1]
+    assert "duration=0.12" in script_lines[1]
+    reasoning_lines = [m for m in messages if m.startswith("reasoning")]
+    assert reasoning_lines, messages
+    assert "thinking hard about the document" in reasoning_lines[0]

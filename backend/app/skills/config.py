@@ -26,7 +26,18 @@ class VerifyCheck:
 
 @dataclass
 class SkillConfig:
-    """Frozen agent configuration consumed by :func:`apply_skill`."""
+    """Frozen skill configuration consumed by :func:`apply_skill`.
+
+    A skill has a ``kind`` (ADR-0014):
+
+    - ``"agent"`` — the classic frozen agent config (ADR-0002): a
+      function-calling loop driven by an LLM over ``allowed_tools``. This is
+      the default for backward compatibility (old ``config_json`` without a
+      ``kind`` deserializes as ``"agent"``).
+    - ``"script"`` — a *deterministic* skill: pure Python source in ``code``
+      executed by the script-runner with no agent loop and no LLM call at
+      runtime. ``allowed_tools``/``model`` are irrelevant for scripts.
+    """
 
     name: str
     description: str
@@ -38,6 +49,24 @@ class SkillConfig:
     max_retries: int = 2
     verify_checks: list[VerifyCheck] = field(default_factory=list)
     output_kind: str = "md"
+    # ``"agent"`` | ``"script"`` (ADR-0014). Default keeps legacy skills agent.
+    kind: str = "agent"
+    # Python source for ``kind="script"`` skills (empty for agent skills).
+    code: str = ""
+    # For ``kind="agent"``: the model's explanation of why the task is not
+    # deterministic (CATALOG-3). Empty for ``script`` skills. Persisted so the
+    # reason is captured alongside the config (DoD requirement).
+    non_determinism_reason: str = ""
+    # Expected number of input documents (CATALOG-4): ``1``, ``2``, ... or
+    # ``None`` for an arbitrary-length list. ``None`` (the default) keeps the
+    # legacy "any number >= 1" behaviour, so old configs deserialize unchanged.
+    input_arity: int | None = None
+    # LLM provider name for this skill (CATALOG-6), e.g. ``"openrouter"`` or
+    # ``"zai"``. Empty = the app's active provider (back-compat default).
+    provider: str = ""
+    # Selected reasoning variant (CATALOG-6), e.g. ``"low"``/``"medium"``/
+    # ``"high"`` for a reasoning-capable model. Empty = no explicit reasoning.
+    reasoning: str = ""
 
     def to_json(self) -> str:
         """Serialize to a JSON string (stable, utf-8 friendly)."""
@@ -56,13 +85,24 @@ class SkillConfig:
                     for c in self.verify_checks
                 ],
                 "output_kind": self.output_kind,
+                "kind": self.kind,
+                "code": self.code,
+                "non_determinism_reason": self.non_determinism_reason,
+                "input_arity": self.input_arity,
+                "provider": self.provider,
+                "reasoning": self.reasoning,
             },
             ensure_ascii=False,
         )
 
     @classmethod
     def from_json(cls, s: str) -> SkillConfig:
-        """Deserialize from a JSON string produced by :meth:`to_json`."""
+        """Deserialize from a JSON string produced by :meth:`to_json`.
+
+        Old ``config_json`` written before ``kind``/``code`` existed lacks
+        those keys; they default to ``"agent"`` / ``""`` so legacy skills keep
+        working without a migration.
+        """
         data = json.loads(s)
         return cls(
             name=data["name"],
@@ -80,4 +120,39 @@ class SkillConfig:
                 for vc in data.get("verify_checks", [])
             ],
             output_kind=data.get("output_kind", "md"),
+            kind=data.get("kind", "agent"),
+            code=data.get("code", ""),
+            non_determinism_reason=data.get("non_determinism_reason", ""),
+            input_arity=data.get("input_arity"),
+            provider=data.get("provider", ""),
+            reasoning=data.get("reasoning", ""),
         )
+
+
+def compute_tags(config: SkillConfig) -> list[str]:
+    """Derive capability tags from a skill config (CATALOG-8).
+
+    The tags are a *derived*, user-facing view of what a skill can do:
+
+    - ``"python"`` — the skill contains deterministic Python code
+      (``kind == "script"`` or non-empty ``code``).
+    - ``"ai"`` — the skill is LLM-driven / non-deterministic
+      (``kind == "agent"`` or a non-empty ``system_prompt`` on a non-script
+      skill).
+
+    A genuinely mixed skill (e.g. an agent that also carries ``code``) gets
+    both tags; the result is a list, not a mutually-exclusive enum.
+
+    ``model`` is intentionally *not* used as a signal: it is always populated
+    (even ``kind="script"`` skills store the default model for config
+    uniformity — see ``_args_to_config``), so it cannot distinguish an agent
+    from a script and would mis-tag pure scripts as ``"ai"``.
+    """
+    tags: list[str] = []
+    if config.kind == "script" or bool(config.code):
+        tags.append("python")
+    if config.kind == "agent" or (
+        bool(config.system_prompt) and config.kind != "script"
+    ):
+        tags.append("ai")
+    return tags

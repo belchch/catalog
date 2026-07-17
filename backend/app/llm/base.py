@@ -34,6 +34,10 @@ class ModelInfo:
     id: str
     name: str
     context_length: int | None = None
+    # Whether the model supports an explicit reasoning/"thinking" mode, and the
+    # selectable variants (CATALOG-6). Empty list when unknown/not applicable.
+    supports_reasoning: bool = False
+    reasoning_variants: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -42,6 +46,24 @@ class CompletionResult:
     tool_calls: list[ToolCall]
     finish_reason: str
     usage: dict = field(default_factory=dict)
+    # Chain-of-thought / "thinking" text emitted by reasoning models
+    # (``reasoning_content`` in the z.ai/GLM dialect). ``None`` when the
+    # provider does not emit reasoning for this response. See ADR-0013.
+    reasoning: str | None = None
+
+
+@dataclass
+class StreamDelta:
+    """One chunk from a streaming completion.
+
+    ``content`` is the visible text delta; ``reasoning`` carries the model's
+    chain-of-thought (``reasoning_content`` in the z.ai/GLM dialect) when the
+    provider emits it, otherwise ``None``. A delta may carry only ``content``,
+    only ``reasoning``, or both. See ADR-0013 for the streaming contract.
+    """
+
+    content: str = ""
+    reasoning: str | None = None
 
 
 class LLMProvider(Protocol):
@@ -54,6 +76,7 @@ class LLMProvider(Protocol):
         tools: list[ToolSpec] | None = None,
         temperature: float = 0.0,
         tool_choice: str = "auto",
+        reasoning: str = "",
     ) -> CompletionResult: ...
 
     async def stream_complete(
@@ -62,7 +85,8 @@ class LLMProvider(Protocol):
         messages: list[Message],
         tools: list[ToolSpec] | None = None,
         temperature: float = 0.0,
-    ) -> AsyncIterator[str]: ...
+        reasoning: str = "",
+    ) -> AsyncIterator[StreamDelta]: ...
 
 
 # --- Serialization helpers --------------------------------------------------

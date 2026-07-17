@@ -14,12 +14,17 @@ export interface SkillOut {
   description: string | null
   status: string
   created_at: string
+  kind: string
+  // Derived capability tags (CATALOG-8): "python" (deterministic code) and/or
+  // "ai" (LLM-driven). Computed by the backend from the skill config.
+  tags: string[]
 }
 
 export interface RunOut {
   id: string
   skill_id: string
   input_doc_id: string | null
+  input_doc_ids: string[] | null
   output_doc_id: string | null
   status: string
   trace: unknown[] | null
@@ -29,8 +34,34 @@ export interface SessionCreated {
   id: string
 }
 
+export interface SkillPreview {
+  name: string
+  description: string | null
+  kind: string
+  model: string
+  provider: string
+  reasoning: string
+  input_arity: number | null
+  allowed_tools: string[]
+}
+
 export interface SkillBuilt {
   skill_id: string
+  config: SkillPreview
+}
+
+export interface ModelOut {
+  id: string
+  name: string
+  context_length: number | null
+  supports_reasoning: boolean
+  reasoning_variants: string[]
+}
+
+export interface ProviderOut {
+  id: string
+  name: string
+  active: boolean
 }
 
 export interface CommitOut {
@@ -87,14 +118,54 @@ export function listSkills(status?: string): Promise<SkillOut[]> {
   return jsonFetch<SkillOut[]>(`/skills${qs}`)
 }
 
-export function applySkill(skillId: string, docId: string): Promise<RunCreated> {
+export function applySkill(skillId: string, docIds: string[]): Promise<RunCreated> {
   return jsonFetch<RunCreated>(`/skills/${skillId}/apply`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ doc_id: docId }),
+    body: JSON.stringify({ doc_ids: docIds }),
   })
 }
 
 export function getRun(runId: string): Promise<RunOut> {
   return jsonFetch<RunOut>(`/runs/${runId}`)
+}
+
+export function listModels(): Promise<ModelOut[]> {
+  return jsonFetch<ModelOut[]>('/models')
+}
+
+export function listProviders(): Promise<ProviderOut[]> {
+  return jsonFetch<ProviderOut[]>('/providers')
+}
+
+export function configureSkill(
+  skillId: string,
+  settings: { model?: string; provider?: string; reasoning?: string },
+): Promise<SkillBuilt> {
+  return jsonFetch<SkillBuilt>(`/skills/${skillId}/configure`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(settings),
+  })
+}
+
+export interface SettingsOut {
+  provider: string
+  model: string
+}
+
+export function getSettings(): Promise<SettingsOut> {
+  return jsonFetch<SettingsOut>('/settings')
+}
+
+export function getProviderModels(providerId: string): Promise<ModelOut[]> {
+  return jsonFetch<ModelOut[]>(`/providers/${encodeURIComponent(providerId)}/models`)
+}
+
+export function updateSettings(settings: SettingsOut): Promise<SettingsOut> {
+  return jsonFetch<SettingsOut>('/settings', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(settings),
+  })
 }

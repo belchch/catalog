@@ -8,7 +8,7 @@ provider is a :class:`FakeProvider` whose ``script`` is populated per test.
 from __future__ import annotations
 
 from app.llm.base import CompletionResult, ToolCall
-from app.skills.config import SkillConfig, VerifyCheck
+from app.skills.config import SkillConfig, VerifyCheck, compute_tags
 from app.skills.repo_skill import create_skill, get_skill, update_status
 from app.storage.repo_message import add_message, list_messages
 
@@ -41,6 +41,26 @@ def _build_skill_call(
             "allowed_tools": allowed_tools if allowed_tools is not None else ["read_document"],
             "model": "test/model",
             "verify_checks": verify_checks if verify_checks is not None else [{"check": "non_empty"}],
+        },
+    )
+
+
+def _build_script_skill_call(
+    *,
+    code: str,
+    name: str = "Uppercaser",
+    verify_checks: list[dict] | None = None,
+) -> ToolCall:
+    """A build_skill tool call for a kind=script skill."""
+    return ToolCall(
+        id="build-1",
+        name="build_skill",
+        arguments={
+            "name": name,
+            "description": "A deterministic script skill.",
+            "kind": "script",
+            "code": code,
+            "verify_checks": verify_checks if verify_checks is not None else [],
         },
     )
 
@@ -147,6 +167,153 @@ def test_ws_session_planner(client, provider, db) -> None:
     assert roles.count("assistant") >= 1
 
 
+def test_parse_suggestions_extracts_and_strips() -> None:
+    """parse_suggestions pulls items out and removes the block (CATALOG-13)."""
+    from app.api.sessions import parse_suggestions
+
+    text = "Вот план.\n\n<suggestions>Шаг 1 | Шаг 2 | Шаг 3</suggestions>"
+    clean, items = parse_suggestions(text)
+    assert clean == "Вот план."
+    assert items == ["Шаг 1", "Шаг 2", "Шаг 3"]
+
+
+def test_parse_suggestions_no_block_unchanged() -> None:
+    """Without a block the text is returned as-is with an empty list."""
+    from app.api.sessions import parse_suggestions
+
+    text = "Просто ответ без подсказок."
+    clean, items = parse_suggestions(text)
+    assert clean == text
+    assert items == []
+
+
+def test_parse_suggestions_empty_items() -> None:
+    """A block with only separators yields no items and is still stripped."""
+    from app.api.sessions import parse_suggestions
+
+    clean, items = parse_suggestions("Ответ.\n<suggestions>  |  |  </suggestions>")
+    assert items == []
+    assert "<suggestions>" not in clean
+    assert clean == "Ответ."
+
+
+def test_ws_session_starter_suggestions(client, provider, db) -> None:
+    """An empty session receives a starter suggestions frame right after accept (CATALOG-13)."""
+    session_id = client.post("/sessions").json()["id"]
+    with client.websocket_connect(f"/sessions/{session_id}") as ws:
+        frame = ws.receive_json()
+    assert frame["type"] == "suggestions"
+    assert isinstance(frame["items"], list)
+    assert len(frame["items"]) >= 1
+
+
+def test_ws_session_emits_suggestions_frame(client, provider, db) -> None:
+    """A model reply with a <suggestions> block yields a suggestions frame and is stripped (CATALOG-13)."""
+    session_id = client.post("/sessions").json()["id"]
+    provider.script = [
+        _completion("Вот план.\n<suggestions>Изучи документы | Опиши задачу</suggestions>")
+    ]
+
+    with client.websocket_connect(f"/sessions/{session_id}") as ws:
+        ws.send_text("сделай план")
+        frames: list[dict] = []
+        while True:
+            frame = ws.receive_json()
+            frames.append(frame)
+            if frame.get("type") == "finish":
+                break
+
+    sug_frames = [f for f in frames if f["type"] == "suggestions"]
+    # The starter frame (empty session) + the model frame.
+    assert len(sug_frames) >= 1
+    model_sug = sug_frames[-1]
+    assert model_sug["items"] == ["Изучи документы", "Опиши задачу"]
+
+    token = next(f for f in frames if f["type"] == "token")
+    assert "<suggestions>" not in token["delta"]
+    assert "Вот план" in token["delta"]
+
+    # Persisted assistant text is the cleaned one.
+    msgs = list_messages(db, session_id)
+    assistant = [m for m in msgs if m["role"] == "assistant"][-1]
+    assert "<suggestions>" not in assistant["content"]
+
+
+def test_planner_uses_active_model(client, provider, db) -> None:
+    """Changing the model via POST /settings drives the planner LLM call (CATALOG-14)."""
+    session_id = client.post("/sessions").json()["id"]
+    client.post("/settings", json={"model": "glm-4.6"})
+    provider.script = [_completion("план")]
+
+    with client.websocket_connect(f"/sessions/{session_id}") as ws:
+        ws.send_text("сделай план")
+        while True:
+            frame = ws.receive_json()
+            if frame.get("type") == "finish":
+                break
+
+    assert provider.requests, "planner did not call the provider"
+    assert provider.requests[0]["model"] == "glm-4.6"
+
+
+def test_ws_session_cancel(client, provider, db) -> None:
+    """Cancelling a running planner turn sends finish{cancelled} and keeps the session alive (CATALOG-11)."""
+    from tests.conftest import FakeProvider as _ConfFakeProvider
+
+    class _BlockingProvider(_ConfFakeProvider):
+        """Provider whose complete() blocks until cancelled."""
+
+        def __init__(self) -> None:
+            super().__init__(script=[])
+            self.was_cancelled = False
+
+        async def complete(self, *args, **kwargs):  # type: ignore[override]
+            import asyncio
+
+            try:
+                await asyncio.Event().wait()
+            except asyncio.CancelledError:
+                self.was_cancelled = True
+                raise
+
+    blocking = _BlockingProvider()
+    client.app.state.provider = blocking
+
+    session_id = client.post("/sessions").json()["id"]
+
+    with client.websocket_connect(f"/sessions/{session_id}") as ws:
+        # Send a message, then immediately a cancel frame. The cancel is read
+        # by the concurrent listener while the agent is blocked in complete().
+        ws.send_text("долгий вопрос")
+        ws.send_text('{"type":"cancel"}')
+
+        frames: list[dict] = []
+        while True:
+            frame = ws.receive_json()
+            frames.append(frame)
+            if frame.get("type") == "finish":
+                break
+
+    finish = frames[-1]
+    assert finish["type"] == "finish"
+    assert finish["status"] == "cancelled"
+    # The provider observed the cancellation at its await point.
+    assert blocking.was_cancelled is True
+
+    # The session is still alive: a follow-up message completes normally.
+    provider.script = [_completion("готово")]
+    client.app.state.provider = provider
+    with client.websocket_connect(f"/sessions/{session_id}") as ws:
+        ws.send_text("ещё вопрос")
+        frames2: list[dict] = []
+        while True:
+            frame = ws.receive_json()
+            frames2.append(frame)
+            if frame.get("type") == "finish":
+                break
+    assert frames2[-1]["status"] == "ok"
+
+
 # --------------------------------------------------------------------------- #
 # Skill build / commit / list
 # --------------------------------------------------------------------------- #
@@ -160,7 +327,11 @@ def test_build_skill_from_session(client, provider, db) -> None:
 
     resp = client.post(f"/sessions/{session_id}/skills")
     assert resp.status_code == 200, resp.text
-    skill_id = resp.json()["skill_id"]
+    body = resp.json()
+    skill_id = body["skill_id"]
+    # CATALOG-6: build returns a preview config for the settings modal.
+    assert body["config"]["name"] == "Summarizer"
+    assert body["config"]["model"] == "test/model"
 
     skill = get_skill(db, skill_id)
     assert skill is not None
@@ -168,6 +339,159 @@ def test_build_skill_from_session(client, provider, db) -> None:
     assert skill.config.name == "Summarizer"
     assert skill.config.allowed_tools == ["read_document"]
     assert [vc.check for vc in skill.config.verify_checks] == ["non_empty"]
+
+
+def test_configure_skill_updates_model_provider_reasoning(client, provider, db) -> None:
+    """PATCH /skills/{id}/configure overrides model/provider/reasoning (CATALOG-6)."""
+    session_id = client.post("/sessions").json()["id"]
+    add_message(db, session_id=session_id, role="user", content="make a skill")
+    provider.script = [_completion(tool_calls=[_build_skill_call(name="S")])]
+
+    skill_id = client.post(f"/sessions/{session_id}/skills").json()["skill_id"]
+
+    resp = client.patch(
+        f"/skills/{skill_id}/configure",
+        json={"model": "glm-4.6", "provider": "zai", "reasoning": "high"},
+    )
+    assert resp.status_code == 200, resp.text
+    cfg = resp.json()["config"]
+    assert cfg["model"] == "glm-4.6"
+    assert cfg["provider"] == "zai"
+    assert cfg["reasoning"] == "high"
+
+    # Persisted in config_json.
+    skill = get_skill(db, skill_id)
+    assert skill is not None
+    assert skill.config.model == "glm-4.6"
+    assert skill.config.provider == "zai"
+    assert skill.config.reasoning == "high"
+
+
+def test_configure_skill_requires_draft(client, provider, db) -> None:
+    """Configure is rejected (409) once the skill is committed."""
+    session_id = client.post("/sessions").json()["id"]
+    add_message(db, session_id=session_id, role="user", content="make a skill")
+    provider.script = [_completion(tool_calls=[_build_skill_call(name="S")])]
+    skill_id = client.post(f"/sessions/{session_id}/skills").json()["skill_id"]
+    update_status(db, skill_id, "committed")
+
+    resp = client.patch(f"/skills/{skill_id}/configure", json={"model": "other"})
+    assert resp.status_code == 409
+
+
+def test_list_models_endpoint(client, provider, monkeypatch) -> None:
+    """GET /models returns the active provider catalog with reasoning info."""
+    from app.llm.base import ModelInfo
+
+    async def _models() -> list[ModelInfo]:
+        return [
+            ModelInfo(
+                id="glm-4.6",
+                name="GLM-4.6",
+                context_length=131072,
+                supports_reasoning=True,
+                reasoning_variants=["low", "medium", "high"],
+            )
+        ]
+
+    monkeypatch.setattr(provider, "list_models", _models)
+    resp = client.get("/models")
+    assert resp.status_code == 200, resp.text
+    data = resp.json()
+    assert len(data) == 1
+    assert data[0]["id"] == "glm-4.6"
+    assert data[0]["supports_reasoning"] is True
+    assert data[0]["reasoning_variants"] == ["low", "medium", "high"]
+
+
+def test_list_providers_endpoint(client) -> None:
+    """GET /providers returns at least one provider, the active one flagged."""
+    resp = client.get("/providers")
+    assert resp.status_code == 200, resp.text
+    data = resp.json()
+    assert isinstance(data, list)
+    assert len(data) >= 1
+    assert any(p["active"] for p in data)
+
+
+def test_provider_for_skill_resolves_pinned_provider() -> None:
+    """A skill's pinned provider is used at apply; unknown/empty falls back (CATALOG-6)."""
+    from app.llm.factory import provider_for_skill
+
+    active = object()
+    zai = object()
+    providers = {"openrouter": object(), "zai": zai}
+
+    assert provider_for_skill(providers, active, "zai") is zai
+    # Empty provider name -> active provider.
+    assert provider_for_skill(providers, active, "") is active
+    # Unknown provider name -> active provider (graceful fallback).
+    assert provider_for_skill(providers, active, "nope") is active
+    # No providers dict -> active provider.
+    assert provider_for_skill(None, active, "zai") is active
+
+
+def test_build_persists_provider_and_reasoning(client, provider, db) -> None:
+    """Build carries provider/reasoning from the model's tool args (CATALOG-6)."""
+    session_id = client.post("/sessions").json()["id"]
+    add_message(db, session_id=session_id, role="user", content="make a skill")
+    call = _build_skill_call(name="S")
+    call.arguments["provider"] = "zai"
+    call.arguments["reasoning"] = "high"
+    provider.script = [_completion(tool_calls=[call])]
+
+    skill_id = client.post(f"/sessions/{session_id}/skills").json()["skill_id"]
+    skill = get_skill(db, skill_id)
+    assert skill is not None
+    assert skill.config.provider == "zai"
+    assert skill.config.reasoning == "high"
+
+
+def test_get_and_update_settings(client) -> None:
+    """GET/POST /settings read and switch the runtime model (CATALOG-14)."""
+    before = client.get("/settings").json()
+    assert before["model"] == "test/model"
+
+    resp = client.post("/settings", json={"model": "glm-4.6"})
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["model"] == "glm-4.6"
+    # Persisted in app state.
+    assert client.app.state.active_model == "glm-4.6"
+    assert client.get("/settings").json()["model"] == "glm-4.6"
+
+
+def test_update_settings_unknown_provider_404(client) -> None:
+    """Switching to an unconfigured provider is rejected (CATALOG-14)."""
+    resp = client.post("/settings", json={"provider": "does-not-exist"})
+    assert resp.status_code == 404
+
+
+def test_update_settings_switches_active_provider(client) -> None:
+    """POST /settings provider=openrouter resolves the active instance (CATALOG-14)."""
+    providers = client.app.state.providers
+    assert "openrouter" in providers
+    resp = client.post("/settings", json={"provider": "openrouter"})
+    assert resp.status_code == 200, resp.text
+    assert client.app.state.provider is providers["openrouter"]
+
+
+def test_provider_models_endpoint(client, monkeypatch) -> None:
+    """GET /providers/{id}/models lists a specific provider's catalog (CATALOG-14)."""
+    from app.llm.base import ModelInfo
+
+    class _FakeProv:
+        async def list_models(self) -> list[ModelInfo]:
+            return [ModelInfo(id="z-glm", name="Z-GLM", context_length=8192)]
+
+    client.app.state.providers = {**client.app.state.providers, "zfake": _FakeProv()}
+    resp = client.get("/providers/zfake/models")
+    assert resp.status_code == 200, resp.text
+    data = resp.json()
+    assert len(data) == 1
+    assert data[0]["id"] == "z-glm"
+
+    # Unknown provider -> 404.
+    assert client.get("/providers/nope/models").status_code == 404
 
 
 def test_build_skill_invalid_allowed_tools_returns_422(client, provider, db) -> None:
@@ -181,6 +505,92 @@ def test_build_skill_invalid_allowed_tools_returns_422(client, provider, db) -> 
 
     resp = client.post(f"/sessions/{session_id}/skills")
     assert resp.status_code == 422
+
+
+def test_build_script_skill_valid_code(client, provider, db) -> None:
+    """A kind=script skill with valid Python code is built as draft."""
+    session_id = client.post("/sessions").json()["id"]
+    add_message(db, session_id=session_id, role="user", content="uppercase the doc")
+
+    provider.script = [
+        _completion(
+            tool_calls=[_build_script_skill_call(code="result = document.upper()\n")]
+        )
+    ]
+
+    resp = client.post(f"/sessions/{session_id}/skills")
+    assert resp.status_code == 200, resp.text
+    skill_id = resp.json()["skill_id"]
+
+    skill = get_skill(db, skill_id)
+    assert skill is not None
+    assert skill.status == "draft"
+    assert skill.config.kind == "script"
+    assert skill.config.code == "result = document.upper()\n"
+    # Scripts have no tools.
+    assert skill.config.allowed_tools == []
+
+
+def test_build_script_skill_forbidden_import_returns_422(client, provider, db) -> None:
+    """A kind=script skill with a forbidden import is rejected (422)."""
+    session_id = client.post("/sessions").json()["id"]
+    add_message(db, session_id=session_id, role="user", content="read the filesystem")
+
+    bad = _completion(
+        tool_calls=[_build_script_skill_call(code="import os\nresult = 'x'\n")]
+    )
+    provider.script = [bad, bad, bad]  # all attempts invalid
+
+    resp = client.post(f"/sessions/{session_id}/skills")
+    assert resp.status_code == 422
+
+
+def test_build_script_skill_dangerous_call_returns_422(client, provider, db) -> None:
+    """A kind=script skill with eval() is rejected (422)."""
+    session_id = client.post("/sessions").json()["id"]
+    add_message(db, session_id=session_id, role="user", content="eval stuff")
+
+    bad = _completion(
+        tool_calls=[_build_script_skill_call(code="result = eval('1')\n")]
+    )
+    provider.script = [bad, bad, bad]
+
+    resp = client.post(f"/sessions/{session_id}/skills")
+    assert resp.status_code == 422
+
+
+def test_build_agent_skill_with_non_determinism_reason(client, provider, db) -> None:
+    """When the task is not deterministic the model chooses kind=agent with a reason."""
+    session_id = client.post("/sessions").json()["id"]
+    add_message(db, session_id=session_id, role="user", content="summarize creatively")
+
+    provider.script = [
+        _completion(
+            tool_calls=[
+                ToolCall(
+                    id="build-1",
+                    name="build_skill",
+                    arguments={
+                        "name": "CreativeSummarizer",
+                        "description": "Creative summary.",
+                        "kind": "agent",
+                        "non_determinism_reason": "Needs subjective judgment on tone.",
+                        "system_prompt": "You summarize creatively.",
+                        "allowed_tools": ["read_document"],
+                        "model": "test/model",
+                    },
+                )
+            ]
+        )
+    ]
+
+    resp = client.post(f"/sessions/{session_id}/skills")
+    assert resp.status_code == 200, resp.text
+    skill_id = resp.json()["skill_id"]
+
+    skill = get_skill(db, skill_id)
+    assert skill is not None
+    assert skill.config.kind == "agent"
 
 
 def test_commit_skill(client, db) -> None:
@@ -212,6 +622,87 @@ def test_list_skills(client, db) -> None:
     draft_resp = client.get("/skills?status=draft")
     assert draft_resp.status_code == 200
     assert all(r["status"] == "draft" for r in draft_resp.json())
+
+
+# --------------------------------------------------------------------------- #
+# Capability tags (CATALOG-8)
+# --------------------------------------------------------------------------- #
+
+
+def test_compute_tags_agent_script_mixed_legacy() -> None:
+    """compute_tags derives python/ai from the config (CATALOG-8 rules)."""
+    # Pure agent: prompt, no code -> ["ai"].
+    agent = SkillConfig(
+        name="a",
+        description="d",
+        system_prompt="You do the task.",
+        allowed_tools=[],
+        model="test/model",
+        kind="agent",
+    )
+    assert compute_tags(agent) == ["ai"]
+
+    # Pure script: code, no prompt -> ["python"].
+    script = SkillConfig(
+        name="s",
+        description="d",
+        system_prompt="",
+        allowed_tools=[],
+        model="test/model",
+        kind="script",
+        code="result = document.upper()\n",
+    )
+    assert compute_tags(script) == ["python"]
+
+    # Mixed: agent kind that also carries code -> both tags.
+    mixed = SkillConfig(
+        name="m",
+        description="d",
+        system_prompt="You do the task.",
+        allowed_tools=[],
+        model="test/model",
+        kind="agent",
+        code="result = 1\n",
+    )
+    assert compute_tags(mixed) == ["python", "ai"]
+
+    # Legacy: no kind -> defaults to "agent" -> ["ai"].
+    legacy = SkillConfig(
+        name="l",
+        description="d",
+        system_prompt="You do the task.",
+        allowed_tools=[],
+        model="test/model",
+    )
+    assert legacy.kind == "agent"
+    assert compute_tags(legacy) == ["ai"]
+
+
+def test_list_skills_endpoint_returns_tags(client, db) -> None:
+    """GET /skills surfaces computed tags per skill (CATALOG-8)."""
+    # An agent skill (the default helper) and a script skill.
+    _seed_committed_skill(db, name="AgentSkill")
+    script_config = SkillConfig(
+        name="ScriptSkill",
+        description="deterministic script",
+        system_prompt="",
+        allowed_tools=[],
+        model="test/model",
+        kind="script",
+        code="result = document.upper()\n",
+    )
+    create_skill(
+        db,
+        name=script_config.name,
+        description=script_config.description,
+        config=script_config,
+        status="committed",
+    )
+
+    rows = client.get("/skills").json()
+    by_name = {r["name"]: r for r in rows}
+    assert by_name["AgentSkill"]["tags"] == ["ai"]
+    assert by_name["ScriptSkill"]["tags"] == ["python"]
 
 
 # --------------------------------------------------------------------------- #
@@ -291,3 +782,55 @@ def test_apply_requires_committed_skill(client, db) -> None:
 
     resp = client.post(f"/skills/{skill_id}/apply", json={"doc_id": doc_id})
     assert resp.status_code == 409
+
+
+def test_apply_multi_doc_via_api(client, provider, db) -> None:
+    """POST /skills/{id}/apply accepts doc_ids (list); GET /runs returns the list."""
+    doc_a = _upload(client, "a.md", b"first source")
+    doc_b = _upload(client, "b.md", b"second source")
+    skill_id = _seed_committed_skill(
+        db, verify_checks=[VerifyCheck("non_empty")], max_retries=2
+    )
+    provider.script = [_completion("# Result\n\nMulti-doc output.")]
+
+    run_id = client.post(
+        f"/skills/{skill_id}/apply", json={"doc_ids": [doc_a, doc_b]}
+    ).json()["run_id"]
+
+    frames = _drain_run_ws(client, run_id)
+    assert frames[-1]["type"] == "finish"
+    assert frames[-1]["status"] == "ok"
+
+    run = client.get(f"/runs/{run_id}").json()
+    assert run["status"] == "ok"
+    assert run["input_doc_ids"] == [doc_a, doc_b]
+
+
+def test_apply_arity_mismatch_returns_422(client, db) -> None:
+    """A skill declaring input_arity=2 rejects a single-doc apply with 422."""
+    doc_id = _upload(client, "input.md", b"source text")
+    config = SkillConfig(
+        name="Merger",
+        description="needs exactly two docs",
+        system_prompt="You merge two documents.",
+        allowed_tools=["read_document"],
+        model="test/model",
+        max_iterations=4,
+        max_retries=1,
+        verify_checks=[VerifyCheck("non_empty")],
+        input_arity=2,
+    )
+    skill_id = create_skill(
+        db, name=config.name, description=config.description, config=config, status="committed"
+    )
+
+    resp = client.post(f"/skills/{skill_id}/apply", json={"doc_ids": [doc_id]})
+    assert resp.status_code == 422
+    assert "expects 2 input" in resp.json()["detail"]
+
+
+def test_apply_requires_at_least_one_doc(client, db) -> None:
+    """An empty doc list (no doc_ids and no doc_id) is rejected with 422."""
+    skill_id = _seed_committed_skill(db)
+    resp = client.post(f"/skills/{skill_id}/apply", json={})
+    assert resp.status_code == 422

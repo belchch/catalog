@@ -4,8 +4,11 @@ import asyncio
 import json
 from typing import Any
 
+import pytest
+
 from app.agent.events import (
     FinishEvent,
+    ReasoningEvent,
     StepEvent,
     TokenEvent,
     ToolCallEvent,
@@ -13,7 +16,15 @@ from app.agent.events import (
 )
 from app.agent.registry import ToolRegistry
 from app.agent.runner import run_agent, run_agent_collect
-from app.llm.base import CompletionResult, LLMProvider, Message, ModelInfo, ToolCall, ToolSpec
+from app.llm.base import (
+    CompletionResult,
+    LLMProvider,
+    Message,
+    ModelInfo,
+    StreamDelta,
+    ToolCall,
+    ToolSpec,
+)
 
 
 class FakeProvider:
@@ -37,6 +48,7 @@ class FakeProvider:
         tools: list[ToolSpec] | None = None,
         temperature: float = 0.0,
         tool_choice: str = "auto",
+        reasoning: str = "",
     ) -> CompletionResult:
         return self.script.pop(0)
 
@@ -46,9 +58,10 @@ class FakeProvider:
         messages: list[Message],
         tools: list[ToolSpec] | None = None,
         temperature: float = 0.0,
-    ):  # type: ignore[no-untyped-def]
+        reasoning: str = "",
+    ) -> Any:
         for chunk in self.stream_script:
-            yield chunk
+            yield StreamDelta(content=chunk)
 
 
 # Static check: FakeProvider satisfies the protocol.
@@ -392,6 +405,106 @@ def test_registry_specs_and_lookup() -> None:
     assert reg.get("missing") is None
 
 
+def test_reasoning_event_non_stream() -> None:
+    """A non-stream completion carrying reasoning emits a ReasoningEvent.
+
+    CATALOG-24/16: the runner surfaces the model's chain-of-thought as its own
+    trace event (right after the StepEvent, before the FinishEvent) so the
+    apply stream can render it instead of burying it in the trace data.
+    """
+
+    async def _run() -> None:
+        provider = FakeProvider(
+            script=[
+                CompletionResult(
+                    content="answer",
+                    tool_calls=[],
+                    finish_reason="stop",
+                    reasoning="step-by-step thinking",
+                )
+            ]
+        )
+        events = await _drain(
+            run_agent(
+                provider=provider,
+                model="m",
+                system_prompt="sys",
+                messages=[Message(role="user", content="x")],
+                tools=_registry(),
+                use_stream=False,
+            )
+        )
+        reasoning = [e for e in events if isinstance(e, ReasoningEvent)]
+        assert len(reasoning) == 1
+        assert reasoning[0].text == "step-by-step thinking"
+        # Reasoning is emitted before the finish, after the step.
+        assert isinstance(events[0], StepEvent)
+        assert isinstance(events[-1], FinishEvent)
+        assert events.index(reasoning[0]) < events.index(events[-1])
+
+    asyncio.run(_run())
+
+
+def test_reasoning_event_stream() -> None:
+    """A streaming completion carrying reasoning emits a ReasoningEvent too."""
+
+    class _ReasoningStreamProvider(FakeProvider):
+        async def stream_complete(
+            self,
+            model: str,
+            messages: list[Message],
+            tools: list[ToolSpec] | None = None,
+            temperature: float = 0.0,
+            reasoning: str = "",
+        ) -> Any:
+            yield StreamDelta(reasoning="thinking...")
+            yield StreamDelta(content="Hel")
+            yield StreamDelta(content="lo")
+
+    async def _run() -> None:
+        provider = _ReasoningStreamProvider()
+        events = await _drain(
+            run_agent(
+                provider=provider,
+                model="m",
+                system_prompt="sys",
+                messages=[Message(role="user", content="x")],
+                tools=_registry(),
+                use_stream=True,
+            )
+        )
+        reasoning = [e for e in events if isinstance(e, ReasoningEvent)]
+        assert len(reasoning) == 1
+        assert reasoning[0].text == "thinking..."
+        finish = events[-1]
+        assert isinstance(finish, FinishEvent)
+        assert finish.text == "Hello"
+
+    asyncio.run(_run())
+
+
+def test_no_reasoning_event_when_absent() -> None:
+    """No ReasoningEvent is emitted when the provider returns no reasoning."""
+
+    async def _run() -> None:
+        provider = FakeProvider(
+            script=[CompletionResult(content="hi", tool_calls=[], finish_reason="stop")]
+        )
+        events = await _drain(
+            run_agent(
+                provider=provider,
+                model="m",
+                system_prompt="sys",
+                messages=[Message(role="user", content="x")],
+                tools=_registry(),
+                use_stream=False,
+            )
+        )
+        assert not any(isinstance(e, ReasoningEvent) for e in events)
+
+    asyncio.run(_run())
+
+
 def test_serialize_result_truncates_long_payloads() -> None:
     """_serialize_result bounds the LLM history: oversized payloads are
     truncated with a marker so a huge read_document cannot overflow the model
@@ -417,3 +530,69 @@ def test_serialize_result_truncates_long_payloads() -> None:
     out_list = _serialize_result(huge_list)
     assert len(out_list) < len(full)
     assert "truncated" in out_list
+
+
+# --------------------------------------------------------------------------- #
+# Cancellation (CATALOG-11)
+# --------------------------------------------------------------------------- #
+
+
+class _BlockingProvider(FakeProvider):
+    """Provider whose ``complete`` blocks until cancelled or released.
+
+    Used to simulate a long LLM call so the agent task can be cancelled
+    mid-flight. ``complete`` awaits an event that is never set, so the only
+    way out is ``CancelledError``.
+    """
+
+    def __init__(self) -> None:
+        super().__init__(script=[])
+        self.was_cancelled = False
+
+    async def complete(
+        self,
+        model: str,
+        messages: list[Message],
+        tools: list[ToolSpec] | None = None,
+        temperature: float = 0.0,
+        tool_choice: str = "auto",
+        reasoning: str = "",
+    ) -> CompletionResult:
+        try:
+            await asyncio.Event().wait()  # blocks forever
+        except asyncio.CancelledError:
+            self.was_cancelled = True
+            raise
+        return CompletionResult(content="unreachable", tool_calls=[], finish_reason="stop")
+
+
+def test_run_agent_propagates_cancel() -> None:
+    """Cancelling the task running run_agent raises CancelledError (CATALOG-11).
+
+    The standard asyncio cancellation must propagate through the whole stack
+    (run_agent -> _run_agent_core -> provider.complete) without being masked.
+    """
+
+    async def _run() -> None:
+        provider = _BlockingProvider()
+        task = asyncio.ensure_future(
+            _drain(
+                run_agent(
+                    provider=provider,
+                    model="m",
+                    system_prompt="sys",
+                    messages=[Message(role="user", content="x")],
+                    tools=_registry(),
+                    use_stream=False,
+                )
+            )
+        )
+        # Give the task a chance to enter provider.complete().
+        await asyncio.sleep(0.05)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        # The provider observed the cancellation at its await point.
+        assert provider.was_cancelled is True
+
+    asyncio.run(_run())

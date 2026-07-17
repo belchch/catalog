@@ -6,11 +6,25 @@ from typing import Any
 
 import pytest
 
-from app.agent.events import FinishEvent, StepEvent, VerifyEvent
+from app.agent.events import (
+    FinishEvent,
+    ReasoningEvent,
+    RunMetaEvent,
+    ScriptEvent,
+    StepEvent,
+    VerifyEvent,
+)
 from app.agent.registry import ToolRegistry
 from app.documents.ingest import ingest_file
 from app.documents.tools import build_document_tools
-from app.llm.base import CompletionResult, LLMProvider, Message, ModelInfo, ToolSpec
+from app.llm.base import (
+    CompletionResult,
+    LLMProvider,
+    Message,
+    ModelInfo,
+    StreamDelta,
+    ToolSpec,
+)
 from app.skills.apply import apply_skill, apply_skill_collect
 from app.skills.config import SkillConfig, VerifyCheck
 from app.skills.repo_run import get_run
@@ -40,6 +54,7 @@ class ScriptProvider:
         tools: list[ToolSpec] | None = None,
         temperature: float = 0.0,
         tool_choice: str = "auto",
+        reasoning: str = "",
     ) -> CompletionResult:
         self.seen_tools.append(list(tools) if tools else None)
         return self.script.pop(0)
@@ -50,8 +65,9 @@ class ScriptProvider:
         messages: list[Message],
         tools: list[ToolSpec] | None = None,
         temperature: float = 0.0,
-    ):  # type: ignore[no-untyped-def]
-        yield ""
+        reasoning: str = "",
+    ) -> Any:
+        yield StreamDelta(content="")
 
 
 # Static check: ScriptProvider satisfies the protocol.
@@ -123,7 +139,7 @@ def test_apply_success_first_try(db: Database, workspace: Path) -> None:
             workspace_dir=str(workspace),
             skill=skill,
             skill_id=skill_id,
-            input_doc_id=input_doc_id,
+            input_doc_ids=[input_doc_id],
             base_tools=build_document_tools(db, workspace),
         )
     )
@@ -174,7 +190,7 @@ def test_apply_retry_then_success(db: Database, workspace: Path) -> None:
             workspace_dir=str(workspace),
             skill=skill,
             skill_id=skill_id,
-            input_doc_id=input_doc_id,
+            input_doc_ids=[input_doc_id],
             base_tools=build_document_tools(db, workspace),
         )
     )
@@ -214,7 +230,7 @@ def test_apply_verify_never_passes(db: Database, workspace: Path) -> None:
             workspace_dir=str(workspace),
             skill=skill,
             skill_id=skill_id,
-            input_doc_id=input_doc_id,
+            input_doc_ids=[input_doc_id],
             base_tools=build_document_tools(db, workspace),
         )
     )
@@ -257,7 +273,7 @@ def test_apply_filters_tools(db: Database, workspace: Path) -> None:
             workspace_dir=str(workspace),
             skill=skill,
             skill_id=skill_id,
-            input_doc_id=input_doc_id,
+            input_doc_ids=[input_doc_id],
             base_tools=build_document_tools(db, workspace),
         )
     )
@@ -289,7 +305,7 @@ def test_apply_unknown_allowed_tool(db: Database, workspace: Path) -> None:
                 workspace_dir=str(workspace),
                 skill=skill,
                 skill_id=skill_id,
-                input_doc_id=input_doc_id,
+                input_doc_ids=[input_doc_id],
                 base_tools=build_document_tools(db, workspace),
             )
         )
@@ -318,7 +334,7 @@ def test_apply_missing_input_doc_raises(db: Database, workspace: Path) -> None:
                 workspace_dir=str(workspace),
                 skill=skill,
                 skill_id=skill_id,
-                input_doc_id="nonexistent",
+                input_doc_ids=["nonexistent"],
                 base_tools=build_document_tools(db, workspace),
             )
         )
@@ -340,13 +356,175 @@ def test_apply_no_verify_checks_passes(db: Database, workspace: Path) -> None:
             workspace_dir=str(workspace),
             skill=skill,
             skill_id=skill_id,
-            input_doc_id=input_doc_id,
+            input_doc_ids=[input_doc_id],
             base_tools=build_document_tools(db, workspace),
         )
     )
 
     assert result.status == "ok"
     assert result.output_doc_id is not None
+
+
+def test_apply_script_skill(db: Database, workspace: Path) -> None:
+    """A kind=script skill runs its code deterministically — no agent loop.
+
+    The provider has an empty script: if the agent loop were invoked,
+    ``pop(0)`` would raise ``AssertionError``. The script uppercases the
+    document text; the result is persisted as a result_md document and the
+    skill_run is marked ok.
+    """
+    skill = SkillConfig(
+        name="uppercaser",
+        description="uppercase the document",
+        system_prompt="",
+        allowed_tools=[],
+        model="test/model",
+        verify_checks=[VerifyCheck("non_empty")],
+        kind="script",
+        code="result = document.upper()\n",
+    )
+    skill_id = create_skill(
+        db, name=skill.name, description=skill.description, config=skill
+    )
+    input_doc_id = _ingest_input(db, workspace)
+    # Empty script — agent loop must NOT be invoked.
+    provider = ScriptProvider([])
+
+    result = asyncio.run(
+        apply_skill_collect(
+            provider=provider,
+            db=db,
+            workspace_dir=str(workspace),
+            skill=skill,
+            skill_id=skill_id,
+            input_doc_ids=[input_doc_id],
+            base_tools=build_document_tools(db, workspace),
+        )
+    )
+
+    assert result.status == "ok"
+    assert result.output_doc_id is not None
+    # Deterministic output: "source text" uppercased.
+    assert result.result_text == "SOURCE TEXT"
+
+    # Result document written to disk.
+    out_path = workspace / "results" / f"{result.output_doc_id}.md"
+    assert out_path.exists()
+    assert out_path.read_text(encoding="utf-8") == "SOURCE TEXT"
+
+    # skill_run row reflects success.
+    with db.connect() as conn:
+        row = conn.execute(
+            "SELECT status, output_doc_id FROM skill_run WHERE skill_id = ?",
+            (skill_id,),
+        ).fetchone()
+    assert row is not None
+    assert row["status"] == "ok"
+    assert row["output_doc_id"] == result.output_doc_id
+
+    # The provider was never called (no agent loop).
+    assert provider.seen_tools == []
+
+    # Trace contains a script entry.
+    script_entries = [e for e in result.trace.entries if e.kind == "script"]
+    assert len(script_entries) == 1
+    assert script_entries[0].data["ok"] is True
+
+
+def _ingest_named(db: Database, workspace: Path, filename: str, content: bytes) -> str:
+    row = ingest_file(db, workspace, filename=filename, content=content)
+    return row.id
+
+
+def test_apply_multi_doc(db: Database, workspace: Path) -> None:
+    """A skill applied to several documents loads them all and persists a result."""
+    skill = _make_skill(verify_checks=[VerifyCheck("non_empty")])
+    skill_id = create_skill(
+        db, name=skill.name, description=skill.description, config=skill
+    )
+    doc_a = _ingest_named(db, workspace, "a.md", b"first document")
+    doc_b = _ingest_named(db, workspace, "b.md", b"second document")
+
+    provider = ScriptProvider([_result("# Summary\n\nBoth documents.")])
+    result = asyncio.run(
+        apply_skill_collect(
+            provider=provider,
+            db=db,
+            workspace_dir=str(workspace),
+            skill=skill,
+            skill_id=skill_id,
+            input_doc_ids=[doc_a, doc_b],
+            base_tools=build_document_tools(db, workspace),
+        )
+    )
+
+    assert result.status == "ok"
+    assert result.output_doc_id is not None
+    # The start message listed both documents (provider saw the user message).
+    assert provider.seen_tools is not None
+
+    # skill_run row records both input ids.
+    with db.connect() as conn:
+        import json as _json
+
+        row = conn.execute(
+            "SELECT input_doc_ids FROM skill_run WHERE skill_id = ?",
+            (skill_id,),
+        ).fetchone()
+    assert _json.loads(row["input_doc_ids"]) == [doc_a, doc_b]
+
+
+def test_apply_arity_mismatch(db: Database, workspace: Path) -> None:
+    """A skill declaring input_arity=2 rejects a single-document apply."""
+    skill = _make_skill(verify_checks=[VerifyCheck("non_empty")])
+    skill.input_arity = 2
+    skill_id = create_skill(
+        db, name=skill.name, description=skill.description, config=skill
+    )
+    doc_a = _ingest_input(db, workspace)
+    provider = ScriptProvider([_result("ok")])
+
+    with pytest.raises(ValueError, match="expects 2 input"):
+        asyncio.run(
+            apply_skill_collect(
+                provider=provider,
+                db=db,
+                workspace_dir=str(workspace),
+                skill=skill,
+                skill_id=skill_id,
+                input_doc_ids=[doc_a],
+                base_tools=build_document_tools(db, workspace),
+            )
+        )
+
+    # No run should have been persisted (validated before create_run).
+    with db.connect() as conn:
+        row = conn.execute(
+            "SELECT COUNT(*) as n FROM skill_run WHERE skill_id = ?",
+            (skill_id,),
+        ).fetchone()
+    assert row["n"] == 0
+
+
+def test_skill_config_input_arity_roundtrip() -> None:
+    """input_arity survives serialization; legacy configs default to None."""
+    skill = SkillConfig(
+        name="x",
+        description="d",
+        system_prompt="",
+        allowed_tools=[],
+        model="m",
+        input_arity=2,
+    )
+    restored = SkillConfig.from_json(skill.to_json())
+    assert restored.input_arity == 2
+
+    legacy = SkillConfig.from_json(
+        '{"name":"x","description":"d","system_prompt":"","allowed_tools":[],'
+        '"model":"m","temperature":0,"max_iterations":1,"max_retries":0,'
+        '"verify_checks":[],"output_kind":"md"}'
+    )
+    assert legacy.input_arity is None
 
 
 def test_get_skill_returns_config(db: Database) -> None:
@@ -382,7 +560,7 @@ def test_get_run_returns_row(db: Database, workspace: Path) -> None:
             workspace_dir=str(workspace),
             skill=skill,
             skill_id=skill_id,
-            input_doc_id=input_doc_id,
+            input_doc_ids=[input_doc_id],
             base_tools=build_document_tools(db, workspace),
         )
     )
@@ -422,6 +600,31 @@ def test_skill_config_json_roundtrip() -> None:
     assert restored.max_retries == skill.max_retries
     assert len(restored.verify_checks) == 2
     assert restored.verify_checks[1].params == {"heading": "X"}
+
+
+def test_skill_config_kind_roundtrip() -> None:
+    """kind/code survive serialization; legacy configs default to agent."""
+    script_skill = SkillConfig(
+        name="upper",
+        description="d",
+        system_prompt="",
+        allowed_tools=[],
+        model="m",
+        kind="script",
+        code="result = document.upper()\n",
+    )
+    restored = SkillConfig.from_json(script_skill.to_json())
+    assert restored.kind == "script"
+    assert restored.code == "result = document.upper()\n"
+
+    # Legacy config without kind/code → defaults.
+    legacy = SkillConfig.from_json(
+        '{"name":"x","description":"d","system_prompt":"","allowed_tools":[],'
+        '"model":"m","temperature":0,"max_iterations":1,"max_retries":0,'
+        '"verify_checks":[],"output_kind":"md"}'
+    )
+    assert legacy.kind == "agent"
+    assert legacy.code == ""
 
 
 def test_tool_registry_filter() -> None:
@@ -482,7 +685,7 @@ def test_apply_skill_streams_inner_events(db: Database, workspace: Path) -> None
                 workspace_dir=str(workspace),
                 skill=skill,
                 skill_id=skill_id,
-                input_doc_id=input_doc_id,
+                input_doc_ids=[input_doc_id],
                 base_tools=build_document_tools(db, workspace),
             )
         )
@@ -519,3 +722,285 @@ def test_apply_skill_streams_inner_events(db: Database, workspace: Path) -> None
 
 async def _noop_tool(**kwargs: Any) -> dict:
     return {}
+
+
+# --------------------------------------------------------------------------- #
+# Granular trace events (CATALOG-16): meta / script / reasoning
+# --------------------------------------------------------------------------- #
+
+
+def test_apply_emits_run_meta_first(db: Database, workspace: Path) -> None:
+    """apply_skill opens the stream with a RunMetaEvent carrying run context.
+
+    The meta frame is the very first event so the trace feed can render
+    model/provider/kind/prompt up front. The provider name passed to
+    apply_skill is forwarded verbatim (CATALOG-16).
+    """
+    skill = _make_skill(verify_checks=[VerifyCheck("non_empty")])
+    skill_id = create_skill(
+        db, name=skill.name, description=skill.description, config=skill
+    )
+    input_doc_id = _ingest_input(db, workspace)
+    provider = ScriptProvider([_result("# Summary\n\nGreat document.")])
+
+    events = asyncio.run(
+        _collect_events(
+            apply_skill(
+                provider=provider,
+                db=db,
+                workspace_dir=str(workspace),
+                skill=skill,
+                skill_id=skill_id,
+                input_doc_ids=[input_doc_id],
+                base_tools=build_document_tools(db, workspace),
+                provider_name="zai",
+            )
+        )
+    )
+
+    # The very first event on the wire is the run meta.
+    meta_events = [e for e in events if isinstance(e, RunMetaEvent)]
+    assert len(meta_events) == 1
+    assert events[0] is meta_events[0]
+    meta = meta_events[0]
+    assert meta.model == skill.model
+    assert meta.provider == "zai"
+    assert meta.skill_kind == "agent"
+    assert meta.system_prompt == skill.system_prompt
+    assert meta.input_docs == [input_doc_id]
+
+
+def test_apply_script_emits_script_events(db: Database, workspace: Path) -> None:
+    """A kind=script skill surfaces start/done ScriptEvents in the stream."""
+    skill = SkillConfig(
+        name="uppercaser",
+        description="uppercase the document",
+        system_prompt="",
+        allowed_tools=[],
+        model="test/model",
+        verify_checks=[VerifyCheck("non_empty")],
+        kind="script",
+        code="result = document.upper()\n",
+    )
+    skill_id = create_skill(
+        db, name=skill.name, description=skill.description, config=skill
+    )
+    input_doc_id = _ingest_input(db, workspace)
+    provider = ScriptProvider([])
+
+    events = asyncio.run(
+        _collect_events(
+            apply_skill(
+                provider=provider,
+                db=db,
+                workspace_dir=str(workspace),
+                skill=skill,
+                skill_id=skill_id,
+                input_doc_ids=[input_doc_id],
+                base_tools=build_document_tools(db, workspace),
+            )
+        )
+    )
+
+    script_events = [e for e in events if isinstance(e, ScriptEvent)]
+    # start + done (no error path taken).
+    assert [e.stage for e in script_events] == ["start", "done"]
+    assert script_events[0].snippet == skill.code
+    assert script_events[1].return_value == "SOURCE TEXT"
+    assert script_events[1].duration is not None and script_events[1].duration >= 0.0
+
+    # The meta frame still leads, and reports kind=script.
+    meta_events = [e for e in events if isinstance(e, RunMetaEvent)]
+    assert len(meta_events) == 1
+    assert meta_events[0].skill_kind == "script"
+
+
+def test_apply_script_emits_error_event_on_failure(db: Database, workspace: Path) -> None:
+    """A failing script surfaces a ScriptEvent(stage=error) before re-raising."""
+    skill = SkillConfig(
+        name="boom",
+        description="raises",
+        system_prompt="",
+        allowed_tools=[],
+        model="test/model",
+        verify_checks=[],
+        kind="script",
+        # NameError at runtime -> ScriptRuntimeError wrapping it.
+        code="result = undefined_name\n",
+    )
+    skill_id = create_skill(
+        db, name=skill.name, description=skill.description, config=skill
+    )
+    input_doc_id = _ingest_input(db, workspace)
+    provider = ScriptProvider([])
+
+    with pytest.raises(Exception):
+        asyncio.run(
+            _collect_events(
+                apply_skill(
+                    provider=provider,
+                    db=db,
+                    workspace_dir=str(workspace),
+                    skill=skill,
+                    skill_id=skill_id,
+                    input_doc_ids=[input_doc_id],
+                    base_tools=build_document_tools(db, workspace),
+                )
+            )
+        )
+
+    # The generator was drained up to the failure; collect the events emitted
+    # before the raise by re-running and capturing synchronously.
+    events: list[Any] = []
+
+    async def _drain_until_error() -> None:
+        try:
+            async for ev in apply_skill(
+                provider=provider,
+                db=db,
+                workspace_dir=str(workspace),
+                skill=skill,
+                skill_id=skill_id,
+                input_doc_ids=[input_doc_id],
+                base_tools=build_document_tools(db, workspace),
+            ):
+                events.append(ev)
+        except Exception:
+            pass
+
+    asyncio.run(_drain_until_error())
+    script_events = [e for e in events if isinstance(e, ScriptEvent)]
+    assert [e.stage for e in script_events] == ["start", "error"]
+    assert script_events[1].error is not None
+    assert script_events[1].duration is not None
+
+
+def test_apply_reasoning_reaches_stream(db: Database, workspace: Path) -> None:
+    """When the provider returns reasoning, a ReasoningEvent reaches the stream.
+
+    Drives apply_skill with a provider whose completion carries ``reasoning``;
+    the agent runner (CATALOG-24/16) must surface it as its own event in the
+    apply stream, not just bury it in the trace.
+    """
+
+    class _ReasoningProvider(ScriptProvider):
+        async def complete(
+            self,
+            model: str,
+            messages: list[Message],
+            tools: list[ToolSpec] | None = None,
+            temperature: float = 0.0,
+            tool_choice: str = "auto",
+            reasoning: str = "",
+        ) -> CompletionResult:
+            self.seen_tools.append(list(tools) if tools else None)
+            base = self.script.pop(0)
+            base.reasoning = "Let me think about this document."
+            return base
+
+    skill = _make_skill(verify_checks=[VerifyCheck("non_empty")])
+    skill_id = create_skill(
+        db, name=skill.name, description=skill.description, config=skill
+    )
+    input_doc_id = _ingest_input(db, workspace)
+    provider = _ReasoningProvider([_result("# Summary\n\nGreat document.")])
+
+    events = asyncio.run(
+        _collect_events(
+            apply_skill(
+                provider=provider,
+                db=db,
+                workspace_dir=str(workspace),
+                skill=skill,
+                skill_id=skill_id,
+                input_doc_ids=[input_doc_id],
+                base_tools=build_document_tools(db, workspace),
+            )
+        )
+    )
+
+    reasoning_events = [e for e in events if isinstance(e, ReasoningEvent)]
+    assert len(reasoning_events) == 1
+    assert "think about this document" in reasoning_events[0].text
+
+
+# --------------------------------------------------------------------------- #
+# Cancellation (CATALOG-11)
+# --------------------------------------------------------------------------- #
+
+
+class _BlockingApplyProvider(ScriptProvider):
+    """Provider whose ``complete`` blocks forever until cancelled."""
+
+    def __init__(self) -> None:
+        super().__init__(script=[])
+        self.was_cancelled = False
+
+    async def complete(
+        self,
+        model: str,
+        messages: list[Message],
+        tools: list[ToolSpec] | None = None,
+        temperature: float = 0.0,
+        tool_choice: str = "auto",
+        reasoning: str = "",
+    ) -> CompletionResult:
+        self.seen_tools.append(list(tools) if tools else None)
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            self.was_cancelled = True
+            raise
+        return _result("unreachable")
+
+
+def test_apply_cancelled_marks_run_cancelled(db: Database, workspace: Path) -> None:
+    """A cancelled apply marks the skill_run ``cancelled``, not ``failed`` (CATALOG-11).
+
+    Cancelling the task running ``apply_skill`` propagates ``CancelledError``
+    through the whole stack; ``_apply_core`` catches it and persists
+    ``status='cancelled'`` so the run row never stays ``running`` and is
+    distinguishable from a genuine failure.
+    """
+    skill = _make_skill(verify_checks=[VerifyCheck("non_empty")])
+    skill_id = create_skill(
+        db, name=skill.name, description=skill.description, config=skill
+    )
+    input_doc_id = _ingest_input(db, workspace)
+    provider = _BlockingApplyProvider()
+
+    async def _run_and_cancel() -> None:
+        task = asyncio.ensure_future(
+            _collect_events(
+                apply_skill(
+                    provider=provider,
+                    db=db,
+                    workspace_dir=str(workspace),
+                    skill=skill,
+                    skill_id=skill_id,
+                    input_doc_ids=[input_doc_id],
+                    base_tools=build_document_tools(db, workspace),
+                )
+            )
+        )
+        await asyncio.sleep(0.05)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+
+    asyncio.run(_run_and_cancel())
+
+    # The provider observed the cancellation.
+    assert provider.was_cancelled is True
+
+    # The skill_run row is marked cancelled (not running/failed).
+    with db.connect() as conn:
+        row = conn.execute(
+            "SELECT status, output_doc_id, trace_json FROM skill_run WHERE skill_id = ?",
+            (skill_id,),
+        ).fetchone()
+    assert row is not None
+    assert row["status"] == "cancelled"
+    assert row["output_doc_id"] is None
+    # Partial trace preserved.
+    assert row["trace_json"] is not None

@@ -1,0 +1,28 @@
+{
+  "version": 1,
+  "hooks": {
+    "sessionStart": [
+      {
+        "command": ".cursor/hooks/pipeline-lock-reset.sh"
+      }
+    ],
+    "subagentStart": [
+      {
+        "command": ".cursor/hooks/pipeline-lock-set.sh",
+        "matcher": "catalog-generator|catalog-reviewer"
+      }
+    ],
+    "subagentStop": [
+      {
+        "command": ".cursor/hooks/pipeline-lock-clear.sh",
+        "matcher": "catalog-generator|catalog-reviewer"
+      }
+    ],
+    "beforeShellExecution": [
+      {
+        "command": ".cursor/hooks/pipeline-git-guard.sh",
+        "matcher": "git |gh pr "
+      }
+    ]
+  }
+}

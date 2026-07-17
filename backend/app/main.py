@@ -2,9 +2,15 @@
 
 Wires the engine (step 03), storage (04) and skills (05) into the HTTP /
 WebSocket routers (06). The lifespan boots the SQLite database, a shared
-``httpx`` client and the OpenRouter provider, and builds the base document
+``httpx`` client and the LLM provider factory, and builds the base document
 tool registry — all carried on ``app.state`` so the routers (and tests) read
 their collaborators from one place.
+
+The factory (:func:`app.llm.factory.build_providers`) instantiates every
+configured provider (OpenRouter always; z.ai when ``ZAI_API_KEY`` is set) and
+:func:`select_provider` picks the active one via ``APP_PROVIDER``. Both the
+dict (``app.state.providers``) and the active instance (``app.state.provider``)
+are exposed.
 
 Tests do not construct these collaborators manually: they enter the
 ``TestClient`` lifespan context (which runs this lifespan over test-scoped
@@ -21,10 +27,11 @@ import httpx
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api import documents, runs, sessions, skills
+from app.api import documents, models, runs, sessions, skills
 from app.config import Settings, get_settings
 from app.documents.tools import build_document_tools
-from app.llm.openrouter import OpenRouterProvider, build_debug_hooks
+from app.llm.factory import build_providers, select_provider
+from app.llm.openrouter import build_debug_hooks
 from app.logging_config import setup_logging
 from app.storage.db import Database
 
@@ -42,9 +49,14 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     http_client = httpx.AsyncClient(timeout=60.0, event_hooks=build_debug_hooks())
     app.state.db = db
     app.state.http_client = http_client
-    app.state.provider = OpenRouterProvider(
-        http_client, settings.api_key, settings.base_url
-    )
+    providers = build_providers(settings, http_client)
+    app.state.providers = providers
+    app.state.provider = select_provider(providers, settings.app_provider)
+    # CATALOG-14: mutable runtime selection of the active provider/model. Seeded
+    # from env (frozen Settings); switchable at runtime via POST /settings. The
+    # frozen Settings remain the source of API keys and the initial default.
+    app.state.active_provider = settings.app_provider or next(iter(providers), "openrouter")
+    app.state.active_model = settings.default_model
     app.state.workspace = settings.workspace_dir
     app.state.tools = build_document_tools(db, settings.workspace_dir)
     app.state.settings = settings
@@ -69,6 +81,7 @@ app.include_router(documents.router)
 app.include_router(sessions.router)
 app.include_router(skills.router)
 app.include_router(runs.router)
+app.include_router(models.router)
 
 
 @app.get("/health")

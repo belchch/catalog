@@ -32,7 +32,17 @@ CREATE TABLE IF NOT EXISTS skill(
 CREATE TABLE IF NOT EXISTS skill_run(
   id TEXT PRIMARY KEY, skill_id TEXT NOT NULL, session_id TEXT,
   input_doc_id TEXT, output_doc_id TEXT,
+  input_doc_ids TEXT,                                            -- JSON array of input doc ids (CATALOG-4)
   status TEXT NOT NULL,                                         -- running|ok|failed
   trace_json TEXT, started_at TEXT NOT NULL, ended_at TEXT
 );
 """
+
+# Safe additive migrations for existing databases (CATALOG-4 / CATALOG-17
+# pattern). There is no migration framework: ``CREATE TABLE IF NOT EXISTS``
+# only covers fresh databases, so columns added after the initial release need
+# an idempotent ``ALTER TABLE`` guarded against the "duplicate column" error
+# for databases that already have them. Each entry is ``(table, column, ddl)``.
+ADDITIVE_MIGRATIONS: list[tuple[str, str, str]] = [
+    ("skill_run", "input_doc_ids", "ALTER TABLE skill_run ADD COLUMN input_doc_ids TEXT"),
+]

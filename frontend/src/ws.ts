@@ -18,6 +18,24 @@ export type ServerEvent =
   | { type: 'tool_result'; id: string; name: string; ok: boolean; result: unknown }
   | { type: 'verify'; iteration: number; passed: boolean; failures: string[] }
   | {
+      type: 'meta'
+      model: string
+      provider: string
+      skill_kind: string
+      system_prompt: string
+      input_docs: string[]
+    }
+  | {
+      type: 'script'
+      stage: string
+      snippet?: string
+      return_value?: string
+      duration?: number
+      error?: string
+    }
+  | { type: 'reasoning'; text: string }
+  | { type: 'suggestions'; items: string[] }
+  | {
       type: 'finish'
       capped?: boolean
       status?: string
@@ -27,10 +45,12 @@ export type ServerEvent =
 
 export interface PlannerConnection {
   send(text: string): void
+  cancel(): void
   close(): void
 }
 
 export interface RunConnection {
+  cancel(): void
   close(): void
 }
 
@@ -61,6 +81,7 @@ export function connectPlanner(
   ws.onclose = () => opts?.onClose?.()
   return {
     send: (text: string) => ws.send(text),
+    cancel: () => ws.send(JSON.stringify({ type: 'cancel' })),
     close: () => ws.close(),
   }
 }
@@ -77,7 +98,10 @@ export function connectRun(
     if (event) onEvent(event)
   }
   ws.onclose = () => opts?.onClose?.()
-  return { close: () => ws.close() }
+  return {
+    cancel: () => ws.send(JSON.stringify({ type: 'cancel' })),
+    close: () => ws.close(),
+  }
 }
 
 /** Render tool-call arguments as a compact JSON string (best-effort). */
@@ -86,5 +110,19 @@ export function formatToolArgs(args: Record<string, unknown>): string {
     return JSON.stringify(args)
   } catch {
     return '{...}'
+  }
+}
+
+/**
+ * Render a tool result payload as a compact, human-readable snippet (CATALOG-16).
+ * Strings pass through; objects/arrays are JSON-encoded. Bounded by the caller
+ * (the backend already truncates the wire frame to ~400 chars).
+ */
+export function formatToolResult(result: unknown): string {
+  if (typeof result === 'string') return result
+  try {
+    return JSON.stringify(result)
+  } catch {
+    return String(result)
   }
 }

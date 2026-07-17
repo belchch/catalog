@@ -27,7 +27,14 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.config import Settings
-from app.llm.base import CompletionResult, LLMProvider, Message, ModelInfo, ToolSpec
+from app.llm.base import (
+    CompletionResult,
+    LLMProvider,
+    Message,
+    ModelInfo,
+    StreamDelta,
+    ToolSpec,
+)
 from app.main import app
 from app.storage.db import Database
 
@@ -55,12 +62,14 @@ class FakeProvider:
         tools: list[ToolSpec] | None = None,
         temperature: float = 0.0,
         tool_choice: str = "auto",
+        reasoning: str = "",
     ) -> CompletionResult:
         self.requests.append(
             {
                 "model": model,
                 "tools": [t.name for t in tools] if tools else None,
                 "n_messages": len(messages),
+                "reasoning": reasoning,
             }
         )
         if not self.script:
@@ -73,8 +82,9 @@ class FakeProvider:
         messages: list[Message],
         tools: list[ToolSpec] | None = None,
         temperature: float = 0.0,
+        reasoning: str = "",
     ) -> Any:
-        yield ""
+        yield StreamDelta(content="")
 
 
 # Static protocol check: FakeProvider satisfies LLMProvider.

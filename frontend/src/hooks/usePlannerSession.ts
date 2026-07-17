@@ -15,9 +15,12 @@ export interface PlannerMessage {
 export interface UsePlannerSessionResult {
   messages: PlannerMessage[]
   streaming: boolean
+  cancelling: boolean
   closed: boolean
   error: string | null
+  suggestions: string[]
   send: (text: string) => void
+  cancel: () => void
 }
 
 /**
@@ -30,8 +33,10 @@ export interface UsePlannerSessionResult {
 export function usePlannerSession(sessionId: string | null): UsePlannerSessionResult {
   const [messages, setMessages] = useState<PlannerMessage[]>([])
   const [streaming, setStreaming] = useState(false)
+  const [cancelling, setCancelling] = useState(false)
   const [closed, setClosed] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [suggestions, setSuggestions] = useState<string[]>([])
 
   const connRef = useRef<PlannerConnection | null>(null)
   const assistantBufferRef = useRef<string>('')
@@ -75,10 +80,15 @@ export function usePlannerSession(sessionId: string | null): UsePlannerSessionRe
       case 'finish':
         assistantBufferRef.current = ''
         setStreaming(false)
+        setCancelling(false)
+        break
+      case 'suggestions':
+        setSuggestions(e.items)
         break
       case 'error':
         setError(e.message)
         setStreaming(false)
+        setCancelling(false)
         break
       case 'step':
       case 'verify':
@@ -94,6 +104,7 @@ export function usePlannerSession(sessionId: string | null): UsePlannerSessionRe
     setStreaming(false)
     setClosed(false)
     setError(null)
+    setSuggestions([])
     assistantBufferRef.current = ''
     pendingRef.current = []
     readyRef.current = false
@@ -123,6 +134,7 @@ export function usePlannerSession(sessionId: string | null): UsePlannerSessionRe
     if (!trimmed) return
     setMessages((prev) => [...prev, { role: 'user', content: trimmed }])
     setStreaming(true)
+    setSuggestions([])
     assistantBufferRef.current = ''
     setError(null)
     if (readyRef.current && connRef.current) {
@@ -132,5 +144,10 @@ export function usePlannerSession(sessionId: string | null): UsePlannerSessionRe
     }
   }, [])
 
-  return { messages, streaming, closed, error, send }
+  const cancel = useCallback(() => {
+    connRef.current?.cancel()
+    setCancelling(true)
+  }, [])
+
+  return { messages, streaming, cancelling, closed, error, suggestions, send, cancel }
 }

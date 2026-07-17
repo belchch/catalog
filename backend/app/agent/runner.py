@@ -10,6 +10,7 @@ import jsonschema
 from app.agent.events import (
     AgentEvent,
     FinishEvent,
+    ReasoningEvent,
     StepEvent,
     TokenEvent,
     ToolCallEvent,
@@ -82,6 +83,7 @@ async def _run_agent_core(
     max_iterations: int,
     use_stream: bool,
     trace: Trace,
+    reasoning: str = "",
 ) -> AsyncIterator[AgentEvent]:
     """Shared loop: streams events and records ``trace``.
 
@@ -103,24 +105,38 @@ async def _run_agent_core(
 
         if use_stream:
             text = ""
+            reasoning_parts: list[str] = []
             async for delta in provider.stream_complete(
-                model, history, tools.specs(), temperature
+                model, history, tools.specs(), temperature, reasoning=reasoning
             ):
-                text += delta
-                yield TokenEvent(delta)
+                if delta.content:
+                    text += delta.content
+                    yield TokenEvent(delta.content)
+                if delta.reasoning:
+                    reasoning_parts.append(delta.reasoning)
             # Stream mode does not parse tool_calls from SSE in this slice;
             # the run finishes at end of stream.
-            trace.entries[-1].data = {"content": text}
+            reasoning_text = "".join(reasoning_parts) or None
+            trace.entries[-1].data = {"content": text, "reasoning": reasoning_text}
+            # CATALOG-24/16: surface the model's chain-of-thought as its own
+            # trace event when the provider emits reasoning_content.
+            if reasoning_text:
+                reasoning_event = ReasoningEvent(reasoning_text)
+                yield reasoning_event
+                log_agent_event(reasoning_event)
             history.append(Message(role="assistant", content=text))
             finish_stream = FinishEvent(text, "stop", capped=False, usage={})
             yield finish_stream
             log_agent_event(finish_stream)
             return
 
-        resp = await provider.complete(model, history, tools.specs(), temperature)
+        resp = await provider.complete(
+            model, history, tools.specs(), temperature, reasoning=reasoning
+        )
         trace.entries[-1].data = {
             "finish_reason": resp.finish_reason,
             "content": resp.content,
+            "reasoning": resp.reasoning,
             "tool_calls": [
                 {"id": tc.id, "name": tc.name, "arguments": tc.arguments}
                 for tc in resp.tool_calls
@@ -131,6 +147,12 @@ async def _run_agent_core(
         )
         if resp.content is not None:
             last_text = resp.content
+        # CATALOG-24/16: surface the model's chain-of-thought as its own trace
+        # event when the provider emits reasoning_content for this turn.
+        if resp.reasoning:
+            reasoning_event = ReasoningEvent(resp.reasoning)
+            yield reasoning_event
+            log_agent_event(reasoning_event)
 
         if not resp.tool_calls:
             finish_no_tools = FinishEvent(
@@ -183,6 +205,7 @@ async def run_agent(
     temperature: float = 0.0,
     max_iterations: int = 8,
     use_stream: bool = True,
+    reasoning: str = "",
 ) -> AsyncIterator[AgentEvent]:
     """Run the function-calling loop, streaming :data:`AgentEvent` items."""
     trace = Trace()
@@ -196,6 +219,7 @@ async def run_agent(
         max_iterations=max_iterations,
         use_stream=use_stream,
         trace=trace,
+        reasoning=reasoning,
     ):
         yield event
 
@@ -210,6 +234,7 @@ async def run_agent_collect(
     temperature: float = 0.0,
     max_iterations: int = 8,
     use_stream: bool = True,
+    reasoning: str = "",
 ) -> tuple[str | None, Trace, bool]:
     """Drain :func:`run_agent` and return ``(final_text, trace, capped)``."""
     trace = Trace()
@@ -225,6 +250,7 @@ async def run_agent_collect(
         max_iterations=max_iterations,
         use_stream=use_stream,
         trace=trace,
+        reasoning=reasoning,
     ):
         if isinstance(event, FinishEvent):
             final_text = event.text

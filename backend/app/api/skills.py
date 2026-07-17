@@ -10,16 +10,29 @@ before the skill is persisted as ``draft`` (ADR-0004: build at approval).
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 
 from app.api.deps import get_db, get_provider, get_settings, get_tools
-from app.api.schemas import CommitOut, SkillBuilt, SkillOut
+from app.api.schemas import (
+    CommitOut,
+    SkillBuilt,
+    SkillConfigureRequest,
+    SkillOut,
+    SkillPreview,
+)
 from app.config import Settings
 from app.llm.base import LLMProvider, Message, ToolSpec
 from app.llm.log_context import prompt_log_context
 from app.agent.registry import ToolRegistry
 from app.skills.config import SkillConfig, VerifyCheck
-from app.skills.repo_skill import create_skill, get_skill, list_skills, update_status
+from app.skills.repo_skill import (
+    create_skill,
+    get_skill,
+    list_skills,
+    update_status,
+    update_skill_config,
+)
+from app.skills.script_runner import ScriptValidationError, validate_script
 from app.skills.verify import registered_checks
 from app.storage.db import Database
 from app.storage.repo_message import list_messages
@@ -30,12 +43,20 @@ router = APIRouter()
 MAX_BUILD_ATTEMPTS = 3  # 1 initial + 2 retries (step 06 contract).
 
 BUILD_SKILL_SYSTEM_PROMPT = (
-    "Ты собираешь SkillConfig — замороженный конфиг агента — из истории "
-    "планировочной сессии. Вызови инструмент build_skill с полями конфига: "
-    "name, description, system_prompt, allowed_tools (только из доступных "
-    "инструментов), model, temperature, verify_checks (только из реестра "
-    "проверок). system_prompt должен быть полной инструкцией для агента, "
-    "который будет применять скилл к документу."
+    "Ты собираешь SkillConfig из истории планировочной сессии. "
+    "СНАЧАЛА оцени детерминизм задачи. Если задача сводится к чистой обработке "
+    "текста/данных без суждений и рассуждений (форматирование, подсчёт, "
+    "регулярные преобразования, парсинг, сортировка) — выбери kind=\"script\" "
+    "и напиши валидный Python-код в поле code: без import, без open/eval/exec; "
+    "входной текст документа доступен в переменной document; результат "
+    "возвращается через return из функции main(), через присваивание глобальной "
+    "переменной result или через print. Если задача требует суждений, "
+    "рассуждений или творческой обработки — выбери kind=\"agent\" и ОБЯЗАТЕЛЬНО "
+    "заполни non_determinism_reason объяснением, почему детерминизм невозможен. "
+    "Для agent также заполни system_prompt (полная инструкция агенту), "
+    "allowed_tools (только из доступных инструментов), model, verify_checks "
+    "(только из реестра проверок). Укажи input_arity — сколько входных "
+    "документов ожидает скил (1, 2, …), либо опусти/null если число любое."
 )
 
 # JSON-Schema for the build_skill tool arguments, mirroring SkillConfig fields.
@@ -44,6 +65,35 @@ _BUILD_SKILL_PARAMETERS = {
     "properties": {
         "name": {"type": "string"},
         "description": {"type": "string"},
+        "kind": {
+            "type": "string",
+            "enum": ["agent", "script"],
+            "description": (
+                "agent = LLM-driven function-calling loop; "
+                "script = deterministic pure-Python (no LLM at runtime)."
+            ),
+        },
+        "code": {
+            "type": "string",
+            "description": (
+                "Python source for kind=script skills. No import/open/eval/exec; "
+                "input in `document`; output via main()/result/print."
+            ),
+        },
+        "input_arity": {
+            "type": ["integer", "null"],
+            "description": (
+                "How many input documents this skill expects (CATALOG-4): "
+                "1, 2, ... or null for an arbitrary-length list. Omit/null = any >=1."
+            ),
+        },
+        "non_determinism_reason": {
+            "type": "string",
+            "description": (
+                "Required when kind=agent: explain why the task is not "
+                "deterministic (needs judgment/reasoning)."
+            ),
+        },
         "system_prompt": {"type": "string"},
         "allowed_tools": {"type": "array", "items": {"type": "string"}},
         "model": {"type": "string"},
@@ -63,7 +113,7 @@ _BUILD_SKILL_PARAMETERS = {
         },
         "output_kind": {"type": "string"},
     },
-    "required": ["name", "description", "system_prompt", "allowed_tools", "model"],
+    "required": ["name", "description", "kind"],
 }
 
 BUILD_SKILL_TOOL = ToolSpec(
@@ -74,7 +124,14 @@ BUILD_SKILL_TOOL = ToolSpec(
 
 
 def _args_to_config(args: dict, default_model: str) -> SkillConfig:
-    """Parse ``build_skill`` tool arguments into a :class:`SkillConfig`."""
+    """Parse ``build_skill`` tool arguments into a :class:`SkillConfig`.
+
+    For ``kind="script"`` the skill is deterministic: ``allowed_tools`` is
+    forced to ``[]`` (no agent loop, no tools) and ``model`` is irrelevant
+    (though still stored for uniformity). For ``kind="agent"`` the classic
+    frozen-agent fields are populated as before.
+    """
+    kind = args.get("kind", "agent")
     verify_checks = [
         VerifyCheck(
             check=vc["check"],
@@ -82,28 +139,54 @@ def _args_to_config(args: dict, default_model: str) -> SkillConfig:
         )
         for vc in (args.get("verify_checks") or [])
     ]
+    if kind == "script":
+        allowed_tools: list[str] = []
+    else:
+        allowed_tools = list(args.get("allowed_tools") or [])
     return SkillConfig(
         name=args["name"],
         description=args["description"],
-        system_prompt=args["system_prompt"],
-        allowed_tools=list(args.get("allowed_tools") or []),
+        system_prompt=args.get("system_prompt") or "",
+        allowed_tools=allowed_tools,
         model=args.get("model") or default_model,
         temperature=float(args.get("temperature", 0.0)),
         max_iterations=int(args.get("max_iterations", 8)),
         max_retries=int(args.get("max_retries", 2)),
         verify_checks=verify_checks,
         output_kind=args.get("output_kind", "md"),
+        kind=kind,
+        code=args.get("code") or "",
+        non_determinism_reason=args.get("non_determinism_reason") or "",
+        input_arity=args.get("input_arity"),
+        provider=args.get("provider") or "",
+        reasoning=args.get("reasoning") or "",
     )
 
 
 def _validate_config(
     config: SkillConfig, available_tools: list[str], available_checks: list[str]
 ) -> list[str]:
-    """Return a list of validation errors (empty when the config is valid)."""
+    """Return a list of validation errors (empty when the config is valid).
+
+    For ``kind="script"`` the code is statically validated via
+    :func:`validate_script` (syntax + sandbox policy); ``allowed_tools`` is
+    ignored (always empty). For ``kind="agent"`` the classic tool/check
+    checks apply. Verify-check ids are validated for both kinds.
+    """
     errors: list[str] = []
-    for name in config.allowed_tools:
-        if name not in available_tools:
-            errors.append(f"unknown tool: {name!r}")
+    if config.kind not in ("agent", "script"):
+        errors.append(f"unknown skill kind: {config.kind!r} (expected 'agent' or 'script')")
+        return errors
+    if config.kind == "script":
+        try:
+            validate_script(config.code)
+        except ScriptValidationError as exc:
+            errors.append(str(exc))
+    else:
+        for name in config.allowed_tools:
+            if name not in available_tools:
+                errors.append(f"unknown tool: {name!r}")
+    # Verify-check ids are validated for both kinds (a script may have checks).
     for vc in config.verify_checks:
         if vc.check not in available_checks:
             errors.append(f"unknown verify check: {vc.check!r}")
@@ -117,12 +200,17 @@ async def build_skill_from_session(
     base_tools: ToolRegistry,
     settings: Settings,
     session_id: str,
+    default_model: str | None = None,
 ) -> str:
     """Build a draft skill from a session; return the new skill id.
 
     Raises :class:`HTTPException` (422) if no valid config can be produced
     within the retry budget.
+
+    ``default_model`` (CATALOG-14) overrides the frozen ``settings.default_model``
+    so a skill is seeded from the runtime-selected model when set.
     """
+    model_default = default_model or settings.default_model
     messages_raw = list_messages(db, session_id)
     history: list[Message] = [Message(role="system", content=BUILD_SKILL_SYSTEM_PROMPT)]
     for m in messages_raw:
@@ -137,7 +225,7 @@ async def build_skill_from_session(
     with prompt_log_context(session_id=session_id, run_id=None, purpose="build_skill"):
         for _attempt in range(MAX_BUILD_ATTEMPTS):
             resp = await provider.complete(
-                settings.default_model,
+                model_default,
                 history,
                 [BUILD_SKILL_TOOL],
                 0.0,
@@ -157,7 +245,7 @@ async def build_skill_from_session(
                 continue
 
             try:
-                config = _args_to_config(tc.arguments, settings.default_model)
+                config = _args_to_config(tc.arguments, model_default)
             except (KeyError, TypeError, ValueError) as exc:
                 history.append(
                     Message(
@@ -195,8 +283,23 @@ async def build_skill_from_session(
     )
 
 
+def _preview(config: SkillConfig) -> SkillPreview:
+    """Build the :class:`SkillPreview` shown in the settings modal (CATALOG-6)."""
+    return SkillPreview(
+        name=config.name,
+        description=config.description,
+        kind=config.kind,
+        model=config.model,
+        provider=config.provider,
+        reasoning=config.reasoning,
+        input_arity=config.input_arity,
+        allowed_tools=list(config.allowed_tools),
+    )
+
+
 @router.post("/sessions/{session_id}/skills", response_model=SkillBuilt)
 async def build_skill_endpoint(
+    request: Request,
     session_id: str,
     db: Database = Depends(get_db),
     provider: LLMProvider = Depends(get_provider),
@@ -205,14 +308,52 @@ async def build_skill_endpoint(
 ) -> SkillBuilt:
     if get_session(db, session_id) is None:
         raise HTTPException(status_code=404, detail="session not found")
+    # CATALOG-14: seed the skill's model from the runtime-selected active model.
+    active_model = getattr(request.app.state, "active_model", None)
     skill_id = await build_skill_from_session(
         provider=provider,
         db=db,
         base_tools=tools,
         settings=settings,
         session_id=session_id,
+        default_model=active_model,
     )
-    return SkillBuilt(skill_id=skill_id)
+    record = get_skill(db, skill_id)
+    assert record is not None  # just created
+    # CATALOG-6: return a preview so the UI opens the settings modal before
+    # the user commits, instead of silently dropping a draft.
+    return SkillBuilt(skill_id=skill_id, config=_preview(record.config))
+
+
+@router.patch("/skills/{skill_id}/configure", response_model=SkillBuilt)
+async def configure_skill_endpoint(
+    skill_id: str,
+    req: SkillConfigureRequest,
+    db: Database = Depends(get_db),
+) -> SkillBuilt:
+    """Apply the user's model/provider/reasoning choices from the settings modal.
+
+    Only fields the user changed are overridden; the rest of the frozen config
+    is preserved. The skill must still be a draft (CATALOG-6: configure before
+    commit).
+    """
+    skill = get_skill(db, skill_id)
+    if skill is None:
+        raise HTTPException(status_code=404, detail="skill not found")
+    if skill.status != "draft":
+        raise HTTPException(
+            status_code=409,
+            detail="skill can only be configured while in draft",
+        )
+    updated = update_skill_config(
+        db,
+        skill_id,
+        model=req.model,
+        provider=req.provider,
+        reasoning=req.reasoning,
+    )
+    assert updated is not None
+    return SkillBuilt(skill_id=skill_id, config=_preview(updated.config))
 
 
 @router.post("/skills/{skill_id}/commit", response_model=CommitOut)
@@ -238,6 +379,8 @@ async def list_skills_endpoint(
             description=r["description"],
             status=r["status"],
             created_at=r["created_at"],
+            kind=r.get("kind", "agent"),
+            tags=r.get("tags", []),
         )
         for r in rows
     ]

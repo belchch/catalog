@@ -18,6 +18,9 @@ from typing import Any
 from app.agent.events import (
     AgentEvent,
     FinishEvent,
+    ReasoningEvent,
+    RunMetaEvent,
+    ScriptEvent,
     StepEvent,
     TokenEvent,
     ToolCallEvent,
@@ -85,4 +88,27 @@ def log_agent_event(event: AgentEvent) -> None:
             event.capped,
             _trunc(event.text),
         )
+        return
+    if isinstance(event, RunMetaEvent):
+        logger.info(
+            "run_meta model=%s provider=%s kind=%s prompt=%s input_docs=%d",
+            event.model,
+            event.provider,
+            event.skill_kind,
+            _trunc(event.system_prompt),
+            len(event.input_docs),
+        )
+        return
+    if isinstance(event, ScriptEvent):
+        logger.info(
+            "script stage=%s duration=%s snippet=%s return=%s error=%s",
+            event.stage,
+            event.duration,
+            _trunc(event.snippet) if event.snippet is not None else None,
+            _trunc(event.return_value) if event.return_value is not None else None,
+            event.error,
+        )
+        return
+    if isinstance(event, ReasoningEvent):
+        logger.info("reasoning text=%s", _trunc(event.text))
         return

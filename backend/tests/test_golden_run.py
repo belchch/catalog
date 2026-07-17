@@ -3,10 +3,19 @@ from __future__ import annotations
 import asyncio
 import re
 from pathlib import Path
+from typing import Any
 
 import docx
 
-from app.llm.base import CompletionResult, LLMProvider, Message, ModelInfo, ToolCall, ToolSpec
+from app.llm.base import (
+    CompletionResult,
+    LLMProvider,
+    Message,
+    ModelInfo,
+    StreamDelta,
+    ToolCall,
+    ToolSpec,
+)
 from app.storage.db import Database
 from scripts.golden_run import run_golden
 
@@ -39,6 +48,7 @@ class _GoldenProvider:
         tools: list[ToolSpec] | None = None,
         temperature: float = 0.0,
         tool_choice: str = "auto",
+        reasoning: str = "",
     ) -> CompletionResult:
         self.calls += 1
         if self.calls == 1:
@@ -103,8 +113,9 @@ class _GoldenProvider:
         messages: list[Message],
         tools: list[ToolSpec] | None = None,
         temperature: float = 0.0,
-    ):  # type: ignore[no-untyped-def]
-        yield ""
+        reasoning: str = "",
+    ) -> Any:
+        yield StreamDelta(content="")
 
 
 # Static protocol check: _GoldenProvider satisfies LLMProvider.

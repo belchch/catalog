@@ -10,6 +10,14 @@ OPENROUTER_BASE_URL = os.getenv("OPENROUTER_BASE_URL", "https://openrouter.ai/ap
 OPENROUTER_DEFAULT_MODEL = os.getenv("OPENROUTER_DEFAULT_MODEL", "openrouter/free")
 OPENROUTER_FALLBACK_MODEL = "google/gemini-2.5-flash"
 
+# z.ai (Zhipu / BigModel, GLM) — OpenAI-compatible provider usable without VPN.
+ZAI_API_KEY = os.getenv("ZAI_API_KEY", "")
+ZAI_BASE_URL = os.getenv("ZAI_BASE_URL", "https://api.z.ai/api/paas/v4")
+
+# Active provider selection: "openrouter" (default) or "zai".
+# When unset, the factory defaults to openrouter (backward compat).
+APP_PROVIDER = os.getenv("APP_PROVIDER", "").strip().lower()
+
 APP_WORKSPACE = os.getenv("APP_WORKSPACE", "workspace")
 APP_DB_PATH = os.getenv("APP_DB_PATH", "catalog.db")
 
@@ -39,6 +47,9 @@ class Settings:
     api_key: str = OPENROUTER_API_KEY
     base_url: str = OPENROUTER_BASE_URL
     default_model: str = OPENROUTER_DEFAULT_MODEL
+    zai_api_key: str = ZAI_API_KEY
+    zai_base_url: str = ZAI_BASE_URL
+    app_provider: str = APP_PROVIDER
     prompt_log_enabled: bool = PROMPT_LOG_ENABLED
     prompt_log_dir: str = PROMPT_LOG_DIR
     log_level: str = LOG_LEVEL

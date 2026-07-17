@@ -11,10 +11,10 @@ from __future__ import annotations
 
 import sqlite3
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 
-from app.skills.config import SkillConfig
+from app.skills.config import SkillConfig, compute_tags
 from app.storage.db import Database
 
 
@@ -79,30 +79,48 @@ def get_skill(db: Database, skill_id: str) -> SkillRecord | None:
 
 
 def list_skills(db: Database, status: str | None = None) -> list[dict]:
-    """List skills, optionally filtered by status (newest first)."""
+    """List skills, optionally filtered by status (newest first).
+
+    Each dict includes ``kind`` and ``tags`` (parsed from ``config_json``) so
+    the API can surface the skill type and capability tags (CATALOG-8) without
+    a separate config fetch.
+    """
     with db.connect() as conn:
         if status is not None:
             rows = conn.execute(
-                "SELECT id, name, description, status, created_at, updated_at "
-                "FROM skill WHERE status = ? ORDER BY created_at DESC",  # noqa: S608
+                "SELECT id, name, description, config_json, status, created_at, "
+                "updated_at FROM skill WHERE status = ? ORDER BY created_at DESC",  # noqa: S608
                 (status,),
             ).fetchall()
         else:
             rows = conn.execute(
-                "SELECT id, name, description, status, created_at, updated_at "
-                "FROM skill ORDER BY created_at DESC"  # noqa: S608
+                "SELECT id, name, description, config_json, status, created_at, "
+                "updated_at FROM skill ORDER BY created_at DESC"  # noqa: S608
             ).fetchall()
-    return [
-        {
-            "id": r["id"],
-            "name": r["name"],
-            "description": r["description"],
-            "status": r["status"],
-            "created_at": r["created_at"],
-            "updated_at": r["updated_at"],
-        }
-        for r in rows
-    ]
+    result: list[dict] = []
+    for r in rows:
+        try:
+            config = SkillConfig.from_json(r["config_json"])
+            config_kind = config.kind
+            config_tags = compute_tags(config)
+        except (ValueError, KeyError):
+            # Unparseable/legacy config: degrade to the agent defaults so the
+            # row still renders on the UI with an ``ai`` tag.
+            config_kind = "agent"
+            config_tags = ["ai"]
+        result.append(
+            {
+                "id": r["id"],
+                "name": r["name"],
+                "description": r["description"],
+                "status": r["status"],
+                "created_at": r["created_at"],
+                "updated_at": r["updated_at"],
+                "kind": config_kind,
+                "tags": config_tags,
+            }
+        )
+    return result
 
 
 def update_status(db: Database, skill_id: str, status: str) -> None:
@@ -113,3 +131,37 @@ def update_status(db: Database, skill_id: str, status: str) -> None:
             "UPDATE skill SET status = ?, updated_at = ? WHERE id = ?",
             (status, now, skill_id),
         )
+
+
+def update_skill_config(
+    db: Database,
+    skill_id: str,
+    *,
+    model: str | None = None,
+    provider: str | None = None,
+    reasoning: str | None = None,
+) -> SkillRecord | None:
+    """Override selected config fields and persist (CATALOG-6 settings modal).
+
+    Only the arguments that are not ``None`` are applied; the rest of the
+    frozen config is preserved. Returns the updated record (or ``None`` if the
+    skill does not exist). Intended for ``draft`` skills before commit.
+    """
+    record = get_skill(db, skill_id)
+    if record is None:
+        return None
+    config = record.config
+    if model is not None:
+        config.model = model
+    if provider is not None:
+        config.provider = provider
+    if reasoning is not None:
+        config.reasoning = reasoning
+    now = _now_iso()
+    with db.connect() as conn:
+        conn.execute(
+            "UPDATE skill SET config_json = ?, updated_at = ? WHERE id = ?",
+            (config.to_json(), now, skill_id),
+        )
+    # Reflect the mutation in-memory rather than re-reading the row.
+    return replace(record, config=config, updated_at=now)
