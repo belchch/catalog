@@ -17,11 +17,9 @@ dist/
 .env.*
 !.env.example
 
-# Workspace content (keep dir, ignore generated files)
-workspace/*
-!workspace/.gitkeep
-
-# Prompt logs (default under workspace/, but cover a custom PROMPT_LOG_DIR too)
+# App data (ADR-0012: lives under the OS data-root / APP_DATA_DIR, outside
+# the source tree by default — these rules are a safety net for point
+# overrides such as APP_WORKSPACE/PROMPT_LOG_DIR still pointing in-tree).
 prompt_logs/
 
 # SQLite databases (local dev/test artifacts)

@@ -93,10 +93,11 @@ _PROVIDER: LLMProvider = FakeProvider([])  # type: ignore[assignment]
 
 @pytest.fixture()
 def settings(tmp_path: Path) -> Settings:
-    """Test settings pointing at tmp_path (no repo pollution)."""
+    """Test settings pointing at tmp_path (no repo pollution, no OS data-root)."""
     return Settings(
         db_path=str(tmp_path / "api.db"),
         workspace_dir=str(tmp_path / "ws"),
+        prompt_log_dir=str(tmp_path / "ws" / "prompt_logs"),
         default_model="test/model",
     )
 

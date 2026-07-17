@@ -22,6 +22,7 @@ from __future__ import annotations
 
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 import httpx
 from fastapi import FastAPI
@@ -34,6 +35,7 @@ from app.llm.factory import build_providers, select_provider
 from app.llm.openrouter import build_debug_hooks
 from app.logging_config import setup_logging
 from app.storage.db import Database
+from app.storage.git import ensure_repo
 
 # Configure stdout logging at import time so every ``app.*`` log line carries
 # the correlation context. Runs once when ``app.main`` is first imported
@@ -44,6 +46,12 @@ setup_logging(level=get_settings().log_level)
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     settings: Settings = get_settings()
+    # ADR-0012: data-root lives outside the source tree and may not exist yet
+    # (fresh install / first run) — create it and the two app-owned git repos
+    # (documents/, skills/) before anything tries to read/write under it.
+    Path(settings.db_path).parent.mkdir(parents=True, exist_ok=True)
+    ensure_repo(Path(settings.workspace_dir) / "documents")
+    ensure_repo(Path(settings.workspace_dir) / "skills")
     db = Database(settings.db_path)
     db.init_schema()
     http_client = httpx.AsyncClient(timeout=60.0, event_hooks=build_debug_hooks())
