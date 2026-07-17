@@ -6,6 +6,7 @@ from typing import Any
 
 from app.agent.events import (
     FinishEvent,
+    ReasoningEvent,
     StepEvent,
     TokenEvent,
     ToolCallEvent,
@@ -400,6 +401,106 @@ def test_registry_specs_and_lookup() -> None:
     assert spec.name == "read_doc"
     assert callable(func)
     assert reg.get("missing") is None
+
+
+def test_reasoning_event_non_stream() -> None:
+    """A non-stream completion carrying reasoning emits a ReasoningEvent.
+
+    CATALOG-24/16: the runner surfaces the model's chain-of-thought as its own
+    trace event (right after the StepEvent, before the FinishEvent) so the
+    apply stream can render it instead of burying it in the trace data.
+    """
+
+    async def _run() -> None:
+        provider = FakeProvider(
+            script=[
+                CompletionResult(
+                    content="answer",
+                    tool_calls=[],
+                    finish_reason="stop",
+                    reasoning="step-by-step thinking",
+                )
+            ]
+        )
+        events = await _drain(
+            run_agent(
+                provider=provider,
+                model="m",
+                system_prompt="sys",
+                messages=[Message(role="user", content="x")],
+                tools=_registry(),
+                use_stream=False,
+            )
+        )
+        reasoning = [e for e in events if isinstance(e, ReasoningEvent)]
+        assert len(reasoning) == 1
+        assert reasoning[0].text == "step-by-step thinking"
+        # Reasoning is emitted before the finish, after the step.
+        assert isinstance(events[0], StepEvent)
+        assert isinstance(events[-1], FinishEvent)
+        assert events.index(reasoning[0]) < events.index(events[-1])
+
+    asyncio.run(_run())
+
+
+def test_reasoning_event_stream() -> None:
+    """A streaming completion carrying reasoning emits a ReasoningEvent too."""
+
+    class _ReasoningStreamProvider(FakeProvider):
+        async def stream_complete(
+            self,
+            model: str,
+            messages: list[Message],
+            tools: list[ToolSpec] | None = None,
+            temperature: float = 0.0,
+            reasoning: str = "",
+        ) -> Any:
+            yield StreamDelta(reasoning="thinking...")
+            yield StreamDelta(content="Hel")
+            yield StreamDelta(content="lo")
+
+    async def _run() -> None:
+        provider = _ReasoningStreamProvider()
+        events = await _drain(
+            run_agent(
+                provider=provider,
+                model="m",
+                system_prompt="sys",
+                messages=[Message(role="user", content="x")],
+                tools=_registry(),
+                use_stream=True,
+            )
+        )
+        reasoning = [e for e in events if isinstance(e, ReasoningEvent)]
+        assert len(reasoning) == 1
+        assert reasoning[0].text == "thinking..."
+        finish = events[-1]
+        assert isinstance(finish, FinishEvent)
+        assert finish.text == "Hello"
+
+    asyncio.run(_run())
+
+
+def test_no_reasoning_event_when_absent() -> None:
+    """No ReasoningEvent is emitted when the provider returns no reasoning."""
+
+    async def _run() -> None:
+        provider = FakeProvider(
+            script=[CompletionResult(content="hi", tool_calls=[], finish_reason="stop")]
+        )
+        events = await _drain(
+            run_agent(
+                provider=provider,
+                model="m",
+                system_prompt="sys",
+                messages=[Message(role="user", content="x")],
+                tools=_registry(),
+                use_stream=False,
+            )
+        )
+        assert not any(isinstance(e, ReasoningEvent) for e in events)
+
+    asyncio.run(_run())
 
 
 def test_serialize_result_truncates_long_payloads() -> None:

@@ -39,6 +39,37 @@ export function RunView({ run, runId, onClose }: RunViewProps) {
       <div className="grid flex-1 grid-cols-1 gap-3 overflow-hidden p-3 md:grid-cols-2">
         <div className="overflow-y-auto rounded-md border border-slate-800 bg-slate-900/40 p-3">
           <h3 className="mb-2 text-xs font-semibold uppercase text-slate-500">Лента шагов</h3>
+          {/* CATALOG-16: run meta header — model/provider/kind/prompt up front. */}
+          {run.meta && (
+            <div className="mb-2 rounded border border-slate-800 bg-slate-950/40 p-2 font-mono text-[10px] text-slate-400">
+              <div className="flex flex-wrap gap-x-3 gap-y-0.5">
+                <span>
+                  <span className="text-slate-600">model:</span> {run.meta.model}
+                </span>
+                {run.meta.provider && (
+                  <span>
+                    <span className="text-slate-600">provider:</span> {run.meta.provider}
+                  </span>
+                )}
+                <span>
+                  <span className="text-slate-600">kind:</span> {run.meta.skillKind}
+                </span>
+                {run.meta.inputDocs.length > 0 && (
+                  <span>
+                    <span className="text-slate-600">docs:</span> {run.meta.inputDocs.length}
+                  </span>
+                )}
+              </div>
+              {run.meta.systemPrompt && (
+                <details className="mt-1">
+                  <summary className="cursor-pointer text-slate-600">системный промпт</summary>
+                  <pre className="mt-1 overflow-x-auto whitespace-pre-wrap break-words text-slate-500">
+                    {run.meta.systemPrompt}
+                  </pre>
+                </details>
+              )}
+            </div>
+          )}
           <TraceSteps steps={run.steps} />
           {run.error && <p className="mt-2 text-xs text-red-400">Ошибка: {run.error}</p>}
           {run.closed && !run.finished && (

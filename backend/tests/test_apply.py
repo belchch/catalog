@@ -6,7 +6,14 @@ from typing import Any
 
 import pytest
 
-from app.agent.events import FinishEvent, StepEvent, VerifyEvent
+from app.agent.events import (
+    FinishEvent,
+    ReasoningEvent,
+    RunMetaEvent,
+    ScriptEvent,
+    StepEvent,
+    VerifyEvent,
+)
 from app.agent.registry import ToolRegistry
 from app.documents.ingest import ingest_file
 from app.documents.tools import build_document_tools
@@ -715,3 +722,203 @@ def test_apply_skill_streams_inner_events(db: Database, workspace: Path) -> None
 
 async def _noop_tool(**kwargs: Any) -> dict:
     return {}
+
+
+# --------------------------------------------------------------------------- #
+# Granular trace events (CATALOG-16): meta / script / reasoning
+# --------------------------------------------------------------------------- #
+
+
+def test_apply_emits_run_meta_first(db: Database, workspace: Path) -> None:
+    """apply_skill opens the stream with a RunMetaEvent carrying run context.
+
+    The meta frame is the very first event so the trace feed can render
+    model/provider/kind/prompt up front. The provider name passed to
+    apply_skill is forwarded verbatim (CATALOG-16).
+    """
+    skill = _make_skill(verify_checks=[VerifyCheck("non_empty")])
+    skill_id = create_skill(
+        db, name=skill.name, description=skill.description, config=skill
+    )
+    input_doc_id = _ingest_input(db, workspace)
+    provider = ScriptProvider([_result("# Summary\n\nGreat document.")])
+
+    events = asyncio.run(
+        _collect_events(
+            apply_skill(
+                provider=provider,
+                db=db,
+                workspace_dir=str(workspace),
+                skill=skill,
+                skill_id=skill_id,
+                input_doc_ids=[input_doc_id],
+                base_tools=build_document_tools(db, workspace),
+                provider_name="zai",
+            )
+        )
+    )
+
+    # The very first event on the wire is the run meta.
+    meta_events = [e for e in events if isinstance(e, RunMetaEvent)]
+    assert len(meta_events) == 1
+    assert events[0] is meta_events[0]
+    meta = meta_events[0]
+    assert meta.model == skill.model
+    assert meta.provider == "zai"
+    assert meta.skill_kind == "agent"
+    assert meta.system_prompt == skill.system_prompt
+    assert meta.input_docs == [input_doc_id]
+
+
+def test_apply_script_emits_script_events(db: Database, workspace: Path) -> None:
+    """A kind=script skill surfaces start/done ScriptEvents in the stream."""
+    skill = SkillConfig(
+        name="uppercaser",
+        description="uppercase the document",
+        system_prompt="",
+        allowed_tools=[],
+        model="test/model",
+        verify_checks=[VerifyCheck("non_empty")],
+        kind="script",
+        code="result = document.upper()\n",
+    )
+    skill_id = create_skill(
+        db, name=skill.name, description=skill.description, config=skill
+    )
+    input_doc_id = _ingest_input(db, workspace)
+    provider = ScriptProvider([])
+
+    events = asyncio.run(
+        _collect_events(
+            apply_skill(
+                provider=provider,
+                db=db,
+                workspace_dir=str(workspace),
+                skill=skill,
+                skill_id=skill_id,
+                input_doc_ids=[input_doc_id],
+                base_tools=build_document_tools(db, workspace),
+            )
+        )
+    )
+
+    script_events = [e for e in events if isinstance(e, ScriptEvent)]
+    # start + done (no error path taken).
+    assert [e.stage for e in script_events] == ["start", "done"]
+    assert script_events[0].snippet == skill.code
+    assert script_events[1].return_value == "SOURCE TEXT"
+    assert script_events[1].duration is not None and script_events[1].duration >= 0.0
+
+    # The meta frame still leads, and reports kind=script.
+    meta_events = [e for e in events if isinstance(e, RunMetaEvent)]
+    assert len(meta_events) == 1
+    assert meta_events[0].skill_kind == "script"
+
+
+def test_apply_script_emits_error_event_on_failure(db: Database, workspace: Path) -> None:
+    """A failing script surfaces a ScriptEvent(stage=error) before re-raising."""
+    skill = SkillConfig(
+        name="boom",
+        description="raises",
+        system_prompt="",
+        allowed_tools=[],
+        model="test/model",
+        verify_checks=[],
+        kind="script",
+        # NameError at runtime -> ScriptRuntimeError wrapping it.
+        code="result = undefined_name\n",
+    )
+    skill_id = create_skill(
+        db, name=skill.name, description=skill.description, config=skill
+    )
+    input_doc_id = _ingest_input(db, workspace)
+    provider = ScriptProvider([])
+
+    with pytest.raises(Exception):
+        asyncio.run(
+            _collect_events(
+                apply_skill(
+                    provider=provider,
+                    db=db,
+                    workspace_dir=str(workspace),
+                    skill=skill,
+                    skill_id=skill_id,
+                    input_doc_ids=[input_doc_id],
+                    base_tools=build_document_tools(db, workspace),
+                )
+            )
+        )
+
+    # The generator was drained up to the failure; collect the events emitted
+    # before the raise by re-running and capturing synchronously.
+    events: list[Any] = []
+
+    async def _drain_until_error() -> None:
+        try:
+            async for ev in apply_skill(
+                provider=provider,
+                db=db,
+                workspace_dir=str(workspace),
+                skill=skill,
+                skill_id=skill_id,
+                input_doc_ids=[input_doc_id],
+                base_tools=build_document_tools(db, workspace),
+            ):
+                events.append(ev)
+        except Exception:
+            pass
+
+    asyncio.run(_drain_until_error())
+    script_events = [e for e in events if isinstance(e, ScriptEvent)]
+    assert [e.stage for e in script_events] == ["start", "error"]
+    assert script_events[1].error is not None
+    assert script_events[1].duration is not None
+
+
+def test_apply_reasoning_reaches_stream(db: Database, workspace: Path) -> None:
+    """When the provider returns reasoning, a ReasoningEvent reaches the stream.
+
+    Drives apply_skill with a provider whose completion carries ``reasoning``;
+    the agent runner (CATALOG-24/16) must surface it as its own event in the
+    apply stream, not just bury it in the trace.
+    """
+
+    class _ReasoningProvider(ScriptProvider):
+        async def complete(
+            self,
+            model: str,
+            messages: list[Message],
+            tools: list[ToolSpec] | None = None,
+            temperature: float = 0.0,
+            tool_choice: str = "auto",
+            reasoning: str = "",
+        ) -> CompletionResult:
+            self.seen_tools.append(list(tools) if tools else None)
+            base = self.script.pop(0)
+            base.reasoning = "Let me think about this document."
+            return base
+
+    skill = _make_skill(verify_checks=[VerifyCheck("non_empty")])
+    skill_id = create_skill(
+        db, name=skill.name, description=skill.description, config=skill
+    )
+    input_doc_id = _ingest_input(db, workspace)
+    provider = _ReasoningProvider([_result("# Summary\n\nGreat document.")])
+
+    events = asyncio.run(
+        _collect_events(
+            apply_skill(
+                provider=provider,
+                db=db,
+                workspace_dir=str(workspace),
+                skill=skill,
+                skill_id=skill_id,
+                input_doc_ids=[input_doc_id],
+                base_tools=build_document_tools(db, workspace),
+            )
+        )
+    )
+
+    reasoning_events = [e for e in events if isinstance(e, ReasoningEvent)]
+    assert len(reasoning_events) == 1
+    assert "think about this document" in reasoning_events[0].text

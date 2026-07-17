@@ -10,6 +10,7 @@ import jsonschema
 from app.agent.events import (
     AgentEvent,
     FinishEvent,
+    ReasoningEvent,
     StepEvent,
     TokenEvent,
     ToolCallEvent,
@@ -117,6 +118,12 @@ async def _run_agent_core(
             # the run finishes at end of stream.
             reasoning_text = "".join(reasoning_parts) or None
             trace.entries[-1].data = {"content": text, "reasoning": reasoning_text}
+            # CATALOG-24/16: surface the model's chain-of-thought as its own
+            # trace event when the provider emits reasoning_content.
+            if reasoning_text:
+                reasoning_event = ReasoningEvent(reasoning_text)
+                yield reasoning_event
+                log_agent_event(reasoning_event)
             history.append(Message(role="assistant", content=text))
             finish_stream = FinishEvent(text, "stop", capped=False, usage={})
             yield finish_stream
@@ -140,6 +147,12 @@ async def _run_agent_core(
         )
         if resp.content is not None:
             last_text = resp.content
+        # CATALOG-24/16: surface the model's chain-of-thought as its own trace
+        # event when the provider emits reasoning_content for this turn.
+        if resp.reasoning:
+            reasoning_event = ReasoningEvent(resp.reasoning)
+            yield reasoning_event
+            log_agent_event(reasoning_event)
 
         if not resp.tool_calls:
             finish_no_tools = FinishEvent(

@@ -117,6 +117,13 @@ async def run_stream_ws(websocket: WebSocket, run_id: str) -> None:
     apply_provider = provider_for_skill(
         providers, provider, skill.config.provider
     )
+    # CATALOG-16: the resolved provider name is surfaced via the opening
+    # RunMetaEvent so the trace feed can show *which* provider ran. A pinned
+    # provider wins; otherwise the app's active provider name is used.
+    if skill.config.provider and providers and skill.config.provider in providers:
+        resolved_provider_name = skill.config.provider
+    else:
+        resolved_provider_name = getattr(websocket.app.state, "active_provider", "") or ""
 
     try:
         # Bind run_id/purpose so every log line and prompt-log entry for this
@@ -132,6 +139,7 @@ async def run_stream_ws(websocket: WebSocket, run_id: str) -> None:
                 input_doc_ids=input_doc_ids,
                 base_tools=tools,
                 run_id=run_id,
+                provider_name=resolved_provider_name,
             ):
                 frame = agent_event_to_frame(event)
                 if frame is not None:

@@ -11,6 +11,9 @@ from __future__ import annotations
 from fastapi import Request, WebSocket
 
 from app.agent.events import (
+    ReasoningEvent,
+    RunMetaEvent,
+    ScriptEvent,
     StepEvent,
     TokenEvent,
     ToolCallEvent,
@@ -81,6 +84,42 @@ def agent_event_to_frame(event) -> dict | None:
             "passed": event.result.passed,
             "failures": list(event.result.failures),
         }
+    if isinstance(event, RunMetaEvent):
+        return {
+            "type": "meta",
+            "model": event.model,
+            "provider": event.provider,
+            "skill_kind": event.skill_kind,
+            "system_prompt": _snip(event.system_prompt),
+            "input_docs": list(event.input_docs),
+        }
+    if isinstance(event, ScriptEvent):
+        frame: dict = {"type": "script", "stage": event.stage}
+        if event.snippet is not None:
+            frame["snippet"] = _snip(event.snippet)
+        if event.return_value is not None:
+            frame["return_value"] = _snip(event.return_value)
+        if event.duration is not None:
+            frame["duration"] = event.duration
+        if event.error is not None:
+            frame["error"] = event.error
+        return frame
+    if isinstance(event, ReasoningEvent):
+        return {"type": "reasoning", "text": _snip(event.text)}
     # FinishEvent is handled by the caller (sessions emits a token+finish pair;
     # runs emit an authoritative finish from the DB after the stream drains).
     return None
+
+
+def _snip(s: str | None, limit: int = 400) -> str:
+    """Bound a free-text field (prompt/snippet/result) carried by a frame.
+
+    The full value is preserved in the trace and the prompt-log; this only caps
+    the wire frame so a huge system prompt or ``read_document`` payload cannot
+    flood the trace feed.
+    """
+    if s is None:
+        return ""
+    if len(s) > limit:
+        return s[:limit] + "…[truncated]"
+    return s

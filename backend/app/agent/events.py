@@ -61,4 +61,58 @@ class VerifyEvent:
     result: VerifyResult
 
 
-AgentEvent = TokenEvent | ToolCallEvent | ToolResultEvent | StepEvent | FinishEvent | VerifyEvent
+@dataclass
+class RunMetaEvent:
+    """Run-level metadata emitted once at the start of an apply (CATALOG-16).
+
+    Surfaces *what* is running so the trace feed can show the model, provider,
+    skill kind and the (truncated) system prompt up front — instead of only
+    seeing iteration bookends.
+    """
+
+    model: str
+    provider: str
+    skill_kind: str
+    system_prompt: str
+    input_docs: list[str]
+
+
+@dataclass
+class ScriptEvent:
+    """A stage of deterministic ``kind="script"`` execution (CATALOG-3/16).
+
+    ``stage`` is one of ``"start"`` (carrying a code ``snippet``), ``"done"``
+    (carrying the ``return_value`` and ``duration`` in seconds) or ``"error"``
+    (carrying the ``error`` message + ``duration``).
+    """
+
+    stage: str
+    snippet: str | None = None
+    return_value: str | None = None
+    duration: float | None = None
+    error: str | None = None
+
+
+@dataclass
+class ReasoningEvent:
+    """A model's chain-of-thought / "thinking" text (CATALOG-24/16).
+
+    Emitted inside an iteration when the provider returns ``reasoning_content``
+    (z.ai/GLM dialect) so the trace can surface the model's reasoning, not just
+    the visible answer.
+    """
+
+    text: str
+
+
+AgentEvent = (
+    TokenEvent
+    | ToolCallEvent
+    | ToolResultEvent
+    | StepEvent
+    | FinishEvent
+    | VerifyEvent
+    | RunMetaEvent
+    | ScriptEvent
+    | ReasoningEvent
+)

@@ -17,12 +17,13 @@ The apply loop (ADR-0001 + ADR-0006 + ADR-0007):
 from __future__ import annotations
 
 import logging
+import time
 import uuid
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from pathlib import Path
 
-from app.agent.events import AgentEvent, FinishEvent, VerifyEvent
+from app.agent.events import AgentEvent, FinishEvent, RunMetaEvent, ScriptEvent, VerifyEvent
 from app.agent.logging import log_agent_event
 from app.agent.registry import ToolRegistry
 from app.agent.runner import _run_agent_core
@@ -71,6 +72,7 @@ async def _apply_core(
     trace: Trace,
     outcome: _ApplyOutcome,
     run_id: str | None = None,
+    provider_name: str = "",
 ) -> AsyncIterator[AgentEvent]:
     """Shared apply loop: streams events, fills ``trace`` and ``outcome``.
 
@@ -135,6 +137,19 @@ async def _apply_core(
     # path, the exception path, and the finally safety net.
     done = False
 
+    # CATALOG-16: run-level meta is the first event on the wire so the trace
+    # feed can render model/provider/kind/prompt up front instead of only the
+    # iteration bookends.
+    meta_event = RunMetaEvent(
+        model=skill.model,
+        provider=provider_name,
+        skill_kind=skill.kind,
+        system_prompt=skill.system_prompt,
+        input_docs=list(input_doc_ids),
+    )
+    yield meta_event
+    log_agent_event(meta_event)
+
     try:
         if skill.kind == "script":
             # ---- Deterministic script path (ADR-0014) ----
@@ -148,9 +163,21 @@ async def _apply_core(
             # Single document → its text verbatim. Multiple → joined with a
             # separator so the script sees all input content.
             doc_text = doc_texts[0] if len(doc_texts) == 1 else "\n\n---\n\n".join(doc_texts)
+            # CATALOG-3/16: surface script execution as granular trace steps
+            # (start/done/error with a code snippet, the return value and the
+            # wall-clock duration) so a script run is not an opaque black box.
+            script_start = ScriptEvent(stage="start", snippet=skill.code)
+            yield script_start
+            log_agent_event(script_start)
+            t0 = time.perf_counter()
             try:
                 text = await run_script_async(skill.code, doc_text)
             except ScriptRuntimeError as exc:
+                script_error = ScriptEvent(
+                    stage="error", error=str(exc), duration=time.perf_counter() - t0
+                )
+                yield script_error
+                log_agent_event(script_error)
                 trace.entries.append(
                     TraceEntry(
                         kind="error",
@@ -159,6 +186,11 @@ async def _apply_core(
                     )
                 )
                 raise
+            script_done = ScriptEvent(
+                stage="done", return_value=text, duration=time.perf_counter() - t0
+            )
+            yield script_done
+            log_agent_event(script_done)
             trace.entries.append(
                 TraceEntry(
                     kind="script",
@@ -343,6 +375,7 @@ async def apply_skill(
     base_tools: ToolRegistry,
     session_id: str | None = None,
     run_id: str | None = None,
+    provider_name: str = "",
 ) -> AsyncIterator[AgentEvent]:
     """Run a skill over one or more documents, streaming :data:`AgentEvent` items.
 
@@ -355,6 +388,9 @@ async def apply_skill(
     When ``run_id`` is supplied the existing ``skill_run`` row is reused
     (used by the ``WS /runs/{id}/stream`` endpoint which creates the row in
     ``POST /skills/{id}/apply``); otherwise a new row is created.
+
+    ``provider_name`` (CATALOG-16) is the resolved provider name surfaced via
+    the opening :class:`RunMetaEvent`; empty when unknown.
     """
     trace = Trace()
     outcome = _ApplyOutcome()
@@ -370,6 +406,7 @@ async def apply_skill(
         trace=trace,
         outcome=outcome,
         run_id=run_id,
+        provider_name=provider_name,
     ):
         yield event
 
@@ -385,6 +422,7 @@ async def apply_skill_collect(
     base_tools: ToolRegistry,
     session_id: str | None = None,
     run_id: str | None = None,
+    provider_name: str = "",
 ) -> ApplyResult:
     """Drain :func:`apply_skill` and return the final :class:`ApplyResult`."""
     trace = Trace()
@@ -401,6 +439,7 @@ async def apply_skill_collect(
         trace=trace,
         outcome=outcome,
         run_id=run_id,
+        provider_name=provider_name,
     ):
         pass
     return ApplyResult(

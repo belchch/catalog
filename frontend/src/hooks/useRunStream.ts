@@ -1,18 +1,45 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { connectRun, formatToolArgs, type ServerEvent } from '../ws.ts'
+import {
+  connectRun,
+  formatToolArgs,
+  formatToolResult,
+  type ServerEvent,
+} from '../ws.ts'
+
+export interface RunMeta {
+  model: string
+  provider: string
+  skillKind: string
+  systemPrompt: string
+  inputDocs: string[]
+}
 
 export interface RunStep {
   id: string
-  kind: 'step' | 'tool_call' | 'tool_result' | 'verify'
+  kind:
+    | 'step'
+    | 'tool_call'
+    | 'tool_result'
+    | 'verify'
+    | 'script'
+    | 'reasoning'
   text: string
   ok?: boolean
   passed?: boolean
   failures?: string[]
   iteration?: number
+  // CATALOG-16: tool result payload (previously discarded) + script stage fields.
+  result?: string
+  stage?: string
+  snippet?: string
+  returnValue?: string
+  duration?: number
+  error?: string
 }
 
 export interface UseRunStreamResult {
   steps: RunStep[]
+  meta: RunMeta | null
   resultText: string
   status: string | null
   finished: boolean
@@ -28,6 +55,7 @@ function uniqueId(prefix: string): string {
 
 export function useRunStream(runId: string | null): UseRunStreamResult {
   const [steps, setSteps] = useState<RunStep[]>([])
+  const [meta, setMeta] = useState<RunMeta | null>(null)
   const [resultText, setResultText] = useState('')
   const [status, setStatus] = useState<string | null>(null)
   const [finished, setFinished] = useState(false)
@@ -37,6 +65,15 @@ export function useRunStream(runId: string | null): UseRunStreamResult {
 
   const handleEvent = useCallback((e: ServerEvent) => {
     switch (e.type) {
+      case 'meta':
+        setMeta({
+          model: e.model,
+          provider: e.provider,
+          skillKind: e.skill_kind,
+          systemPrompt: e.system_prompt,
+          inputDocs: e.input_docs,
+        })
+        break
       case 'step':
         setSteps((prev) => [
           ...prev,
@@ -63,9 +100,17 @@ export function useRunStream(runId: string | null): UseRunStreamResult {
         ])
         break
       case 'tool_result':
+        // CATALOG-16: keep the result payload so the trace can show what the
+        // tool returned, not just its name + ok flag.
         setSteps((prev) => [
           ...prev,
-          { id: uniqueId('res'), kind: 'tool_result', text: `← ${e.name}`, ok: e.ok },
+          {
+            id: uniqueId('res'),
+            kind: 'tool_result',
+            text: `← ${e.name}`,
+            ok: e.ok,
+            result: formatToolResult(e.result),
+          },
         ])
         break
       case 'verify':
@@ -78,6 +123,36 @@ export function useRunStream(runId: string | null): UseRunStreamResult {
             passed: e.passed,
             failures: e.failures,
             iteration: e.iteration,
+          },
+        ])
+        break
+      case 'script':
+        setSteps((prev) => [
+          ...prev,
+          {
+            id: uniqueId('script'),
+            kind: 'script',
+            text:
+              e.stage === 'start'
+                ? 'Скрипт: запуск'
+                : e.stage === 'done'
+                  ? 'Скрипт: готово'
+                  : 'Скрипт: ошибка',
+            stage: e.stage,
+            snippet: e.snippet,
+            returnValue: e.return_value,
+            duration: e.duration,
+            error: e.error,
+          },
+        ])
+        break
+      case 'reasoning':
+        setSteps((prev) => [
+          ...prev,
+          {
+            id: uniqueId('reasoning'),
+            kind: 'reasoning',
+            text: e.text,
           },
         ])
         break
@@ -96,6 +171,7 @@ export function useRunStream(runId: string | null): UseRunStreamResult {
   useEffect(() => {
     if (!runId) return
     setSteps([])
+    setMeta(null)
     setResultText('')
     setStatus(null)
     setFinished(false)
@@ -109,5 +185,5 @@ export function useRunStream(runId: string | null): UseRunStreamResult {
     return () => conn.close()
   }, [runId, handleEvent])
 
-  return { steps, resultText, status, finished, closed, error }
+  return { steps, meta, resultText, status, finished, closed, error }
 }
