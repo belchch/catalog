@@ -167,6 +167,78 @@ def test_ws_session_planner(client, provider, db) -> None:
     assert roles.count("assistant") >= 1
 
 
+def test_parse_suggestions_extracts_and_strips() -> None:
+    """parse_suggestions pulls items out and removes the block (CATALOG-13)."""
+    from app.api.sessions import parse_suggestions
+
+    text = "Вот план.\n\n<suggestions>Шаг 1 | Шаг 2 | Шаг 3</suggestions>"
+    clean, items = parse_suggestions(text)
+    assert clean == "Вот план."
+    assert items == ["Шаг 1", "Шаг 2", "Шаг 3"]
+
+
+def test_parse_suggestions_no_block_unchanged() -> None:
+    """Without a block the text is returned as-is with an empty list."""
+    from app.api.sessions import parse_suggestions
+
+    text = "Просто ответ без подсказок."
+    clean, items = parse_suggestions(text)
+    assert clean == text
+    assert items == []
+
+
+def test_parse_suggestions_empty_items() -> None:
+    """A block with only separators yields no items and is still stripped."""
+    from app.api.sessions import parse_suggestions
+
+    clean, items = parse_suggestions("Ответ.\n<suggestions>  |  |  </suggestions>")
+    assert items == []
+    assert "<suggestions>" not in clean
+    assert clean == "Ответ."
+
+
+def test_ws_session_starter_suggestions(client, provider, db) -> None:
+    """An empty session receives a starter suggestions frame right after accept (CATALOG-13)."""
+    session_id = client.post("/sessions").json()["id"]
+    with client.websocket_connect(f"/sessions/{session_id}") as ws:
+        frame = ws.receive_json()
+    assert frame["type"] == "suggestions"
+    assert isinstance(frame["items"], list)
+    assert len(frame["items"]) >= 1
+
+
+def test_ws_session_emits_suggestions_frame(client, provider, db) -> None:
+    """A model reply with a <suggestions> block yields a suggestions frame and is stripped (CATALOG-13)."""
+    session_id = client.post("/sessions").json()["id"]
+    provider.script = [
+        _completion("Вот план.\n<suggestions>Изучи документы | Опиши задачу</suggestions>")
+    ]
+
+    with client.websocket_connect(f"/sessions/{session_id}") as ws:
+        ws.send_text("сделай план")
+        frames: list[dict] = []
+        while True:
+            frame = ws.receive_json()
+            frames.append(frame)
+            if frame.get("type") == "finish":
+                break
+
+    sug_frames = [f for f in frames if f["type"] == "suggestions"]
+    # The starter frame (empty session) + the model frame.
+    assert len(sug_frames) >= 1
+    model_sug = sug_frames[-1]
+    assert model_sug["items"] == ["Изучи документы", "Опиши задачу"]
+
+    token = next(f for f in frames if f["type"] == "token")
+    assert "<suggestions>" not in token["delta"]
+    assert "Вот план" in token["delta"]
+
+    # Persisted assistant text is the cleaned one.
+    msgs = list_messages(db, session_id)
+    assistant = [m for m in msgs if m["role"] == "assistant"][-1]
+    assert "<suggestions>" not in assistant["content"]
+
+
 def test_planner_uses_active_model(client, provider, db) -> None:
     """Changing the model via POST /settings drives the planner LLM call (CATALOG-14)."""
     session_id = client.post("/sessions").json()["id"]

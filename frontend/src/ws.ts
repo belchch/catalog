@@ -34,6 +34,7 @@ export type ServerEvent =
       error?: string
     }
   | { type: 'reasoning'; text: string }
+  | { type: 'suggestions'; items: string[] }
   | {
       type: 'finish'
       capped?: boolean

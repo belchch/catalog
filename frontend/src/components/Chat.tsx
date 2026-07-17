@@ -2,12 +2,22 @@ import { useEffect, useRef, useState } from 'react'
 import type { PlannerMessage } from '../hooks/usePlannerSession.ts'
 import { ChatMessage } from './ChatMessage.tsx'
 
+// Static starter quick-replies for an empty chat (CATALOG-13). Mirrors the
+// backend STARTER_SUGGESTIONS; shown before a session is connected and for a
+// freshly opened empty session.
+const STARTER_SUGGESTIONS = [
+  'Изучи доступные документы',
+  'Опиши задачу для скилла',
+  'Какие документы уже есть?',
+]
+
 interface ChatProps {
   messages: PlannerMessage[]
   streaming: boolean
   cancelling: boolean
   closed: boolean
   error: string | null
+  suggestions: string[]
   onSend: (text: string) => void
   onCancel: () => void
   onCreateSkill: () => void
@@ -20,6 +30,7 @@ export function Chat({
   cancelling,
   closed,
   error,
+  suggestions,
   onSend,
   onCancel,
   onCreateSkill,
@@ -38,6 +49,14 @@ export function Chat({
     onSend(text)
     setInput('')
   }
+
+  // CATALOG-13: quick-reply chips. Hidden while streaming; the starter set is
+  // shown for an empty chat, otherwise the model-suggested items are used.
+  const visibleSuggestions = streaming
+    ? []
+    : messages.length === 0
+      ? STARTER_SUGGESTIONS
+      : suggestions
 
   return (
     <div className="flex h-full flex-col">
@@ -58,6 +77,20 @@ export function Chat({
         <div ref={bottomRef} />
       </div>
       <div className="border-t border-slate-800 p-3">
+        {visibleSuggestions.length > 0 && (
+          <div className="mb-2 flex flex-wrap gap-2">
+            {visibleSuggestions.map((s) => (
+              <button
+                key={s}
+                className="rounded-full border border-slate-700 bg-slate-800/60 px-3 py-1 text-xs text-slate-200 transition-colors hover:border-indigo-500 hover:bg-slate-800 disabled:opacity-50"
+                onClick={() => onSend(s)}
+                disabled={streaming}
+              >
+                {s}
+              </button>
+            ))}
+          </div>
+        )}
         <div className="flex gap-2">
           <input
             className="flex-1 rounded-md bg-slate-800 px-3 py-2 text-sm text-slate-100 outline-none placeholder:text-slate-500 disabled:opacity-50"

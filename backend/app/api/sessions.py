@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 
 from fastapi import APIRouter, Depends, WebSocket, WebSocketDisconnect
 
@@ -42,8 +43,42 @@ PLANNER_SYSTEM_PROMPT = (
     "документа, который затем превратится в переиспользуемый скилл. "
     "Используй инструменты list_documents и read_document, чтобы изучить "
     "доступные документы. Задавай уточняющие вопросы и формулируй чёткое "
-    "задание для скилла."
+    "задание для скилла.\n\n"
+    "В конце КАЖДОГО своего ответа предлагай 1–3 коротких варианта следующего "
+    "шага пользователя отдельной строкой строго в формате:\n"
+    "<suggestions>вариант 1 | вариант 2 | вариант 3</suggestions>\n"
+    "Варианты — конкретные, до 6 слов, разделены « | ». Этот блок вырезается "
+    "из текста ответа и показывается пользователю отдельными кнопками, поэтому "
+    "не дублируй его содержимое в основном тексте."
 )
+
+# Static starter suggestions sent on connect when the session is empty
+# (CATALOG-13). Deterministic for now; an LLM-driven source is a future option.
+STARTER_SUGGESTIONS = [
+    "Изучи доступные документы",
+    "Опиши задачу для скилла",
+    "Какие документы уже есть?",
+]
+
+# Matches a ``<suggestions>…</suggestions>`` block (case-insensitive,
+# spans newlines). Only the first occurrence is parsed/stripped.
+_SUGGESTIONS_RE = re.compile(r"<suggestions>(.*?)</suggestions>", re.IGNORECASE | re.DOTALL)
+
+
+def parse_suggestions(text: str) -> tuple[str, list[str]]:
+    """Extract a ``<suggestions>a | b | c</suggestions>`` block from model text.
+
+    Returns ``(clean_text, items)``: the block is removed from ``clean_text``
+    (any trailing whitespace is stripped), and ``items`` is the list of
+    stripped, non-empty suggestion strings split on ``|``. If no block is
+    present, the text is returned unchanged with an empty list.
+    """
+    match = _SUGGESTIONS_RE.search(text)
+    if match is None:
+        return text, []
+    items = [s.strip() for s in match.group(1).split("|") if s.strip()]
+    clean = (text[: match.start()] + text[match.end() :]).rstrip()
+    return clean, items
 
 
 def _parse_user_payload(raw: str) -> str:
@@ -196,6 +231,11 @@ async def session_ws(
         await websocket.close()
         return
 
+    # CATALOG-13: starter suggestions for an empty session so the chat shows
+    # quick-reply buttons before the first message.
+    if not list_messages(db, session_id):
+        await websocket.send_json({"type": "suggestions", "items": STARTER_SUGGESTIONS})
+
     buffered: str | None = None
     try:
         while True:
@@ -234,14 +274,19 @@ async def session_ws(
 
             # Emit the final assistant text as a single token frame (collect
             # mode does not stream tokens incrementally — see module docstring).
+            # CATALOG-13: strip the <suggestions> block from the shown/persisted
+            # text and emit it as a separate suggestions frame before finish.
             if final_text:
-                await websocket.send_json({"type": "token", "delta": final_text})
+                clean_text, items = parse_suggestions(final_text)
+                await websocket.send_json({"type": "token", "delta": clean_text})
                 add_message(
                     db,
                     session_id=session_id,
                     role="assistant",
-                    content=final_text,
+                    content=clean_text,
                 )
+                if items:
+                    await websocket.send_json({"type": "suggestions", "items": items})
 
             if cancelled:
                 await websocket.send_json({"type": "finish", "status": "cancelled"})

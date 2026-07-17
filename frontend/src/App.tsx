@@ -118,6 +118,7 @@ export default function App() {
               cancelling={planner.cancelling}
               closed={planner.closed}
               error={planner.error}
+              suggestions={planner.suggestions}
               onSend={handleSend}
               onCancel={planner.cancel}
               onCreateSkill={handleCreateSkill}
