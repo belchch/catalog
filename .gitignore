@@ -37,3 +37,7 @@ prompt_logs/
 # Kilo local state (plans may contain secrets like API tokens)
 .kilo/plans/
 .kilo/worktrees/
+
+# Cursor pipeline state (local orchestrator state, not shared via git)
+.cursor/state/
+.cursor/steps-results/
