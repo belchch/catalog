@@ -2,6 +2,7 @@
 
 - **Задача Plane:** [CATALOG-14](https://app.plane.so/belchch/projects/catalog-app/work-items/14) (id: `45be521d-4268-4edf-8001-cd2146b8b11c`, state: In Progress)
 - **Статус плана:** Analyzed
+- **Тип шага:** ui
 - **Предпосылки:** CATALOG-24 (фабрика провайдеров); CATALOG-6 (каталог `/models`/`/providers` — переиспользовать, не дублировать)
 - **Цель:** Дать пользователю в UI **самостоятельно выбирать модель и провайдера** — перенести этот конфиг из переменных окружения в интерфейс. Выбранные значения становятся активной runtime-конфигурацией, используемой планировщиком и применением скилов. Опирается на мульти-провайдерную фабрику из [CATALOG-24](https://app.plane.so/belchch/projects/catalog-app/work-items/24) и каталог моделей/провайдеров из [CATALOG-6](https://app.plane.so/belchch/projects/catalog-app/work-items/6).
 

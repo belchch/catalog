@@ -2,6 +2,7 @@
 
 - **Задача Plane:** [CATALOG-3](https://app.plane.so/belchch/projects/catalog-app/work-items/3) (id: `746a71f0-d334-4aeb-98b7-50817887d2af`, state: In Progress)
 - **Статус плана:** Analyzed
+- **Тип шага:** code
 - **Предпосылки:** нет (база для CATALOG-8, CATALOG-16)
 - **Цель:** Ввести у скила поле **типа** (`kind`): `agent` (умный/смешанный — текущее поведение, агент-луп + LLM) и `script` (детерминированный — чистый Python-код без агент-лупа и без вызова LLM). Дать пользователю/модели выбирать тип при создании; модель должна определять, возможен ли детерминизм для данной задачи, и если нет — сообщать об этом и предлагать вариант `agent`. Связан с [CATALOG-8](https://app.plane.so/belchch/projects/catalog-app/work-items/8) (теги `python`/`ai` на UI).
 

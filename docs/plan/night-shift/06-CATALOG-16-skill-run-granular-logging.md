@@ -2,6 +2,7 @@
 
 - **Задача Plane:** [CATALOG-16](https://app.plane.so/belchch/projects/catalog-app/work-items/16) (id: `5cd8a8f5-204d-4e2f-9e1d-2a68106a85bd`, state: In Progress)
 - **Статус плана:** Analyzed
+- **Тип шага:** ui
 - **Предпосылки:** CATALOG-3 (script-события); CATALOG-24 (reasoning)
 - **Цель:** Сделать ленту шагов выполнения скила **более гранулярной**: показывать в UI не только старт/финиш итерации, но и любые действия внутри — **модель, провайдер, промпт, вызовы инструментов с результатами, выполнение скрипта (для script-скилов), рассуждения (reasoning)**. Расширить набор событий/кадров и их отрисовку. Опирается на типы скилов из [CATALOG-3](https://app.plane.so/belchch/projects/catalog-app/work-items/3) (script) и reasoning из [CATALOG-24](https://app.plane.so/belchch/projects/catalog-app/work-items/24).
 

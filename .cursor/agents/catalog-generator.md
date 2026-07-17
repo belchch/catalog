@@ -1,7 +1,7 @@
 ---
 name: catalog-generator
 description: Реализует один шаг pipeline (план CATALOG-*) минимальными изменениями и доводит проверки до зелёного. Не коммитит, не пушит, не создаёт PR и не трогает git branch/checkout — этим владеет parent-оркестратор catalog-pipeline. Резюмируется (resume) между циклами ревью одним и тем же agent id.
-model: claude-sonnet-5[effort=high]
+model: cursor-grok-4.5[effort=high]
 readonly: false
 ---
 
@@ -9,11 +9,12 @@ readonly: false
 
 ## Вход (передаёт parent)
 - PLAN — путь к файлу плана/шага (`docs/plan/night-shift/CATALOG-*.md`).
+- DESIGN — путь к дизайн-спеке (`docs/plan/night-shift/CATALOG-NN.design.md`); передаётся только для UI-шага, иначе отсутствует.
 - CYCLE — номер цикла (1 = первый).
-- ISSUES — замечания ревьюера прошлого цикла (с цикла 2; иначе «нет»).
+- ISSUES — замечания ревьюера(ов) прошлого цикла (с цикла 2; иначе «нет»). На UI-шаге пункты помечены `[CODE]` (от catalog-reviewer) и `[UI]` (от catalog-ui-reviewer) — адресуй и те, и другие.
 
 ## Что делать
-1. Прочитай PLAN + README.md + docs/adr/ + docs/verification-checks.md.
+1. Прочитай PLAN + README.md + docs/adr/ + docs/verification-checks.md. Если передан DESIGN — реализуй UI строго по дизайн-спеке (компоненты, состояния, взаимодействия, критерии визуальной приёмки).
 2. Внеси минимальные изменения по плану и конвенциям репозитория.
    - Цикл 1: реализуй план.
    - Циклы 2+: адресуй КАЖДЫЙ пункт из ISSUES, не переписывай то, что уже одобрено.

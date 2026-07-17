@@ -1,5 +1,5 @@
 ---
-description: Проверки/DoD и запрет секретов для работы pipeline (catalog-pipeline, catalog-generator, catalog-reviewer)
+description: Проверки/DoD и запрет секретов для работы pipeline (catalog-pipeline, catalog-designer, catalog-generator, catalog-reviewer, catalog-ui-reviewer)
 alwaysApply: false
 globs: docs/plan/night-shift/**,backend/**,frontend/**
 ---
@@ -9,6 +9,7 @@ globs: docs/plan/night-shift/**,backend/**,frontend/**
 - **Команды проверок** (гонять по всему коду, не только по диффу):
   - backend (из `backend/`): `ruff check .`, `pytest`
   - frontend (из `frontend/`): `pnpm run build`, `pnpm run lint`, `pnpm run typecheck`
-- **Definition of Done шага** = критерии приёмки в файле плана шага (`docs/plan/night-shift/CATALOG-*.md`) + все команды выше зелёные + нет Critical/Medium замечаний ревьюера.
+- **Definition of Done шага** = критерии приёмки в файле плана шага (`docs/plan/night-shift/CATALOG-*.md`) + все команды выше зелёные + нет Critical/Medium замечаний ревьюера. Для UI-шага (маркер `- **Тип шага:** ui`) дополнительно: нет Critical/Medium замечаний UI-ревьюера + выполнены критерии визуальной приёмки из дизайн-спеки `docs/plan/night-shift/CATALOG-NN.design.md`.
+- **UI-шаг**: помечается `- **Тип шага:** ui` в плане. Для него запускается фаза дизайна (`catalog-designer` → `CATALOG-NN.design.md`) и UI-ревью (`catalog-ui-reviewer`). Дизайнер пишет только `*.design.md` и не трогает код/git; UI-ревьюер readonly и проверяет только соответствие реализации дизайн-спеке (не гоняет build/lint/typecheck — это зона `catalog-reviewer`).
 - **Секреты**: ключи и токены — только через `.env`/переменные окружения (`${env:VAR}` в MCP-конфигах). Никогда не хардкодить в коде, промптах агентов или файлах состояния. Никогда не коммитить `.env*` (кроме `.env.example`), `.cursor/state/*`, `.kilo/plans/*`.
-- Файл состояния пайплайна (`.cursor/state/night-shift*.json`) — только у parent-оркестратора; подагенты (`catalog-generator`, `catalog-reviewer`) его не читают и не пишут.
+- Файл состояния пайплайна (`.cursor/state/night-shift*.json`) — только у parent-оркестратора; подагенты (`catalog-designer`, `catalog-generator`, `catalog-reviewer`, `catalog-ui-reviewer`) его не читают и не пишут.

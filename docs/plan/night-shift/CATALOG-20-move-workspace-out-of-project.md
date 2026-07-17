@@ -2,6 +2,7 @@
 
 - **Задача Plane:** [CATALOG-20](https://app.plane.so/belchch/projects/catalog-app/work-items/20) (id: `141f68a2-874b-4439-b570-a79fdd8325bc`, state: In Progress)
 - **Статус плана:** Analyzed
+- **Тип шага:** code
 - **Цель:** Перевести все данные приложения (документы, результаты прогонов, `catalog.db`, prompt-логи) на **абсолютный data-root вне дерева исходников** с env-override (`APP_DATA_DIR`) и OS-дефолтом, и заложить фундамент из двух app-owned git-репозиториев (`documents/`, `skills/`) через dulwich. Реализует ADR-0012 (Accepted).
 
 ## Контекст

@@ -2,6 +2,7 @@
 
 - **Задача Plane:** [CATALOG-24](https://app.plane.so/belchch/projects/catalog-app/work-items/24) (id: `b00ba6c5-ab0b-4448-8e1c-907c532fe87d`, state: In Progress)
 - **Статус плана:** Analyzed
+- **Тип шага:** code
 - **Цель:** Реализовать OpenAI-совместимый провайдер **z.ai** (Zhipu/BigModel, GLM), переиспользуя общую логику OpenRouter через базовый класс `OpenAICompatibleProvider`; добавить поддержку `reasoning_content` (thinking-модели GLM) и фабрику нескольких провайдеров. Мотивация: OpenRouter доступен только по VPN — нужен рабочий провайдер без VPN.
 
 ## Контекст
