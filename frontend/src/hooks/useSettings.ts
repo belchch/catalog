@@ -57,13 +57,27 @@ export function useSettings() {
         const initModel = local?.model || remote.model
         setProvider(initProvider)
         setModel(initModel)
-        // If a local choice differs from the backend, push it up.
+        // If a local choice differs from the backend, push it up. A stale local
+        // provider (no longer configured) makes updateSettings 404 — fall back
+        // to the remote values in that case rather than leaving the UI empty.
         if (local && (local.provider !== remote.provider || local.model !== remote.model)) {
-          await updateSettings(local)
+          try {
+            await updateSettings(local)
+          } catch {
+            setProvider(remote.provider)
+            setModel(remote.model)
+            writeLocal({ provider: remote.provider, model: remote.model })
+          }
         }
         if (initProvider) {
-          setModels(await getProviderModels(initProvider))
+          try {
+            setModels(await getProviderModels(initProvider))
+          } catch {
+            setModels([])
+          }
         }
+      } catch {
+        // Network/catalog failure: leave providers/models empty; UI stays usable.
       } finally {
         setLoading(false)
       }

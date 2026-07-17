@@ -167,6 +167,23 @@ def test_ws_session_planner(client, provider, db) -> None:
     assert roles.count("assistant") >= 1
 
 
+def test_planner_uses_active_model(client, provider, db) -> None:
+    """Changing the model via POST /settings drives the planner LLM call (CATALOG-14)."""
+    session_id = client.post("/sessions").json()["id"]
+    client.post("/settings", json={"model": "glm-4.6"})
+    provider.script = [_completion("план")]
+
+    with client.websocket_connect(f"/sessions/{session_id}") as ws:
+        ws.send_text("сделай план")
+        while True:
+            frame = ws.receive_json()
+            if frame.get("type") == "finish":
+                break
+
+    assert provider.requests, "planner did not call the provider"
+    assert provider.requests[0]["model"] == "glm-4.6"
+
+
 # --------------------------------------------------------------------------- #
 # Skill build / commit / list
 # --------------------------------------------------------------------------- #

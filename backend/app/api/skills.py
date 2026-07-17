@@ -10,7 +10,7 @@ before the skill is persisted as ``draft`` (ADR-0004: build at approval).
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 
 from app.api.deps import get_db, get_provider, get_settings, get_tools
 from app.api.schemas import (
@@ -200,12 +200,17 @@ async def build_skill_from_session(
     base_tools: ToolRegistry,
     settings: Settings,
     session_id: str,
+    default_model: str | None = None,
 ) -> str:
     """Build a draft skill from a session; return the new skill id.
 
     Raises :class:`HTTPException` (422) if no valid config can be produced
     within the retry budget.
+
+    ``default_model`` (CATALOG-14) overrides the frozen ``settings.default_model``
+    so a skill is seeded from the runtime-selected model when set.
     """
+    model_default = default_model or settings.default_model
     messages_raw = list_messages(db, session_id)
     history: list[Message] = [Message(role="system", content=BUILD_SKILL_SYSTEM_PROMPT)]
     for m in messages_raw:
@@ -220,7 +225,7 @@ async def build_skill_from_session(
     with prompt_log_context(session_id=session_id, run_id=None, purpose="build_skill"):
         for _attempt in range(MAX_BUILD_ATTEMPTS):
             resp = await provider.complete(
-                settings.default_model,
+                model_default,
                 history,
                 [BUILD_SKILL_TOOL],
                 0.0,
@@ -240,7 +245,7 @@ async def build_skill_from_session(
                 continue
 
             try:
-                config = _args_to_config(tc.arguments, settings.default_model)
+                config = _args_to_config(tc.arguments, model_default)
             except (KeyError, TypeError, ValueError) as exc:
                 history.append(
                     Message(
@@ -294,6 +299,7 @@ def _preview(config: SkillConfig) -> SkillPreview:
 
 @router.post("/sessions/{session_id}/skills", response_model=SkillBuilt)
 async def build_skill_endpoint(
+    request: Request,
     session_id: str,
     db: Database = Depends(get_db),
     provider: LLMProvider = Depends(get_provider),
@@ -302,12 +308,15 @@ async def build_skill_endpoint(
 ) -> SkillBuilt:
     if get_session(db, session_id) is None:
         raise HTTPException(status_code=404, detail="session not found")
+    # CATALOG-14: seed the skill's model from the runtime-selected active model.
+    active_model = getattr(request.app.state, "active_model", None)
     skill_id = await build_skill_from_session(
         provider=provider,
         db=db,
         base_tools=tools,
         settings=settings,
         session_id=session_id,
+        default_model=active_model,
     )
     record = get_skill(db, skill_id)
     assert record is not None  # just created
