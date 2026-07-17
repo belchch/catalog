@@ -43,6 +43,10 @@ export function usePlannerSession(sessionId: string | null): UsePlannerSessionRe
   const pendingRef = useRef<string[]>([])
   const readyRef = useRef<boolean>(false)
   const prevSessionRef = useRef<string | null>(null)
+  // CATALOG-23: an `error` frame is always followed by the server closing the
+  // socket. Without this flag `onClose` would also show "Соединение
+  // закрыто", duplicating/masking the actual error message for the user.
+  const hadErrorRef = useRef<boolean>(false)
 
   const handleEvent = useCallback((e: ServerEvent) => {
     switch (e.type) {
@@ -87,6 +91,7 @@ export function usePlannerSession(sessionId: string | null): UsePlannerSessionRe
         setSuggestions(e.items)
         break
       case 'error':
+        hadErrorRef.current = true
         setError(e.message)
         setStreaming(false)
         setCancelling(false)
@@ -109,6 +114,7 @@ export function usePlannerSession(sessionId: string | null): UsePlannerSessionRe
       setSuggestions([])
       assistantBufferRef.current = ''
       pendingRef.current = []
+      hadErrorRef.current = false
     }
     prevSessionRef.current = sessionId
     readyRef.current = false
@@ -122,7 +128,10 @@ export function usePlannerSession(sessionId: string | null): UsePlannerSessionRe
       },
       onClose: () => {
         readyRef.current = false
-        setClosed(true)
+        // A close that follows a reported `error` is expected (the server
+        // closes the socket after sending it) — the error message alone is
+        // the useful signal, so don't also show "Соединение закрыто".
+        if (!hadErrorRef.current) setClosed(true)
       },
     })
     connRef.current = conn

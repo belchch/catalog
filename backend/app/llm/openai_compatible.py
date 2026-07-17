@@ -101,6 +101,24 @@ class OpenAICompatibleProvider:
         """Exponential backoff for ``attempt`` (0-based): base * 2**attempt."""
         return self._backoff_base * (2**attempt)
 
+    def _error_detail(self, resp: httpx.Response) -> str:
+        """Build a readable ``"provider error <status>: <detail>"`` message.
+
+        Most OpenAI-compatible providers return ``{"error": {"message": …}}``
+        on failure (CATALOG-23) — that message is far more useful to a user
+        than the generic text ``httpx.HTTPStatusError`` would otherwise raise
+        (e.g. a rejected/unknown model on a 400, or an access-denied model on
+        a 403). Falls back to the raw response body when it isn't JSON.
+        """
+        try:
+            body = resp.json()
+            detail = body.get("error", {}).get("message") or body.get("error")
+        except (json.JSONDecodeError, AttributeError):
+            detail = None
+        if not detail:
+            detail = resp.text[:300]
+        return f"{self._provider_name} error {resp.status_code}: {detail}"
+
     def _parse_model(self, m: dict[str, Any]) -> ModelInfo:
         ctx = m.get("context_length")
         return ModelInfo(
@@ -170,7 +188,7 @@ class OpenAICompatibleProvider:
                     f"{self._provider_name} returned HTTP {resp.status_code} after "
                     f"{self._max_retries} retries"
                 )
-            resp.raise_for_status()
+            raise RuntimeError(self._error_detail(resp))
         return resp
 
     # --- model catalog -----------------------------------------------------
@@ -367,13 +385,13 @@ class OpenAICompatibleProvider:
                 if resp.status_code == 429:
                     raise RuntimeError("Rate limit exceeded")
                 if resp.status_code >= 400:
-                    err_body = (await resp.aread()).decode(errors="replace")
+                    await resp.aread()
                     logger.warning(
                         "stream_complete HTTP %d body: %s",
                         resp.status_code,
-                        err_body[:1000],
+                        resp.text[:1000],
                     )
-                    resp.raise_for_status()
+                    raise RuntimeError(self._error_detail(resp))
 
                 async for line in resp.aiter_lines():
                     line = line.strip()
