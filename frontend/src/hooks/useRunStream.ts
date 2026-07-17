@@ -3,6 +3,7 @@ import {
   connectRun,
   formatToolArgs,
   formatToolResult,
+  type RunConnection,
   type ServerEvent,
 } from '../ws.ts'
 
@@ -43,8 +44,10 @@ export interface UseRunStreamResult {
   resultText: string
   status: string | null
   finished: boolean
+  cancelling: boolean
   closed: boolean
   error: string | null
+  cancel: () => void
 }
 
 let stepCounter = 0
@@ -59,9 +62,11 @@ export function useRunStream(runId: string | null): UseRunStreamResult {
   const [resultText, setResultText] = useState('')
   const [status, setStatus] = useState<string | null>(null)
   const [finished, setFinished] = useState(false)
+  const [cancelling, setCancelling] = useState(false)
   const [closed, setClosed] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const bufferRef = useRef<string>('')
+  const connRef = useRef<RunConnection | null>(null)
 
   const handleEvent = useCallback((e: ServerEvent) => {
     switch (e.type) {
@@ -159,9 +164,11 @@ export function useRunStream(runId: string | null): UseRunStreamResult {
       case 'finish':
         if (e.status) setStatus(e.status)
         setFinished(true)
+        setCancelling(false)
         break
       case 'error':
         setError(e.message)
+        setCancelling(false)
         break
       default:
         break
@@ -182,8 +189,17 @@ export function useRunStream(runId: string | null): UseRunStreamResult {
     const conn = connectRun(runId, handleEvent, {
       onClose: () => setClosed(true),
     })
-    return () => conn.close()
+    connRef.current = conn
+    return () => {
+      conn.close()
+      connRef.current = null
+    }
   }, [runId, handleEvent])
 
-  return { steps, meta, resultText, status, finished, closed, error }
+  const cancel = useCallback(() => {
+    connRef.current?.cancel()
+    setCancelling(true)
+  }, [])
+
+  return { steps, meta, resultText, status, finished, cancelling, closed, error, cancel }
 }

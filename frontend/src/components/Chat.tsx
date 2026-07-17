@@ -5,9 +5,11 @@ import { ChatMessage } from './ChatMessage.tsx'
 interface ChatProps {
   messages: PlannerMessage[]
   streaming: boolean
+  cancelling: boolean
   closed: boolean
   error: string | null
   onSend: (text: string) => void
+  onCancel: () => void
   onCreateSkill: () => void
   buildingSkill: boolean
 }
@@ -15,9 +17,11 @@ interface ChatProps {
 export function Chat({
   messages,
   streaming,
+  cancelling,
   closed,
   error,
   onSend,
+  onCancel,
   onCreateSkill,
   buildingSkill,
 }: ChatProps) {
@@ -56,21 +60,32 @@ export function Chat({
       <div className="border-t border-slate-800 p-3">
         <div className="flex gap-2">
           <input
-            className="flex-1 rounded-md bg-slate-800 px-3 py-2 text-sm text-slate-100 outline-none placeholder:text-slate-500"
+            className="flex-1 rounded-md bg-slate-800 px-3 py-2 text-sm text-slate-100 outline-none placeholder:text-slate-500 disabled:opacity-50"
             placeholder="Сообщение планировщику…"
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={(e) => {
               if (e.key === 'Enter') submit()
             }}
-          />
-          <button
-            className="rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
-            onClick={submit}
             disabled={streaming}
-          >
-            Отправить
-          </button>
+          />
+          {streaming ? (
+            <button
+              className="rounded-md bg-red-600 px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
+              onClick={onCancel}
+              disabled={cancelling}
+            >
+              {cancelling ? 'Останавливаю…' : 'Стоп'}
+            </button>
+          ) : (
+            <button
+              className="rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
+              onClick={submit}
+              disabled={streaming}
+            >
+              Отправить
+            </button>
+          )}
         </div>
         <button
           className="mt-2 rounded-md border border-slate-700 px-3 py-1.5 text-xs text-slate-300 disabled:opacity-50"

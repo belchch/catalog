@@ -4,6 +4,8 @@ import asyncio
 import json
 from typing import Any
 
+import pytest
+
 from app.agent.events import (
     FinishEvent,
     ReasoningEvent,
@@ -528,3 +530,69 @@ def test_serialize_result_truncates_long_payloads() -> None:
     out_list = _serialize_result(huge_list)
     assert len(out_list) < len(full)
     assert "truncated" in out_list
+
+
+# --------------------------------------------------------------------------- #
+# Cancellation (CATALOG-11)
+# --------------------------------------------------------------------------- #
+
+
+class _BlockingProvider(FakeProvider):
+    """Provider whose ``complete`` blocks until cancelled or released.
+
+    Used to simulate a long LLM call so the agent task can be cancelled
+    mid-flight. ``complete`` awaits an event that is never set, so the only
+    way out is ``CancelledError``.
+    """
+
+    def __init__(self) -> None:
+        super().__init__(script=[])
+        self.was_cancelled = False
+
+    async def complete(
+        self,
+        model: str,
+        messages: list[Message],
+        tools: list[ToolSpec] | None = None,
+        temperature: float = 0.0,
+        tool_choice: str = "auto",
+        reasoning: str = "",
+    ) -> CompletionResult:
+        try:
+            await asyncio.Event().wait()  # blocks forever
+        except asyncio.CancelledError:
+            self.was_cancelled = True
+            raise
+        return CompletionResult(content="unreachable", tool_calls=[], finish_reason="stop")
+
+
+def test_run_agent_propagates_cancel() -> None:
+    """Cancelling the task running run_agent raises CancelledError (CATALOG-11).
+
+    The standard asyncio cancellation must propagate through the whole stack
+    (run_agent -> _run_agent_core -> provider.complete) without being masked.
+    """
+
+    async def _run() -> None:
+        provider = _BlockingProvider()
+        task = asyncio.ensure_future(
+            _drain(
+                run_agent(
+                    provider=provider,
+                    model="m",
+                    system_prompt="sys",
+                    messages=[Message(role="user", content="x")],
+                    tools=_registry(),
+                    use_stream=False,
+                )
+            )
+        )
+        # Give the task a chance to enter provider.complete().
+        await asyncio.sleep(0.05)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        # The provider observed the cancellation at its await point.
+        assert provider.was_cancelled is True
+
+    asyncio.run(_run())

@@ -922,3 +922,85 @@ def test_apply_reasoning_reaches_stream(db: Database, workspace: Path) -> None:
     reasoning_events = [e for e in events if isinstance(e, ReasoningEvent)]
     assert len(reasoning_events) == 1
     assert "think about this document" in reasoning_events[0].text
+
+
+# --------------------------------------------------------------------------- #
+# Cancellation (CATALOG-11)
+# --------------------------------------------------------------------------- #
+
+
+class _BlockingApplyProvider(ScriptProvider):
+    """Provider whose ``complete`` blocks forever until cancelled."""
+
+    def __init__(self) -> None:
+        super().__init__(script=[])
+        self.was_cancelled = False
+
+    async def complete(
+        self,
+        model: str,
+        messages: list[Message],
+        tools: list[ToolSpec] | None = None,
+        temperature: float = 0.0,
+        tool_choice: str = "auto",
+        reasoning: str = "",
+    ) -> CompletionResult:
+        self.seen_tools.append(list(tools) if tools else None)
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            self.was_cancelled = True
+            raise
+        return _result("unreachable")
+
+
+def test_apply_cancelled_marks_run_cancelled(db: Database, workspace: Path) -> None:
+    """A cancelled apply marks the skill_run ``cancelled``, not ``failed`` (CATALOG-11).
+
+    Cancelling the task running ``apply_skill`` propagates ``CancelledError``
+    through the whole stack; ``_apply_core`` catches it and persists
+    ``status='cancelled'`` so the run row never stays ``running`` and is
+    distinguishable from a genuine failure.
+    """
+    skill = _make_skill(verify_checks=[VerifyCheck("non_empty")])
+    skill_id = create_skill(
+        db, name=skill.name, description=skill.description, config=skill
+    )
+    input_doc_id = _ingest_input(db, workspace)
+    provider = _BlockingApplyProvider()
+
+    async def _run_and_cancel() -> None:
+        task = asyncio.ensure_future(
+            _collect_events(
+                apply_skill(
+                    provider=provider,
+                    db=db,
+                    workspace_dir=str(workspace),
+                    skill=skill,
+                    skill_id=skill_id,
+                    input_doc_ids=[input_doc_id],
+                    base_tools=build_document_tools(db, workspace),
+                )
+            )
+        )
+        await asyncio.sleep(0.05)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+
+    asyncio.run(_run_and_cancel())
+
+    # The provider observed the cancellation.
+    assert provider.was_cancelled is True
+
+    # The skill_run row is marked cancelled (not running/failed).
+    with db.connect() as conn:
+        row = conn.execute(
+            "SELECT status, output_doc_id, trace_json FROM skill_run WHERE skill_id = ?",
+            (skill_id,),
+        ).fetchone()
+    assert row is not None
+    assert row["status"] == "cancelled"
+    assert row["output_doc_id"] is None
+    # Partial trace preserved.
+    assert row["trace_json"] is not None

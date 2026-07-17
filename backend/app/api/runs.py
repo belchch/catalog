@@ -5,21 +5,29 @@ The apply flow is split across two endpoints (step 06): ``POST`` creates the
 streams the apply loop reusing that same run id (``apply_skill(run_id=...)``),
 forwarding every agent/verify event and finishing with an authoritative
 ``finish`` frame carrying the persisted ``status``/``output_doc_id``.
+
+CATALOG-11: the apply stream runs as an ``asyncio.Task`` with a concurrent
+cancel listener. On ``{"type":"cancel"}`` the task is cancelled; ``apply_skill``
+catches ``CancelledError`` and marks the run ``cancelled`` (not ``failed``),
+so the authoritative ``finish`` frame carries ``status:"cancelled"``.
 """
 
 from __future__ import annotations
+
+import asyncio
 
 from fastapi import APIRouter, Depends, HTTPException, WebSocket, WebSocketDisconnect
 
 from app.agent.registry import ToolRegistry
 from app.api.deps import agent_event_to_frame, get_db
 from app.api.schemas import ApplyRequest, RunCreated, RunOut
+from app.api.sessions import _is_cancel_frame
 from app.llm.base import LLMProvider
+from app.llm.factory import provider_for_skill, provider_name_for_skill
 from app.llm.log_context import prompt_log_context
 from app.skills.apply import apply_skill
 from app.skills.repo_run import create_run, get_run
 from app.skills.repo_skill import get_skill
-from app.llm.factory import provider_for_skill, provider_name_for_skill
 from app.storage.db import Database
 
 router = APIRouter()
@@ -132,22 +140,56 @@ async def run_stream_ws(websocket: WebSocket, run_id: str) -> None:
         # apply stream carries the correlation context (iteration is set per
         # turn inside _run_agent_core).
         with prompt_log_context(run_id=run_id, session_id=None, purpose="apply_skill"):
-            async for event in apply_skill(
-                provider=apply_provider,
-                db=db,
-                workspace_dir=workspace,
-                skill=skill.config,
-                skill_id=run["skill_id"],
-                input_doc_ids=input_doc_ids,
-                base_tools=tools,
-                run_id=run_id,
-                provider_name=resolved_provider_name,
-            ):
-                frame = agent_event_to_frame(event)
-                if frame is not None:
-                    await websocket.send_json(frame)
+            apply_task = asyncio.create_task(
+                _stream_apply(
+                    websocket,
+                    provider=apply_provider,
+                    db=db,
+                    workspace_dir=workspace,
+                    skill=skill.config,
+                    skill_id=run["skill_id"],
+                    input_doc_ids=input_doc_ids,
+                    base_tools=tools,
+                    run_id=run_id,
+                    provider_name=resolved_provider_name,
+                )
+            )
+            receive_task = asyncio.create_task(websocket.receive_text())
 
-        # Authoritative finish from the persisted run row.
+            try:
+                while True:
+                    done, _pending = await asyncio.wait(
+                        {apply_task, receive_task},
+                        return_when=asyncio.FIRST_COMPLETED,
+                    )
+                    if receive_task in done:
+                        frame_raw = receive_task.result()
+                        if _is_cancel_frame(frame_raw):
+                            apply_task.cancel()
+                            try:
+                                await apply_task
+                            except asyncio.CancelledError:
+                                pass
+                            break
+                        # Non-cancel frame during apply: keep listening.
+                        receive_task = asyncio.create_task(
+                            websocket.receive_text()
+                        )
+                    if apply_task in done:
+                        receive_task.cancel()
+                        try:
+                            await receive_task
+                        except (asyncio.CancelledError, WebSocketDisconnect):
+                            pass
+                        apply_task.result()
+                        break
+            except BaseException:
+                apply_task.cancel()
+                receive_task.cancel()
+                raise
+
+        # Authoritative finish from the persisted run row. On cancel the row
+        # was marked ``cancelled`` by apply_skill's CancelledError handler.
         final = get_run(db, run_id)
         await websocket.send_json(
             {
@@ -166,3 +208,33 @@ async def run_stream_ws(websocket: WebSocket, run_id: str) -> None:
         except RuntimeError:
             # Already closed (e.g. client disconnect) — ignore.
             pass
+
+
+async def _stream_apply(
+    websocket: WebSocket,
+    *,
+    provider: LLMProvider,
+    db: Database,
+    workspace_dir: str,
+    skill,
+    skill_id: str,
+    input_doc_ids: list[str],
+    base_tools: ToolRegistry,
+    run_id: str,
+    provider_name: str,
+) -> None:
+    """Drive ``apply_skill`` and forward every event frame to the socket."""
+    async for event in apply_skill(
+        provider=provider,
+        db=db,
+        workspace_dir=workspace_dir,
+        skill=skill,
+        skill_id=skill_id,
+        input_doc_ids=input_doc_ids,
+        base_tools=base_tools,
+        run_id=run_id,
+        provider_name=provider_name,
+    ):
+        frame = agent_event_to_frame(event)
+        if frame is not None:
+            await websocket.send_json(frame)

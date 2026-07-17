@@ -19,6 +19,7 @@ from __future__ import annotations
 import logging
 import time
 import uuid
+from asyncio import CancelledError
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from pathlib import Path
@@ -331,6 +332,26 @@ async def _apply_core(
         # apply-finish is not re-logged here: the agent FinishEvent was already
         # logged once by _run_agent_core, and "apply_skill done" is the
         # authoritative completion line for the apply layer.
+    except CancelledError:
+        # CATALOG-11: the apply task was cancelled (user pressed "Stop" in the
+        # UI). Distinguish this from a provider/agent failure: the run is marked
+        # ``cancelled`` (not ``failed``) so the trace feed and the run row
+        # reflect the user's intent. The partial trace is preserved. The
+        # CancelledError is re-raised so the WS handler can send its
+        # authoritative ``finish{status:"cancelled"}`` frame and the standard
+        # asyncio cancellation propagates through the whole stack.
+        logger.info("apply_skill cancelled run_id=%s", run_id)
+        if not done:
+            finish_run(
+                db,
+                run_id,
+                status="cancelled",
+                output_doc_id=None,
+                trace=trace,
+            )
+            done = True
+        outcome.status = "cancelled"
+        raise
     except Exception:
         # Provider/agent failure: persist a failed run (trace preserved) so the
         # row is never left 'running', then re-raise — the stream consumer gets

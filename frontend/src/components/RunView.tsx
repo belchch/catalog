@@ -29,12 +29,23 @@ export function RunView({ run, runId, onClose }: RunViewProps) {
             </span>
           )}
         </div>
-        <button
-          className="rounded bg-slate-800 px-2 py-1 text-xs text-slate-300"
-          onClick={onClose}
-        >
-          ← К чату
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            className="rounded bg-slate-800 px-2 py-1 text-xs text-slate-300"
+            onClick={onClose}
+          >
+            ← К чату
+          </button>
+          {!run.finished && (
+            <button
+              className="rounded bg-red-600 px-2 py-1 text-xs font-medium text-white disabled:opacity-50"
+              onClick={run.cancel}
+              disabled={run.cancelling}
+            >
+              {run.cancelling ? 'Останавливаю…' : 'Стоп'}
+            </button>
+          )}
+        </div>
       </div>
       <div className="grid flex-1 grid-cols-1 gap-3 overflow-hidden p-3 md:grid-cols-2">
         <div className="overflow-y-auto rounded-md border border-slate-800 bg-slate-900/40 p-3">

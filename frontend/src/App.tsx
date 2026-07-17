@@ -115,9 +115,11 @@ export default function App() {
             <Chat
               messages={planner.messages}
               streaming={planner.streaming}
+              cancelling={planner.cancelling}
               closed={planner.closed}
               error={planner.error}
               onSend={handleSend}
+              onCancel={planner.cancel}
               onCreateSkill={handleCreateSkill}
               buildingSkill={buildingSkill}
             />

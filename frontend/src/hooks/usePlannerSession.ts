@@ -15,9 +15,11 @@ export interface PlannerMessage {
 export interface UsePlannerSessionResult {
   messages: PlannerMessage[]
   streaming: boolean
+  cancelling: boolean
   closed: boolean
   error: string | null
   send: (text: string) => void
+  cancel: () => void
 }
 
 /**
@@ -30,6 +32,7 @@ export interface UsePlannerSessionResult {
 export function usePlannerSession(sessionId: string | null): UsePlannerSessionResult {
   const [messages, setMessages] = useState<PlannerMessage[]>([])
   const [streaming, setStreaming] = useState(false)
+  const [cancelling, setCancelling] = useState(false)
   const [closed, setClosed] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -75,10 +78,12 @@ export function usePlannerSession(sessionId: string | null): UsePlannerSessionRe
       case 'finish':
         assistantBufferRef.current = ''
         setStreaming(false)
+        setCancelling(false)
         break
       case 'error':
         setError(e.message)
         setStreaming(false)
+        setCancelling(false)
         break
       case 'step':
       case 'verify':
@@ -132,5 +137,10 @@ export function usePlannerSession(sessionId: string | null): UsePlannerSessionRe
     }
   }, [])
 
-  return { messages, streaming, closed, error, send }
+  const cancel = useCallback(() => {
+    connRef.current?.cancel()
+    setCancelling(true)
+  }, [])
+
+  return { messages, streaming, cancelling, closed, error, send, cancel }
 }

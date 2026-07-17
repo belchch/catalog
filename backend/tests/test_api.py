@@ -184,6 +184,64 @@ def test_planner_uses_active_model(client, provider, db) -> None:
     assert provider.requests[0]["model"] == "glm-4.6"
 
 
+def test_ws_session_cancel(client, provider, db) -> None:
+    """Cancelling a running planner turn sends finish{cancelled} and keeps the session alive (CATALOG-11)."""
+    from tests.conftest import FakeProvider as _ConfFakeProvider
+
+    class _BlockingProvider(_ConfFakeProvider):
+        """Provider whose complete() blocks until cancelled."""
+
+        def __init__(self) -> None:
+            super().__init__(script=[])
+            self.was_cancelled = False
+
+        async def complete(self, *args, **kwargs):  # type: ignore[override]
+            import asyncio
+
+            try:
+                await asyncio.Event().wait()
+            except asyncio.CancelledError:
+                self.was_cancelled = True
+                raise
+
+    blocking = _BlockingProvider()
+    client.app.state.provider = blocking
+
+    session_id = client.post("/sessions").json()["id"]
+
+    with client.websocket_connect(f"/sessions/{session_id}") as ws:
+        # Send a message, then immediately a cancel frame. The cancel is read
+        # by the concurrent listener while the agent is blocked in complete().
+        ws.send_text("долгий вопрос")
+        ws.send_text('{"type":"cancel"}')
+
+        frames: list[dict] = []
+        while True:
+            frame = ws.receive_json()
+            frames.append(frame)
+            if frame.get("type") == "finish":
+                break
+
+    finish = frames[-1]
+    assert finish["type"] == "finish"
+    assert finish["status"] == "cancelled"
+    # The provider observed the cancellation at its await point.
+    assert blocking.was_cancelled is True
+
+    # The session is still alive: a follow-up message completes normally.
+    provider.script = [_completion("готово")]
+    client.app.state.provider = provider
+    with client.websocket_connect(f"/sessions/{session_id}") as ws:
+        ws.send_text("ещё вопрос")
+        frames2: list[dict] = []
+        while True:
+            frame = ws.receive_json()
+            frames2.append(frame)
+            if frame.get("type") == "finish":
+                break
+    assert frames2[-1]["status"] == "ok"
+
+
 # --------------------------------------------------------------------------- #
 # Skill build / commit / list
 # --------------------------------------------------------------------------- #
