@@ -42,6 +42,7 @@ export function usePlannerSession(sessionId: string | null): UsePlannerSessionRe
   const assistantBufferRef = useRef<string>('')
   const pendingRef = useRef<string[]>([])
   const readyRef = useRef<boolean>(false)
+  const prevSessionRef = useRef<string | null>(null)
 
   const handleEvent = useCallback((e: ServerEvent) => {
     switch (e.type) {
@@ -100,13 +101,16 @@ export function usePlannerSession(sessionId: string | null): UsePlannerSessionRe
 
   useEffect(() => {
     if (!sessionId) return
-    setMessages([])
-    setStreaming(false)
-    setClosed(false)
-    setError(null)
-    setSuggestions([])
-    assistantBufferRef.current = ''
-    pendingRef.current = []
+    if (prevSessionRef.current !== null && prevSessionRef.current !== sessionId) {
+      setMessages([])
+      setStreaming(false)
+      setClosed(false)
+      setError(null)
+      setSuggestions([])
+      assistantBufferRef.current = ''
+      pendingRef.current = []
+    }
+    prevSessionRef.current = sessionId
     readyRef.current = false
 
     const conn = connectPlanner(sessionId, handleEvent, {
