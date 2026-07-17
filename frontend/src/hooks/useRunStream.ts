@@ -44,6 +44,9 @@ export interface UseRunStreamResult {
   resultText: string
   status: string | null
   finished: boolean
+  // Result document created by the run itself ("в док" mode) — null in
+  // "на экран" mode until the user saves it explicitly (CATALOG-18).
+  outputDocId: string | null
   cancelling: boolean
   closed: boolean
   error: string | null
@@ -62,6 +65,7 @@ export function useRunStream(runId: string | null): UseRunStreamResult {
   const [resultText, setResultText] = useState('')
   const [status, setStatus] = useState<string | null>(null)
   const [finished, setFinished] = useState(false)
+  const [outputDocId, setOutputDocId] = useState<string | null>(null)
   const [cancelling, setCancelling] = useState(false)
   const [closed, setClosed] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -163,6 +167,11 @@ export function useRunStream(runId: string | null): UseRunStreamResult {
         break
       case 'finish':
         if (e.status) setStatus(e.status)
+        if (e.output_doc_id !== undefined) setOutputDocId(e.output_doc_id)
+        // The apply loop never streams tokens, so the finish frame's
+        // result_text (CATALOG-18) is the only source for the on-screen
+        // result — apply it unless something already streamed into resultText.
+        if (e.result_text != null) setResultText(e.result_text)
         setFinished(true)
         setCancelling(false)
         break
@@ -182,6 +191,7 @@ export function useRunStream(runId: string | null): UseRunStreamResult {
     setResultText('')
     setStatus(null)
     setFinished(false)
+    setOutputDocId(null)
     setClosed(false)
     setError(null)
     bufferRef.current = ''
@@ -201,5 +211,16 @@ export function useRunStream(runId: string | null): UseRunStreamResult {
     setCancelling(true)
   }, [])
 
-  return { steps, meta, resultText, status, finished, cancelling, closed, error, cancel }
+  return {
+    steps,
+    meta,
+    resultText,
+    status,
+    finished,
+    outputDocId,
+    cancelling,
+    closed,
+    error,
+    cancel,
+  }
 }

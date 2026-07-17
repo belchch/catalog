@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import type { SkillOut } from '../api.ts'
+import type { ApplyMode, SkillOut } from '../api.ts'
 import { applySkill, commitSkill, listSkills } from '../api.ts'
 
 export interface UseSkillsResult {
@@ -8,7 +8,7 @@ export interface UseSkillsResult {
   error: string | null
   refresh: () => Promise<void>
   commit: (skillId: string) => Promise<void>
-  apply: (skillId: string, docIds: string[]) => Promise<string>
+  apply: (skillId: string, docIds: string[], mode?: ApplyMode) => Promise<string>
 }
 
 export function useSkills(): UseSkillsResult {
@@ -35,10 +35,13 @@ export function useSkills(): UseSkillsResult {
     )
   }, [])
 
-  const apply = useCallback(async (skillId: string, docIds: string[]) => {
-    const { run_id } = await applySkill(skillId, docIds)
-    return run_id
-  }, [])
+  const apply = useCallback(
+    async (skillId: string, docIds: string[], mode: ApplyMode = 'persist') => {
+      const { run_id } = await applySkill(skillId, docIds, mode)
+      return run_id
+    },
+    [],
+  )
 
   useEffect(() => {
     void refresh()

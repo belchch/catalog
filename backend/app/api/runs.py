@@ -1,34 +1,43 @@
-"""``POST /skills/{id}/apply``, ``GET /runs/{id}``, ``WS /runs/{id}/stream``.
+"""``POST /skills/{id}/apply``, ``GET /runs/{id}``, ``WS /runs/{id}/stream``,
+``POST /runs/{id}/save``.
 
 The apply flow is split across two endpoints (step 06): ``POST`` creates the
 ``skill_run`` row (status ``running``) and returns its id; the WebSocket then
 streams the apply loop reusing that same run id (``apply_skill(run_id=...)``),
 forwarding every agent/verify event and finishing with an authoritative
-``finish`` frame carrying the persisted ``status``/``output_doc_id``.
+``finish`` frame carrying the persisted ``status``/``output_doc_id``/
+``result_text``.
 
 CATALOG-11: the apply stream runs as an ``asyncio.Task`` with a concurrent
 cancel listener. On ``{"type":"cancel"}`` the task is cancelled; ``apply_skill``
 catches ``CancelledError`` and marks the run ``cancelled`` (not ``failed``),
 so the authoritative ``finish`` frame carries ``status:"cancelled"``.
+
+CATALOG-18: ``ApplyRequest.persist`` selects the output mode ("в док" vs "на
+экран"); ``POST /runs/{id}/save`` materializes a ``persist=False`` run's
+on-screen ``result_text`` into a ``result_md`` document after the fact.
 """
 
 from __future__ import annotations
 
 import asyncio
+import uuid
+from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, WebSocket, WebSocketDisconnect
 
 from app.agent.registry import ToolRegistry
-from app.api.deps import agent_event_to_frame, get_db
-from app.api.schemas import ApplyRequest, RunCreated, RunOut
+from app.api.deps import agent_event_to_frame, get_db, get_workspace
+from app.api.schemas import ApplyRequest, DocumentOut, RunCreated, RunOut
 from app.api.sessions import _is_cancel_frame
 from app.llm.base import LLMProvider
 from app.llm.factory import provider_for_skill, provider_name_for_skill
 from app.llm.log_context import prompt_log_context
 from app.skills.apply import apply_skill
-from app.skills.repo_run import create_run, get_run
+from app.skills.repo_run import create_run, get_run, set_output_doc_id
 from app.skills.repo_skill import get_skill
 from app.storage.db import Database
+from app.storage.repo_document import create_document
 
 router = APIRouter()
 
@@ -58,7 +67,7 @@ async def apply_endpoint(
             ),
         )
     run_id = create_run(
-        db, skill_id=skill_id, session_id=None, input_doc_ids=doc_ids
+        db, skill_id=skill_id, session_id=None, input_doc_ids=doc_ids, persist=req.persist
     )
     return RunCreated(run_id=run_id)
 
@@ -81,7 +90,43 @@ async def get_run_endpoint(run_id: str, db: Database = Depends(get_db)) -> RunOu
         output_doc_id=row["output_doc_id"],
         status=row["status"],
         trace=trace,
+        result_text=row["result_text"],
     )
+
+
+@router.post("/runs/{run_id}/save", response_model=DocumentOut)
+async def save_run_result_endpoint(
+    run_id: str,
+    db: Database = Depends(get_db),
+    workspace: str = Depends(get_workspace),
+) -> DocumentOut:
+    """Materialize a finished run's on-screen result into a document (CATALOG-18).
+
+    Used by the "Сохранить как новый документ" button after a ``persist=False``
+    ("на экран") apply: the run must have finished successfully with a
+    non-empty ``result_text`` and no ``output_doc_id`` yet (a ``persist=True``
+    run already has one — saving again would create a duplicate).
+    """
+    run = get_run(db, run_id)
+    if run is None:
+        raise HTTPException(status_code=404, detail="run not found")
+    if run["output_doc_id"]:
+        raise HTTPException(status_code=409, detail="run result is already saved")
+    if run["status"] != "ok" or not run["result_text"]:
+        raise HTTPException(status_code=409, detail="run has no result to save")
+
+    skill = get_skill(db, run["skill_id"])
+    title = f"{skill.name} — результат" if skill is not None else "Результат прогона"
+    out_id = uuid.uuid4().hex
+    doc = create_document(
+        db, title=title, path=f"results/{out_id}.md", kind="result_md", doc_id=out_id
+    )
+    results_dir = Path(workspace) / "results"
+    results_dir.mkdir(parents=True, exist_ok=True)
+    (results_dir / f"{out_id}.md").write_text(run["result_text"], encoding="utf-8")
+    set_output_doc_id(db, run_id, out_id)
+
+    return DocumentOut(id=doc.id, title=doc.title, kind=doc.kind, created_at=doc.created_at)
 
 
 @router.websocket("/runs/{run_id}/stream")
@@ -152,6 +197,7 @@ async def run_stream_ws(websocket: WebSocket, run_id: str) -> None:
                     base_tools=tools,
                     run_id=run_id,
                     provider_name=resolved_provider_name,
+                    persist=run["persist"],
                 )
             )
             receive_task = asyncio.create_task(websocket.receive_text())
@@ -196,6 +242,7 @@ async def run_stream_ws(websocket: WebSocket, run_id: str) -> None:
                 "type": "finish",
                 "status": final["status"] if final else "failed",
                 "output_doc_id": final["output_doc_id"] if final else None,
+                "result_text": final["result_text"] if final else None,
             }
         )
     except WebSocketDisconnect:
@@ -222,6 +269,7 @@ async def _stream_apply(
     base_tools: ToolRegistry,
     run_id: str,
     provider_name: str,
+    persist: bool = True,
 ) -> None:
     """Drive ``apply_skill`` and forward every event frame to the socket."""
     async for event in apply_skill(
@@ -234,6 +282,7 @@ async def _stream_apply(
         base_tools=base_tools,
         run_id=run_id,
         provider_name=provider_name,
+        persist=persist,
     ):
         frame = agent_event_to_frame(event)
         if frame is not None:

@@ -9,6 +9,13 @@ The list of input documents is stored as a JSON array in ``input_doc_ids``.
 The legacy ``input_doc_id`` column is kept in sync (it always holds the first
 input) so older readers and the existing ``RunOut.input_doc_id`` field keep
 working.
+
+CATALOG-18: ``persist`` records which output mode the run was started with
+(``True`` = auto-create a ``result_md`` document on success, matching the
+pre-CATALOG-18 behaviour; ``False`` = leave the result on screen only).
+``result_text`` carries the raw agent/script output regardless of ``persist``
+so a preview run can still be materialized into a document later via
+``POST /runs/{id}/save``.
 """
 
 from __future__ import annotations
@@ -31,12 +38,14 @@ def create_run(
     skill_id: str,
     session_id: str | None,
     input_doc_ids: list[str],
+    persist: bool = True,
 ) -> str:
     """Insert a skill_run row with ``status='running'`` and return its id.
 
     ``input_doc_ids`` is serialized to a JSON array in ``input_doc_ids``; the
     first id is also written to the legacy ``input_doc_id`` column for
-    backward compatibility with older readers.
+    backward compatibility with older readers. ``persist`` (CATALOG-18)
+    records the requested output mode for this run.
     """
     if not input_doc_ids:
         raise ValueError("create_run requires at least one input document id")
@@ -47,9 +56,10 @@ def create_run(
     with db.connect() as conn:
         conn.execute(
             "INSERT INTO skill_run(id, skill_id, session_id, input_doc_id, "
-            "input_doc_ids, output_doc_id, status, trace_json, started_at, ended_at) "
-            "VALUES (?, ?, ?, ?, ?, NULL, 'running', NULL, ?, NULL)",
-            (run_id, skill_id, session_id, first_doc_id, ids_json, now),
+            "input_doc_ids, output_doc_id, status, trace_json, started_at, ended_at, "
+            "persist, result_text) "
+            "VALUES (?, ?, ?, ?, ?, NULL, 'running', NULL, ?, NULL, ?, NULL)",
+            (run_id, skill_id, session_id, first_doc_id, ids_json, now, int(persist)),
         )
     return run_id
 
@@ -61,14 +71,28 @@ def finish_run(
     status: str,
     output_doc_id: str | None,
     trace: Trace,
+    result_text: str | None = None,
 ) -> None:
-    """Mark a run finished: set status, output doc, trace, and ended_at."""
+    """Mark a run finished: set status, output doc, trace, text, and ended_at."""
     now = _now_iso()
     with db.connect() as conn:
         conn.execute(
             "UPDATE skill_run SET status = ?, output_doc_id = ?, "
-            "trace_json = ?, ended_at = ? WHERE id = ?",
-            (status, output_doc_id, trace.to_json(), now, run_id),
+            "trace_json = ?, ended_at = ?, result_text = ? WHERE id = ?",
+            (status, output_doc_id, trace.to_json(), now, result_text, run_id),
+        )
+
+
+def set_output_doc_id(db: Database, run_id: str, output_doc_id: str) -> None:
+    """Attach a materialized result document to an existing run (CATALOG-18).
+
+    Used by ``POST /runs/{id}/save`` when a ``persist=False`` (preview) run's
+    on-screen result is saved as a document after the fact.
+    """
+    with db.connect() as conn:
+        conn.execute(
+            "UPDATE skill_run SET output_doc_id = ? WHERE id = ?",
+            (output_doc_id, run_id),
         )
 
 
@@ -82,7 +106,8 @@ def get_run(db: Database, run_id: str) -> dict | None:
     with db.connect() as conn:
         row = conn.execute(
             "SELECT id, skill_id, session_id, input_doc_id, input_doc_ids, "
-            "output_doc_id, status, trace_json, started_at, ended_at "
+            "output_doc_id, status, trace_json, started_at, ended_at, "
+            "persist, result_text "
             "FROM skill_run WHERE id = ?",  # noqa: S608
             (run_id,),
         ).fetchone()
@@ -110,4 +135,8 @@ def get_run(db: Database, run_id: str) -> dict | None:
         "trace_json": row["trace_json"],
         "started_at": row["started_at"],
         "ended_at": row["ended_at"],
+        # Legacy rows (written before CATALOG-18) have no persist column value
+        # other than the additive migration's DEFAULT 1 backfill.
+        "persist": bool(row["persist"]) if row["persist"] is not None else True,
+        "result_text": row["result_text"],
     }

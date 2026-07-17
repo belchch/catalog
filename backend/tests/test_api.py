@@ -901,6 +901,94 @@ def test_apply_multi_doc_via_api(client, provider, db) -> None:
     assert run["input_doc_ids"] == [doc_a, doc_b]
 
 
+def test_apply_preview_mode_skips_document_creation(client, provider, db) -> None:
+    """persist=False ("на экран", CATALOG-18) does not create a result_md doc.
+
+    The finish frame and GET /runs/{id} still carry the full result_text so
+    the UI can render it without a document.
+    """
+    doc_id = _upload(client, "input.md", b"source text")
+    skill_id = _seed_committed_skill(
+        db, verify_checks=[VerifyCheck("non_empty")], max_retries=2
+    )
+    provider.script = [_completion("# Result\n\nOn-screen only.")]
+
+    run_id = client.post(
+        f"/skills/{skill_id}/apply", json={"doc_id": doc_id, "persist": False}
+    ).json()["run_id"]
+
+    frames = _drain_run_ws(client, run_id)
+    finish = frames[-1]
+    assert finish["type"] == "finish"
+    assert finish["status"] == "ok"
+    assert finish["output_doc_id"] is None
+    assert finish["result_text"] == "# Result\n\nOn-screen only."
+
+    run = client.get(f"/runs/{run_id}").json()
+    assert run["status"] == "ok"
+    assert run["output_doc_id"] is None
+    assert run["result_text"] == "# Result\n\nOn-screen only."
+
+    # No result_md document appeared in the list.
+    docs_before = client.get("/documents").json()
+    assert all(d["kind"] != "result_md" for d in docs_before)
+
+
+def test_save_run_result_materializes_preview_into_document(
+    client, provider, db
+) -> None:
+    """POST /runs/{id}/save creates a document from a preview run's text."""
+    doc_id = _upload(client, "input.md", b"source text")
+    skill_id = _seed_committed_skill(
+        db, verify_checks=[VerifyCheck("non_empty")], max_retries=2
+    )
+    provider.script = [_completion("# Result\n\nSaved later.")]
+
+    run_id = client.post(
+        f"/skills/{skill_id}/apply", json={"doc_id": doc_id, "persist": False}
+    ).json()["run_id"]
+    _drain_run_ws(client, run_id)
+
+    resp = client.post(f"/runs/{run_id}/save")
+    assert resp.status_code == 200, resp.text
+    saved = resp.json()
+    assert saved["kind"] == "result_md"
+    assert saved["id"]
+
+    # The document now appears in the list and the run carries output_doc_id.
+    doc_ids = [d["id"] for d in client.get("/documents").json()]
+    assert saved["id"] in doc_ids
+
+    run = client.get(f"/runs/{run_id}").json()
+    assert run["output_doc_id"] == saved["id"]
+
+    # Saving a second time is rejected (no duplicate document).
+    resp2 = client.post(f"/runs/{run_id}/save")
+    assert resp2.status_code == 409
+
+
+def test_save_run_result_missing_run_returns_404(client, db) -> None:
+    resp = client.post("/runs/does-not-exist/save")
+    assert resp.status_code == 404
+
+
+def test_save_run_result_already_persisted_returns_409(client, provider, db) -> None:
+    """A persist=True run already has output_doc_id — saving again is rejected."""
+    doc_id = _upload(client, "input.md", b"source text")
+    skill_id = _seed_committed_skill(
+        db, verify_checks=[VerifyCheck("non_empty")], max_retries=2
+    )
+    provider.script = [_completion("# Result\n\nAuto-saved.")]
+
+    run_id = client.post(
+        f"/skills/{skill_id}/apply", json={"doc_id": doc_id}
+    ).json()["run_id"]
+    _drain_run_ws(client, run_id)
+
+    resp = client.post(f"/runs/{run_id}/save")
+    assert resp.status_code == 409
+
+
 def test_apply_arity_mismatch_returns_422(client, db) -> None:
     """A skill declaring input_arity=2 rejects a single-doc apply with 422."""
     doc_id = _upload(client, "input.md", b"source text")

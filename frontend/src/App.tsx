@@ -1,5 +1,13 @@
-import { useCallback, useState } from 'react'
-import { buildSkill, createSession, startEditSession, type SkillPreview } from './api.ts'
+import { useCallback, useEffect, useState } from 'react'
+import {
+  buildSkill,
+  createSession,
+  saveRunResult,
+  startEditSession,
+  type ApplyMode,
+  type DocumentOut,
+  type SkillPreview,
+} from './api.ts'
 import { Chat } from './components/Chat.tsx'
 import { DocumentList } from './components/DocumentList.tsx'
 import { ModelSelector } from './components/ModelSelector.tsx'
@@ -27,9 +35,21 @@ export default function App() {
   // CATALOG-17: set while the chat is editing an existing skill (vs. building
   // a brand new one) — drives the "Сохранить изменения" button and banner.
   const [editingSkill, setEditingSkill] = useState<{ skillId: string; name: string } | null>(null)
+  // CATALOG-18: the doc a "на экран" result was just saved into, plus its
+  // in-flight state — cleared whenever a new run starts.
+  const [savedResultDoc, setSavedResultDoc] = useState<DocumentOut | null>(null)
+  const [savingResult, setSavingResult] = useState(false)
 
   const planner = usePlannerSession(sessionId)
   const run = useRunStream(activeRunId)
+
+  // "В док" runs create their result document server-side — refresh the list
+  // so it shows up without the user having to click "Обновить".
+  useEffect(() => {
+    if (run.finished && run.status === 'ok' && run.outputDocId) {
+      void docs.refresh()
+    }
+  }, [run.finished, run.status, run.outputDocId, docs])
 
   const ensureSession = useCallback(async (): Promise<string> => {
     if (sessionId) return sessionId
@@ -84,16 +104,35 @@ export default function App() {
   }, [skillsHook])
 
   const handleApply = useCallback(
-    async (skillId: string, docIds: string[]) => {
+    async (skillId: string, docIds: string[], mode: ApplyMode) => {
       setNotice(null)
+      setSavedResultDoc(null)
       try {
-        const runId = await skillsHook.apply(skillId, docIds)
+        const runId = await skillsHook.apply(skillId, docIds, mode)
         setActiveRunId(runId)
       } catch (e) {
         setNotice(e instanceof Error ? e.message : String(e))
       }
     },
     [skillsHook],
+  )
+
+  const handleSaveResult = useCallback(
+    async (runId: string) => {
+      setSavingResult(true)
+      setNotice(null)
+      try {
+        const doc = await saveRunResult(runId)
+        setSavedResultDoc(doc)
+        await docs.refresh()
+        setCurrentDocId(doc.id)
+      } catch (e) {
+        setNotice(e instanceof Error ? e.message : String(e))
+      } finally {
+        setSavingResult(false)
+      }
+    },
+    [docs],
   )
 
   return (
@@ -126,7 +165,15 @@ export default function App() {
         </aside>
         <main className="overflow-hidden">
           {activeRunId ? (
-            <RunView run={run} runId={activeRunId} onClose={() => setActiveRunId(null)} />
+            <RunView
+              run={run}
+              runId={activeRunId}
+              documents={docs.documents}
+              onClose={() => setActiveRunId(null)}
+              onSaveResult={handleSaveResult}
+              savingResult={savingResult}
+              savedDoc={savedResultDoc}
+            />
           ) : (
             <Chat
               messages={planner.messages}

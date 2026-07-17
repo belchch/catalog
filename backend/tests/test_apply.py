@@ -431,6 +431,57 @@ def test_apply_script_skill(db: Database, workspace: Path) -> None:
     assert script_entries[0].data["ok"] is True
 
 
+def test_apply_persist_false_skips_document_but_keeps_text(
+    db: Database, workspace: Path
+) -> None:
+    """persist=False (CATALOG-18 "на экран") does not create a result_md doc.
+
+    ``result_text`` is still filled in on the collected result and the run
+    row, so the preview can be materialized later via ``POST /runs/{id}/save``.
+    """
+    skill = _make_skill(verify_checks=[VerifyCheck("non_empty")])
+    skill_id = create_skill(
+        db, name=skill.name, description=skill.description, config=skill
+    )
+    input_doc_id = _ingest_input(db, workspace)
+    provider = ScriptProvider([_result("# Summary\n\nOn-screen only.")])
+
+    result = asyncio.run(
+        apply_skill_collect(
+            provider=provider,
+            db=db,
+            workspace_dir=str(workspace),
+            skill=skill,
+            skill_id=skill_id,
+            input_doc_ids=[input_doc_id],
+            base_tools=build_document_tools(db, workspace),
+            persist=False,
+        )
+    )
+
+    assert result.status == "ok"
+    assert result.output_doc_id is None
+    assert result.result_text == "# Summary\n\nOn-screen only."
+
+    # No result document written to disk.
+    results_dir = workspace / "results"
+    if results_dir.exists():
+        assert not any(results_dir.iterdir())
+
+    # skill_run row records the text without an output_doc_id.
+    with db.connect() as conn:
+        row = conn.execute(
+            "SELECT status, output_doc_id, result_text, persist FROM skill_run "
+            "WHERE skill_id = ?",
+            (skill_id,),
+        ).fetchone()
+    assert row is not None
+    assert row["status"] == "ok"
+    assert row["output_doc_id"] is None
+    assert row["result_text"] == "# Summary\n\nOn-screen only."
+    assert row["persist"] == 0
+
+
 def _ingest_named(db: Database, workspace: Path, filename: str, content: bytes) -> str:
     row = ingest_file(db, workspace, filename=filename, content=content)
     return row.id

@@ -28,7 +28,12 @@ export interface RunOut {
   output_doc_id: string | null
   status: string
   trace: unknown[] | null
+  // Raw agent/script output, kept even when persist=false (CATALOG-18).
+  result_text: string | null
 }
+
+/** Output mode for applying a skill (CATALOG-18): "в док" vs "на экран". */
+export type ApplyMode = 'persist' | 'preview'
 
 export interface SessionCreated {
   id: string
@@ -128,16 +133,25 @@ export function listSkills(status?: string): Promise<SkillOut[]> {
   return jsonFetch<SkillOut[]>(`/skills${qs}`)
 }
 
-export function applySkill(skillId: string, docIds: string[]): Promise<RunCreated> {
+export function applySkill(
+  skillId: string,
+  docIds: string[],
+  mode: ApplyMode = 'persist',
+): Promise<RunCreated> {
   return jsonFetch<RunCreated>(`/skills/${skillId}/apply`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ doc_ids: docIds }),
+    body: JSON.stringify({ doc_ids: docIds, persist: mode === 'persist' }),
   })
 }
 
 export function getRun(runId: string): Promise<RunOut> {
   return jsonFetch<RunOut>(`/runs/${runId}`)
+}
+
+/** Materialize a preview run's on-screen result into a document (CATALOG-18). */
+export function saveRunResult(runId: string): Promise<DocumentOut> {
+  return jsonFetch<DocumentOut>(`/runs/${runId}/save`, { method: 'POST' })
 }
 
 export function listModels(): Promise<ModelOut[]> {

@@ -1,16 +1,37 @@
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
+import type { DocumentOut } from '../api.ts'
 import type { UseRunStreamResult } from '../hooks/useRunStream.ts'
 import { TraceSteps } from './TraceSteps.tsx'
 
 interface RunViewProps {
   run: UseRunStreamResult
   runId: string | null
+  documents: DocumentOut[]
   onClose: () => void
+  // "Сохранить как новый документ" (CATALOG-18, "на экран" mode only).
+  onSaveResult: (runId: string) => void
+  savingResult: boolean
+  // Set right after a successful save so the confirmation shows immediately,
+  // before the documents list has had a chance to refresh.
+  savedDoc: DocumentOut | null
 }
 
-export function RunView({ run, runId, onClose }: RunViewProps) {
+export function RunView({
+  run,
+  runId,
+  documents,
+  onClose,
+  onSaveResult,
+  savingResult,
+  savedDoc,
+}: RunViewProps) {
   const statusOk = run.status === 'ok'
+  const outputDocId = run.outputDocId ?? savedDoc?.id ?? null
+  const outputDoc = outputDocId
+    ? documents.find((d) => d.id === outputDocId) ?? (savedDoc?.id === outputDocId ? savedDoc : null)
+    : null
+  const canSaveResult = run.finished && statusOk && !outputDocId && !!run.resultText
   return (
     <div className="flex h-full flex-col">
       <div className="flex items-center justify-between border-b border-slate-800 px-4 py-2">
@@ -89,6 +110,20 @@ export function RunView({ run, runId, onClose }: RunViewProps) {
         </div>
         <div className="overflow-y-auto rounded-md border border-slate-800 bg-slate-900/40 p-3">
           <h3 className="mb-2 text-xs font-semibold uppercase text-slate-500">Результат</h3>
+          {outputDocId && (
+            <p className="mb-2 rounded border border-emerald-800 bg-emerald-950/40 px-2 py-1 text-xs text-emerald-300">
+              Документ создан{outputDoc ? `: «${outputDoc.title}»` : ` (id ${outputDocId.slice(0, 8)})`}
+            </p>
+          )}
+          {canSaveResult && (
+            <button
+              className="mb-2 rounded bg-indigo-600 px-2 py-1 text-xs text-white disabled:opacity-50"
+              disabled={savingResult}
+              onClick={() => runId && onSaveResult(runId)}
+            >
+              {savingResult ? 'Сохраняю…' : 'Сохранить как новый документ'}
+            </button>
+          )}
           {run.resultText ? (
             <div className="run-markdown text-sm text-slate-200">
               <ReactMarkdown remarkPlugins={[remarkGfm]}>{run.resultText}</ReactMarkdown>

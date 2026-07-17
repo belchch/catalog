@@ -1,12 +1,12 @@
 import { useState } from 'react'
-import type { DocumentOut } from '../api.ts'
+import type { ApplyMode, DocumentOut } from '../api.ts'
 import type { UseSkillsResult } from '../hooks/useSkills.ts'
 
 interface SkillsPanelProps {
   skills: UseSkillsResult
   documents: DocumentOut[]
   defaultDocId: string | null
-  onApply: (skillId: string, docIds: string[]) => void
+  onApply: (skillId: string, docIds: string[], mode: ApplyMode) => void
   onEdit: (skillId: string, name: string) => void
 }
 
@@ -121,13 +121,24 @@ export function SkillsPanel({ skills, documents, defaultDocId, onApply, onEdit }
                         })}
                       </ul>
                     )}
-                    <button
-                      className="rounded bg-indigo-600 px-2 py-1 text-[11px] text-white disabled:opacity-50"
-                      disabled={selected.length === 0}
-                      onClick={() => selected.length > 0 && onApply(s.id, selected)}
-                    >
-                      Применить{selected.length > 1 ? ` (${selected.length})` : ''}
-                    </button>
+                    <div className="flex flex-wrap gap-1.5">
+                      <button
+                        className="rounded bg-indigo-600 px-2 py-1 text-[11px] text-white disabled:opacity-50"
+                        disabled={selected.length === 0}
+                        title="Результат сразу сохраняется в новый документ"
+                        onClick={() => selected.length > 0 && onApply(s.id, selected, 'persist')}
+                      >
+                        В док{selected.length > 1 ? ` (${selected.length})` : ''}
+                      </button>
+                      <button
+                        className="rounded bg-slate-700 px-2 py-1 text-[11px] text-slate-200 disabled:opacity-50"
+                        disabled={selected.length === 0}
+                        title="Результат выводится на экран; документ можно сохранить отдельно"
+                        onClick={() => selected.length > 0 && onApply(s.id, selected, 'preview')}
+                      >
+                        На экран{selected.length > 1 ? ` (${selected.length})` : ''}
+                      </button>
+                    </div>
                   </div>
                 )}
               </div>

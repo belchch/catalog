@@ -35,7 +35,9 @@ CREATE TABLE IF NOT EXISTS skill_run(
   input_doc_id TEXT, output_doc_id TEXT,
   input_doc_ids TEXT,                                            -- JSON array of input doc ids (CATALOG-4)
   status TEXT NOT NULL,                                         -- running|ok|failed
-  trace_json TEXT, started_at TEXT NOT NULL, ended_at TEXT
+  trace_json TEXT, started_at TEXT NOT NULL, ended_at TEXT,
+  persist INTEGER NOT NULL DEFAULT 1,                            -- 1 = auto-persist result_md (CATALOG-18)
+  result_text TEXT                                               -- raw agent/script output, kept even when persist=0
 );
 """
 
@@ -47,4 +49,10 @@ CREATE TABLE IF NOT EXISTS skill_run(
 ADDITIVE_MIGRATIONS: list[tuple[str, str, str]] = [
     ("skill_run", "input_doc_ids", "ALTER TABLE skill_run ADD COLUMN input_doc_ids TEXT"),
     ("session", "skill_id", "ALTER TABLE session ADD COLUMN skill_id TEXT"),
+    (
+        "skill_run",
+        "persist",
+        "ALTER TABLE skill_run ADD COLUMN persist INTEGER NOT NULL DEFAULT 1",
+    ),
+    ("skill_run", "result_text", "ALTER TABLE skill_run ADD COLUMN result_text TEXT"),
 ]

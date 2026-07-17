@@ -8,9 +8,13 @@ The apply loop (ADR-0001 + ADR-0006 + ADR-0007):
 3. For up to ``max_retries + 1`` attempts: run the agent loop, verify the
    output, emit a :class:`VerifyEvent`; on failure feed the reasons back and
    retry.
-4. On success: persist the result as ``Document(kind=result_md)`` and write
-   the file under ``workspace/results/``. On failure: keep the last text in
-   the trace.
+4. On success: when ``persist=True`` (CATALOG-18; the default, matching the
+   pre-CATALOG-18 behaviour), persist the result as ``Document(kind=result_md)``
+   and write the file under ``workspace/results/``. When ``persist=False``
+   the result stays on screen only — no document is created, but the raw text
+   is still stored on the run row (``result_text``) so it can be materialized
+   later via ``POST /runs/{id}/save``. On failure: keep the last text in the
+   trace.
 5. Record the outcome in ``skill_run`` and emit a :class:`FinishEvent`.
 """
 
@@ -74,6 +78,7 @@ async def _apply_core(
     outcome: _ApplyOutcome,
     run_id: str | None = None,
     provider_name: str = "",
+    persist: bool = True,
 ) -> AsyncIterator[AgentEvent]:
     """Shared apply loop: streams events, fills ``trace`` and ``outcome``.
 
@@ -119,7 +124,11 @@ async def _apply_core(
     # 3. Create the skill_run row (or reuse a pre-created one).
     if run_id is None:
         run_id = create_run(
-            db, skill_id=skill_id, session_id=session_id, input_doc_ids=input_doc_ids
+            db,
+            skill_id=skill_id,
+            session_id=session_id,
+            input_doc_ids=input_doc_ids,
+            persist=persist,
         )
 
     logger.info(
@@ -279,8 +288,10 @@ async def _apply_core(
                         )
                     )
 
-        # 5. Persist result on success.
-        if passed:
+        # 5. Persist result on success (CATALOG-18: only in "persist" mode —
+        # "preview" mode leaves the result on screen, materialized later via
+        # POST /runs/{id}/save if the user chooses to).
+        if passed and persist:
             out_id = uuid.uuid4().hex
             if len(docs) == 1:
                 result_title = f"{skill.name} — {docs[0].title}"
@@ -303,13 +314,15 @@ async def _apply_core(
 
         status = "ok" if passed else "failed"
 
-        # 6. Record outcome (normal path).
+        # 6. Record outcome (normal path). ``result_text`` is stored
+        # regardless of ``persist`` so a preview run can still be saved later.
         finish_run(
             db,
             run_id,
             status=status,
             output_doc_id=output_doc_id,
             trace=trace,
+            result_text=last_text,
         )
         done = True
 
@@ -348,6 +361,7 @@ async def _apply_core(
                 status="cancelled",
                 output_doc_id=None,
                 trace=trace,
+                result_text=last_text,
             )
             done = True
         outcome.status = "cancelled"
@@ -364,6 +378,7 @@ async def _apply_core(
                 status="failed",
                 output_doc_id=None,
                 trace=trace,
+                result_text=last_text,
             )
             done = True
         raise
@@ -377,6 +392,7 @@ async def _apply_core(
                 status="failed",
                 output_doc_id=None,
                 trace=trace,
+                result_text=last_text,
             )
             done = True
 
@@ -397,6 +413,7 @@ async def apply_skill(
     session_id: str | None = None,
     run_id: str | None = None,
     provider_name: str = "",
+    persist: bool = True,
 ) -> AsyncIterator[AgentEvent]:
     """Run a skill over one or more documents, streaming :data:`AgentEvent` items.
 
@@ -412,6 +429,10 @@ async def apply_skill(
 
     ``provider_name`` (CATALOG-16) is the resolved provider name surfaced via
     the opening :class:`RunMetaEvent`; empty when unknown.
+
+    ``persist`` (CATALOG-18) selects the output mode: ``True`` (default)
+    auto-creates a ``result_md`` document on success; ``False`` leaves the
+    result on screen only (``result_text`` is still recorded on the run row).
     """
     trace = Trace()
     outcome = _ApplyOutcome()
@@ -428,6 +449,7 @@ async def apply_skill(
         outcome=outcome,
         run_id=run_id,
         provider_name=provider_name,
+        persist=persist,
     ):
         yield event
 
@@ -444,6 +466,7 @@ async def apply_skill_collect(
     session_id: str | None = None,
     run_id: str | None = None,
     provider_name: str = "",
+    persist: bool = True,
 ) -> ApplyResult:
     """Drain :func:`apply_skill` and return the final :class:`ApplyResult`."""
     trace = Trace()
@@ -461,6 +484,7 @@ async def apply_skill_collect(
         outcome=outcome,
         run_id=run_id,
         provider_name=provider_name,
+        persist=persist,
     ):
         pass
     return ApplyResult(

@@ -30,10 +30,16 @@ class ApplyRequest(BaseModel):
     Preferred form: ``doc_ids`` (a list of >=1 document id). For backward
     compatibility a single ``doc_id`` is still accepted and normalized to a
     one-element list. At least one document must be supplied (else 422).
+
+    ``persist`` (CATALOG-18) selects the output mode: ``True`` (default,
+    matching pre-CATALOG-18 behaviour) auto-creates a ``result_md`` document
+    on success ("в док"); ``False`` leaves the result on screen only
+    ("на экран") — it can still be saved later via ``POST /runs/{id}/save``.
     """
 
     doc_ids: list[str] = Field(default_factory=list)
     doc_id: str | None = None
+    persist: bool = True
 
     @model_validator(mode="after")
     def _normalize_doc_ids(self) -> ApplyRequest:
@@ -55,6 +61,8 @@ class RunOut(BaseModel):
     status: str
     # Trace is a JSON array of TraceEntry dicts (see Trace.to_json).
     trace: list | None = None
+    # Raw agent/script output, kept even when persist=False (CATALOG-18).
+    result_text: str | None = None
 
 
 class BuildSkillRequest(BaseModel):
