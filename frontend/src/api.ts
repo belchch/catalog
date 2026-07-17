@@ -148,3 +148,24 @@ export function configureSkill(
     body: JSON.stringify(settings),
   })
 }
+
+export interface SettingsOut {
+  provider: string
+  model: string
+}
+
+export function getSettings(): Promise<SettingsOut> {
+  return jsonFetch<SettingsOut>('/settings')
+}
+
+export function getProviderModels(providerId: string): Promise<ModelOut[]> {
+  return jsonFetch<ModelOut[]>(`/providers/${encodeURIComponent(providerId)}/models`)
+}
+
+export function updateSettings(settings: SettingsOut): Promise<SettingsOut> {
+  return jsonFetch<SettingsOut>('/settings', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(settings),
+  })
+}

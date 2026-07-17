@@ -115,3 +115,17 @@ class ProviderOut(BaseModel):
     id: str
     name: str
     active: bool = False
+
+
+class SettingsOut(BaseModel):
+    """Current runtime provider/model selection (CATALOG-14)."""
+
+    provider: str
+    model: str
+
+
+class SettingsUpdate(BaseModel):
+    """Override the runtime active provider and/or model (CATALOG-14)."""
+
+    provider: str | None = None
+    model: str | None = None

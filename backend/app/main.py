@@ -52,6 +52,11 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     providers = build_providers(settings, http_client)
     app.state.providers = providers
     app.state.provider = select_provider(providers, settings.app_provider)
+    # CATALOG-14: mutable runtime selection of the active provider/model. Seeded
+    # from env (frozen Settings); switchable at runtime via POST /settings. The
+    # frozen Settings remain the source of API keys and the initial default.
+    app.state.active_provider = settings.app_provider or next(iter(providers), "openrouter")
+    app.state.active_model = settings.default_model
     app.state.workspace = settings.workspace_dir
     app.state.tools = build_document_tools(db, settings.workspace_dir)
     app.state.settings = settings

@@ -300,6 +300,53 @@ def test_build_persists_provider_and_reasoning(client, provider, db) -> None:
     assert skill.config.reasoning == "high"
 
 
+def test_get_and_update_settings(client) -> None:
+    """GET/POST /settings read and switch the runtime model (CATALOG-14)."""
+    before = client.get("/settings").json()
+    assert before["model"] == "test/model"
+
+    resp = client.post("/settings", json={"model": "glm-4.6"})
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["model"] == "glm-4.6"
+    # Persisted in app state.
+    assert client.app.state.active_model == "glm-4.6"
+    assert client.get("/settings").json()["model"] == "glm-4.6"
+
+
+def test_update_settings_unknown_provider_404(client) -> None:
+    """Switching to an unconfigured provider is rejected (CATALOG-14)."""
+    resp = client.post("/settings", json={"provider": "does-not-exist"})
+    assert resp.status_code == 404
+
+
+def test_update_settings_switches_active_provider(client) -> None:
+    """POST /settings provider=openrouter resolves the active instance (CATALOG-14)."""
+    providers = client.app.state.providers
+    assert "openrouter" in providers
+    resp = client.post("/settings", json={"provider": "openrouter"})
+    assert resp.status_code == 200, resp.text
+    assert client.app.state.provider is providers["openrouter"]
+
+
+def test_provider_models_endpoint(client, monkeypatch) -> None:
+    """GET /providers/{id}/models lists a specific provider's catalog (CATALOG-14)."""
+    from app.llm.base import ModelInfo
+
+    class _FakeProv:
+        async def list_models(self) -> list[ModelInfo]:
+            return [ModelInfo(id="z-glm", name="Z-GLM", context_length=8192)]
+
+    client.app.state.providers = {**client.app.state.providers, "zfake": _FakeProv()}
+    resp = client.get("/providers/zfake/models")
+    assert resp.status_code == 200, resp.text
+    data = resp.json()
+    assert len(data) == 1
+    assert data[0]["id"] == "z-glm"
+
+    # Unknown provider -> 404.
+    assert client.get("/providers/nope/models").status_code == 404
+
+
 def test_build_skill_invalid_allowed_tools_returns_422(client, provider, db) -> None:
     session_id = client.post("/sessions").json()["id"]
     add_message(db, session_id=session_id, role="user", content="make a skill")

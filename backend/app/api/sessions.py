@@ -21,7 +21,7 @@ from app.agent.registry import ToolRegistry
 from app.api.deps import agent_event_to_frame, get_db
 from app.api.schemas import SessionCreated
 from app.config import Settings
-from app.llm.base import LLMProvider, Message
+from app.llm.base import Message
 from app.llm.log_context import prompt_log_context
 from app.storage.db import Database
 from app.storage.repo_message import add_message, list_messages
@@ -73,7 +73,6 @@ async def session_ws(
     await websocket.accept()
 
     db: Database = websocket.app.state.db
-    provider: LLMProvider = websocket.app.state.provider
     tools: ToolRegistry = websocket.app.state.tools
     settings: Settings = websocket.app.state.settings
 
@@ -94,10 +93,14 @@ async def session_ws(
 
             # Bind the planner session to the prompt-log context so every LLM
             # call inside run_agent is tagged with session_id + purpose.
+            # CATALOG-14: read the runtime active provider/model each turn so a
+            # mid-session UI switch takes effect immediately.
+            provider = websocket.app.state.provider
+            model = getattr(websocket.app.state, "active_model", None) or settings.default_model
             with prompt_log_context(session_id=session_id, purpose="planner"):
                 async for event in run_agent(
                     provider=provider,
-                    model=settings.default_model,
+                    model=model,
                     system_prompt=PLANNER_SYSTEM_PROMPT,
                     messages=messages,
                     tools=tools,

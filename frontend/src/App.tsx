@@ -2,17 +2,20 @@ import { useCallback, useState } from 'react'
 import { buildSkill, createSession, type SkillPreview } from './api.ts'
 import { Chat } from './components/Chat.tsx'
 import { DocumentList } from './components/DocumentList.tsx'
+import { ModelSelector } from './components/ModelSelector.tsx'
 import { RunView } from './components/RunView.tsx'
 import { SkillSettingsModal } from './components/SkillSettingsModal.tsx'
 import { SkillsPanel } from './components/SkillsPanel.tsx'
 import { useDocuments } from './hooks/useDocuments.ts'
 import { usePlannerSession } from './hooks/usePlannerSession.ts'
 import { useRunStream } from './hooks/useRunStream.ts'
+import { useSettings } from './hooks/useSettings.ts'
 import { useSkills } from './hooks/useSkills.ts'
 
 export default function App() {
   const docs = useDocuments()
   const skillsHook = useSkills()
+  const settingsHook = useSettings()
 
   const [sessionId, setSessionId] = useState<string | null>(null)
   const [currentDocId, setCurrentDocId] = useState<string | null>(null)
@@ -80,8 +83,17 @@ export default function App() {
 
   return (
     <div className="flex h-screen flex-col bg-slate-950 text-slate-100">
-      <header className="border-b border-slate-800 px-4 py-2">
+      <header className="flex items-center justify-between border-b border-slate-800 px-4 py-2">
         <h1 className="text-base font-semibold">Catalog — планировщик скиллов</h1>
+        <ModelSelector
+          provider={settingsHook.provider}
+          model={settingsHook.model}
+          providers={settingsHook.providers}
+          models={settingsHook.models}
+          loading={settingsHook.loading}
+          onProviderChange={(p) => void settingsHook.changeProvider(p)}
+          onModelChange={(m) => void settingsHook.changeModel(m)}
+        />
       </header>
       {notice && (
         <div className="bg-slate-800/60 px-4 py-1 text-xs text-slate-300">{notice}</div>
