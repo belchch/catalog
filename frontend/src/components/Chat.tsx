@@ -67,7 +67,13 @@ export function Chat({
           </p>
         )}
         {messages.map((m, i) => (
-          <ChatMessage key={i} message={m} />
+          <ChatMessage
+            key={i}
+            message={m}
+            onRepeat={onSend}
+            streaming={streaming}
+            closed={closed}
+          />
         ))}
         {streaming && (
           <div className="my-2 text-xs text-slate-400">●●● планировщик думает…</div>

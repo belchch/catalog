@@ -1,12 +1,29 @@
 import type { PlannerMessage } from '../hooks/usePlannerSession.ts'
+import { MessageCommands } from './MessageCommands.tsx'
 
-export function ChatMessage({ message }: { message: PlannerMessage }) {
+interface ChatMessageProps {
+  message: PlannerMessage
+  /** Re-send handler for the «Повторить» command under user messages. */
+  onRepeat?: (content: string) => void
+  /** True while a planner response is streaming — blocks «Повторить». */
+  streaming?: boolean
+  /** True when the socket is closed — also blocks «Повторить». */
+  closed?: boolean
+}
+
+export function ChatMessage({ message, onRepeat, streaming, closed }: ChatMessageProps) {
   if (message.role === 'user') {
     return (
-      <div className="my-2 flex justify-end">
+      <div className="my-2 flex flex-col items-end">
         <div className="max-w-[80%] whitespace-pre-wrap rounded-lg bg-indigo-600 px-3 py-2 text-sm text-white">
           {message.content}
         </div>
+        <MessageCommands
+          content={message.content}
+          onRepeat={onRepeat}
+          streaming={streaming}
+          closed={closed}
+        />
       </div>
     )
   }
