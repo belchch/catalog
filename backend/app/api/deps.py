@@ -8,6 +8,9 @@ endpoints.
 
 from __future__ import annotations
 
+import json
+from typing import Any
+
 from fastapi import Request, WebSocket
 
 from app.agent.events import (
@@ -75,7 +78,7 @@ def agent_event_to_frame(event) -> dict | None:
             "id": event.id,
             "name": event.name,
             "ok": event.ok,
-            "result": event.result,
+            "result": _snip_result(event.result),
         }
     if isinstance(event, VerifyEvent):
         return {
@@ -123,3 +126,19 @@ def _snip(s: str | None, limit: int = 400) -> str:
     if len(s) > limit:
         return s[:limit] + "…[truncated]"
     return s
+
+
+def _snip_result(result: Any, limit: int = 400) -> str:
+    """Bound a tool result carried by a ``tool_result`` frame.
+
+    ``result`` may be a free-text error string or a structured tool return
+    value (dict/list, e.g. a ``read_document`` payload). Structured values are
+    serialized to JSON before truncation so a huge document cannot flood the
+    trace feed; the full value is preserved in the trace/prompt-log.
+    """
+    if isinstance(result, str):
+        return _snip(result, limit)
+    try:
+        return _snip(json.dumps(result, ensure_ascii=False, default=str), limit)
+    except (TypeError, ValueError):
+        return _snip(str(result), limit)

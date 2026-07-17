@@ -19,7 +19,7 @@ from app.llm.log_context import prompt_log_context
 from app.skills.apply import apply_skill
 from app.skills.repo_run import create_run, get_run
 from app.skills.repo_skill import get_skill
-from app.llm.factory import provider_for_skill
+from app.llm.factory import provider_for_skill, provider_name_for_skill
 from app.storage.db import Database
 
 router = APIRouter()
@@ -118,12 +118,14 @@ async def run_stream_ws(websocket: WebSocket, run_id: str) -> None:
         providers, provider, skill.config.provider
     )
     # CATALOG-16: the resolved provider name is surfaced via the opening
-    # RunMetaEvent so the trace feed can show *which* provider ran. A pinned
-    # provider wins; otherwise the app's active provider name is used.
-    if skill.config.provider and providers and skill.config.provider in providers:
-        resolved_provider_name = skill.config.provider
-    else:
-        resolved_provider_name = getattr(websocket.app.state, "active_provider", "") or ""
+    # RunMetaEvent so the trace feed can show *which* provider ran. The name
+    # follows the same pin/fallback rule as the provider instance above
+    # (provider_name_for_skill), avoiding a second copy of the condition.
+    resolved_provider_name = provider_name_for_skill(
+        providers,
+        getattr(websocket.app.state, "active_provider", "") or "",
+        skill.config.provider,
+    )
 
     try:
         # Bind run_id/purpose so every log line and prompt-log entry for this

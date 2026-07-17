@@ -65,6 +65,24 @@ def select_provider(
     return next(iter(providers.values()))
 
 
+def provider_name_for_skill(
+    providers: dict[str, LLMProvider] | None,
+    active_name: str,
+    provider_name: str,
+) -> str:
+    """Resolve the provider *name* a skill configured (CATALOG-6/16).
+
+    A skill may pin a specific ``provider`` (chosen in the settings modal). If
+    it names an available provider, that name is returned; otherwise the app's
+    active provider name is returned. This is the single source of truth for
+    the pin/fallback rule — :func:`provider_for_skill` and the run stream both
+    delegate here instead of re-implementing the condition.
+    """
+    if provider_name and providers and provider_name in providers:
+        return provider_name
+    return active_name
+
+
 def provider_for_skill(
     providers: dict[str, LLMProvider] | None,
     active: LLMProvider,
@@ -72,11 +90,12 @@ def provider_for_skill(
 ) -> LLMProvider:
     """Resolve the provider a skill configured (CATALOG-6).
 
-    A skill may pin a specific ``provider`` (chosen in the settings modal). If it
-    names an available provider, that one is used; otherwise the app's active
+    A skill may pin a specific ``provider`` (chosen in the settings modal). If
+    it names an available provider, that one is used; otherwise the app's active
     provider is used (back-compat for skills without a pinned provider, or when
     the named provider is no longer configured).
     """
-    if provider_name and providers and provider_name in providers:
-        return providers[provider_name]
+    name = provider_name_for_skill(providers, "", provider_name)
+    if name and providers and name in providers:
+        return providers[name]
     return active
