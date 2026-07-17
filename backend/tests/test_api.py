@@ -11,6 +11,7 @@ from app.llm.base import CompletionResult, ToolCall
 from app.skills.config import SkillConfig, VerifyCheck, compute_tags
 from app.skills.repo_skill import create_skill, get_skill, update_status
 from app.storage.repo_message import add_message, list_messages
+from app.storage.repo_session import get_session
 
 
 def _completion(
@@ -339,6 +340,100 @@ def test_build_skill_from_session(client, provider, db) -> None:
     assert skill.config.name == "Summarizer"
     assert skill.config.allowed_tools == ["read_document"]
     assert [vc.check for vc in skill.config.verify_checks] == ["non_empty"]
+
+
+def test_edit_skill_starts_session_with_skill_id(client, provider, db) -> None:
+    """POST /skills/{id}/edit creates a session linked to the skill (CATALOG-17)."""
+    skill_id = _seed_committed_skill(db, name="Original")
+
+    resp = client.post(f"/skills/{skill_id}/edit")
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["skill_id"] == skill_id
+    session_id = body["session_id"]
+
+    session = get_session(db, session_id)
+    assert session is not None
+    assert session.skill_id == skill_id
+
+    # The session is seeded with a human-readable dump of the current config
+    # so the planner (and later build_skill) has full context.
+    msgs = list_messages(db, session_id)
+    assert len(msgs) == 1
+    assert "Original" in msgs[0]["content"]
+    assert skill_id in msgs[0]["content"]
+
+
+def test_edit_skill_missing_returns_404(client, db) -> None:
+    resp = client.post("/skills/does-not-exist/edit")
+    assert resp.status_code == 404
+
+
+def test_build_from_edit_session_updates_same_skill_and_drops_to_draft(
+    client, provider, db
+) -> None:
+    """Building from an edit session updates the same skill (CATALOG-17).
+
+    A committed skill drops back to draft after the edit is saved.
+    """
+    skill_id = _seed_committed_skill(db, name="Original")
+
+    session_id = client.post(f"/skills/{skill_id}/edit").json()["session_id"]
+    add_message(db, session_id=session_id, role="user", content="переименуй в Renamed")
+
+    provider.script = [_completion(tool_calls=[_build_skill_call(name="Renamed")])]
+    resp = client.post(f"/sessions/{session_id}/skills")
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["skill_id"] == skill_id  # same id, not a new skill
+
+    skill = get_skill(db, skill_id)
+    assert skill is not None
+    assert skill.id == skill_id
+    assert skill.name == "Renamed"
+    assert skill.config.name == "Renamed"
+    assert skill.status == "draft"  # committed -> draft after save
+
+
+def test_build_from_edit_session_draft_stays_draft(client, provider, db) -> None:
+    """Editing a draft skill keeps it a draft (no forced status change)."""
+    session0 = client.post("/sessions").json()["id"]
+    add_message(db, session_id=session0, role="user", content="make a skill")
+    provider.script = [_completion(tool_calls=[_build_skill_call(name="S")])]
+    skill_id = client.post(f"/sessions/{session0}/skills").json()["skill_id"]
+    assert get_skill(db, skill_id).status == "draft"
+
+    session_id = client.post(f"/skills/{skill_id}/edit").json()["session_id"]
+    add_message(db, session_id=session_id, role="user", content="tweak it")
+    provider.script = [_completion(tool_calls=[_build_skill_call(name="S2")])]
+    resp = client.post(f"/sessions/{session_id}/skills")
+    assert resp.status_code == 200, resp.text
+
+    skill = get_skill(db, skill_id)
+    assert skill is not None
+    assert skill.status == "draft"
+    assert skill.name == "S2"
+
+
+def test_build_without_skill_id_still_creates_new_skill(client, provider, db) -> None:
+    """Regression: a regular (non-edit) session still creates a new skill."""
+    existing_id = _seed_committed_skill(db, name="Existing")
+
+    session_id = client.post("/sessions").json()["id"]
+    add_message(db, session_id=session_id, role="user", content="make a skill")
+    provider.script = [_completion(tool_calls=[_build_skill_call(name="Brand new")])]
+
+    resp = client.post(f"/sessions/{session_id}/skills")
+    assert resp.status_code == 200, resp.text
+    new_skill_id = resp.json()["skill_id"]
+
+    assert new_skill_id != existing_id
+    new_skill = get_skill(db, new_skill_id)
+    assert new_skill is not None
+    assert new_skill.name == "Brand new"
+    # The pre-existing skill is untouched.
+    existing = get_skill(db, existing_id)
+    assert existing is not None
+    assert existing.name == "Existing"
 
 
 def test_configure_skill_updates_model_provider_reasoning(client, provider, db) -> None:

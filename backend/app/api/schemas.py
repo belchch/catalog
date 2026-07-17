@@ -70,6 +70,13 @@ class SessionCreated(BaseModel):
     id: str
 
 
+class EditStarted(BaseModel):
+    """Response of ``POST /skills/{id}/edit`` (CATALOG-17)."""
+
+    session_id: str
+    skill_id: str
+
+
 class RunCreated(BaseModel):
     run_id: str
 

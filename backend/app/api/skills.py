@@ -1,11 +1,16 @@
 """``POST /sessions/{id}/skills`` (build), ``POST /skills/{id}/commit``,
-``GET /skills``.
+``POST /skills/{id}/edit``, ``GET /skills``.
 
 ``build_skill_from_session`` makes a single function-calling LLM turn with a
 ``build_skill`` tool whose schema mirrors :class:`SkillConfig`. The returned
 arguments are validated (``allowed_tools`` must exist in the registry;
 ``verify_checks`` ids must be registered) and retried up to twice with feedback
 before the skill is persisted as ``draft`` (ADR-0004: build at approval).
+
+CATALOG-17: when the build's session was started via ``POST
+/skills/{id}/edit`` (``session.skill_id`` set), the same skill is updated in
+place (``update_skill``) instead of a new one being created — a committed
+skill drops back to ``draft``.
 """
 
 from __future__ import annotations
@@ -15,6 +20,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from app.api.deps import get_db, get_provider, get_settings, get_tools
 from app.api.schemas import (
     CommitOut,
+    EditStarted,
     SkillBuilt,
     SkillConfigureRequest,
     SkillOut,
@@ -26,17 +32,19 @@ from app.llm.log_context import prompt_log_context
 from app.agent.registry import ToolRegistry
 from app.skills.config import SkillConfig, VerifyCheck
 from app.skills.repo_skill import (
+    SkillRecord,
     create_skill,
     get_skill,
     list_skills,
+    update_skill,
     update_status,
     update_skill_config,
 )
 from app.skills.script_runner import ScriptValidationError, validate_script
 from app.skills.verify import registered_checks
 from app.storage.db import Database
-from app.storage.repo_message import list_messages
-from app.storage.repo_session import get_session, update_session_status
+from app.storage.repo_message import add_message, list_messages
+from app.storage.repo_session import create_session, get_session, update_session_status
 
 router = APIRouter()
 
@@ -267,13 +275,36 @@ async def build_skill_from_session(
                 )
                 continue
 
-            skill_id = create_skill(
-                db,
-                name=config.name,
-                description=config.description,
-                config=config,
-                status="draft",
-            )
+            # CATALOG-17: an edit session (``session.skill_id`` set) updates
+            # the existing skill in place instead of creating a new one. A
+            # committed skill drops back to draft (it needs a fresh commit);
+            # a draft edited skill stays draft.
+            session_row = get_session(db, session_id)
+            edit_target = session_row.skill_id if session_row is not None else None
+            if edit_target is not None:
+                existing = get_skill(db, edit_target)
+                if existing is None:
+                    raise HTTPException(
+                        status_code=404, detail="edited skill not found"
+                    )
+                status_override = "draft" if existing.status == "committed" else None
+                update_skill(
+                    db,
+                    edit_target,
+                    name=config.name,
+                    description=config.description,
+                    config=config,
+                    status=status_override,
+                )
+                skill_id = edit_target
+            else:
+                skill_id = create_skill(
+                    db,
+                    name=config.name,
+                    description=config.description,
+                    config=config,
+                    status="draft",
+                )
             update_session_status(db, session_id, "done")
             return skill_id
 
@@ -295,6 +326,68 @@ def _preview(config: SkillConfig) -> SkillPreview:
         input_arity=config.input_arity,
         allowed_tools=list(config.allowed_tools),
     )
+
+
+def _format_skill_for_edit(record: SkillRecord) -> str:
+    """Human-readable dump of a skill's current config for the edit prefill.
+
+    Seeds the planning session so the planner (and, later, ``build_skill``)
+    has the full existing config in context instead of starting from a blank
+    session (CATALOG-17).
+    """
+    config = record.config
+    lines = [
+        f"Редактируем этот скилл: «{record.name}» (id={record.id}, статус={record.status}).",
+        "Текущая конфигурация:",
+        f"- name: {config.name}",
+        f"- description: {config.description}",
+        f"- kind: {config.kind}",
+    ]
+    if config.kind == "script":
+        lines.append(f"- code:\n{config.code}")
+    else:
+        lines.append(f"- system_prompt: {config.system_prompt}")
+        lines.append(f"- allowed_tools: {', '.join(config.allowed_tools) or '(нет)'}")
+        lines.append(f"- model: {config.model}")
+        if config.provider:
+            lines.append(f"- provider: {config.provider}")
+        if config.reasoning:
+            lines.append(f"- reasoning: {config.reasoning}")
+        if config.non_determinism_reason:
+            lines.append(f"- non_determinism_reason: {config.non_determinism_reason}")
+    lines.append(f"- input_arity: {config.input_arity if config.input_arity is not None else 'любое'}")
+    if config.verify_checks:
+        checks = ", ".join(vc.check for vc in config.verify_checks)
+        lines.append(f"- verify_checks: {checks}")
+    lines.append(
+        "Обсуди с пользователем, что нужно изменить, и вызови build_skill "
+        "заново с обновлённой конфигурацией, когда всё согласовано."
+    )
+    return "\n".join(lines)
+
+
+@router.post("/skills/{skill_id}/edit", response_model=EditStarted)
+async def edit_skill_endpoint(
+    skill_id: str, db: Database = Depends(get_db)
+) -> EditStarted:
+    """Start an edit session for an existing skill (CATALOG-17).
+
+    Creates a new planning session linked to the skill (``session.skill_id``)
+    and seeds it with a human-readable dump of the current config, so the
+    planner chat opens already aware of what is being edited. Building from
+    this session updates the same skill instead of creating a new one.
+    """
+    record = get_skill(db, skill_id)
+    if record is None:
+        raise HTTPException(status_code=404, detail="skill not found")
+    session_id = create_session(db, skill_id=skill_id)
+    add_message(
+        db,
+        session_id=session_id,
+        role="assistant",
+        content=_format_skill_for_edit(record),
+    )
+    return EditStarted(session_id=session_id, skill_id=skill_id)
 
 
 @router.post("/sessions/{session_id}/skills", response_model=SkillBuilt)

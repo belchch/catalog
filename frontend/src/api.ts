@@ -34,6 +34,11 @@ export interface SessionCreated {
   id: string
 }
 
+export interface EditStarted {
+  session_id: string
+  skill_id: string
+}
+
 export interface SkillPreview {
   name: string
   description: string | null
@@ -107,6 +112,11 @@ export function createSession(): Promise<SessionCreated> {
 
 export function buildSkill(sessionId: string): Promise<SkillBuilt> {
   return jsonFetch<SkillBuilt>(`/sessions/${sessionId}/skills`, { method: 'POST' })
+}
+
+/** Start an edit session for an existing skill (CATALOG-17). */
+export function startEditSession(skillId: string): Promise<EditStarted> {
+  return jsonFetch<EditStarted>(`/skills/${skillId}/edit`, { method: 'POST' })
 }
 
 export function commitSkill(skillId: string): Promise<CommitOut> {

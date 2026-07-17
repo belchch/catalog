@@ -16,7 +16,8 @@ CREATE TABLE IF NOT EXISTS document(
   created_at TEXT NOT NULL        -- ISO-8601 UTC
 );
 CREATE TABLE IF NOT EXISTS session(
-  id TEXT PRIMARY KEY, status TEXT NOT NULL, created_at TEXT NOT NULL
+  id TEXT PRIMARY KEY, status TEXT NOT NULL, created_at TEXT NOT NULL,
+  skill_id TEXT                    -- nullable; set when editing an existing skill (CATALOG-17)
 );                                -- status: planning|done
 CREATE TABLE IF NOT EXISTS message(
   id INTEGER PRIMARY KEY AUTOINCREMENT, session_id TEXT NOT NULL,
@@ -45,4 +46,5 @@ CREATE TABLE IF NOT EXISTS skill_run(
 # for databases that already have them. Each entry is ``(table, column, ddl)``.
 ADDITIVE_MIGRATIONS: list[tuple[str, str, str]] = [
     ("skill_run", "input_doc_ids", "ALTER TABLE skill_run ADD COLUMN input_doc_ids TEXT"),
+    ("session", "skill_id", "ALTER TABLE session ADD COLUMN skill_id TEXT"),
 ]

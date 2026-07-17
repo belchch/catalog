@@ -22,6 +22,9 @@ interface ChatProps {
   onCancel: () => void
   onCreateSkill: () => void
   buildingSkill: boolean
+  // CATALOG-17: name of the skill being edited, or null for a regular
+  // "build a new skill" session — drives the banner and button label.
+  editingSkillName: string | null
 }
 
 export function Chat({
@@ -35,6 +38,7 @@ export function Chat({
   onCancel,
   onCreateSkill,
   buildingSkill,
+  editingSkillName,
 }: ChatProps) {
   const [input, setInput] = useState('')
   const bottomRef = useRef<HTMLDivElement>(null)
@@ -60,6 +64,11 @@ export function Chat({
 
   return (
     <div className="flex h-full flex-col">
+      {editingSkillName && (
+        <div className="bg-indigo-900/40 px-4 py-1.5 text-xs text-indigo-200">
+          Редактирование: {editingSkillName}
+        </div>
+      )}
       <div className="flex-1 overflow-y-auto px-4 py-3">
         {messages.length === 0 && (
           <p className="mt-8 text-center text-sm text-slate-500">
@@ -131,7 +140,11 @@ export function Chat({
           onClick={onCreateSkill}
           disabled={buildingSkill || messages.length === 0}
         >
-          {buildingSkill ? 'Собираю скилл…' : 'Создать скилл из сессии'}
+          {buildingSkill
+            ? 'Собираю скилл…'
+            : editingSkillName
+              ? 'Сохранить изменения'
+              : 'Создать скилл из сессии'}
         </button>
       </div>
     </div>

@@ -7,9 +7,10 @@ interface SkillsPanelProps {
   documents: DocumentOut[]
   defaultDocId: string | null
   onApply: (skillId: string, docIds: string[]) => void
+  onEdit: (skillId: string, name: string) => void
 }
 
-export function SkillsPanel({ skills, documents, defaultDocId, onApply }: SkillsPanelProps) {
+export function SkillsPanel({ skills, documents, defaultDocId, onApply, onEdit }: SkillsPanelProps) {
   // CATALOG-4: each skill keeps a *list* of selected input documents.
   const [target, setTarget] = useState<Record<string, string[]>>({})
 
@@ -81,6 +82,12 @@ export function SkillsPanel({ skills, documents, defaultDocId, onApply }: Skills
                 <p className="mt-1 text-[11px] text-slate-400">{s.description}</p>
               )}
               <div className="mt-2 flex flex-wrap items-center gap-1.5">
+                <button
+                  className="rounded bg-slate-700 px-2 py-1 text-[11px] text-slate-200"
+                  onClick={() => onEdit(s.id, s.name)}
+                >
+                  Редактировать
+                </button>
                 {s.status === 'draft' && (
                   <button
                     className="rounded bg-slate-700 px-2 py-1 text-[11px] text-slate-200"

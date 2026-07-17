@@ -1,5 +1,5 @@
 import { useCallback, useState } from 'react'
-import { buildSkill, createSession, type SkillPreview } from './api.ts'
+import { buildSkill, createSession, startEditSession, type SkillPreview } from './api.ts'
 import { Chat } from './components/Chat.tsx'
 import { DocumentList } from './components/DocumentList.tsx'
 import { ModelSelector } from './components/ModelSelector.tsx'
@@ -24,6 +24,9 @@ export default function App() {
   const [activeRunId, setActiveRunId] = useState<string | null>(null)
   // CATALOG-6: skill being configured in the pre-save settings modal.
   const [settingsSkill, setSettingsSkill] = useState<{ skillId: string; preview: SkillPreview } | null>(null)
+  // CATALOG-17: set while the chat is editing an existing skill (vs. building
+  // a brand new one) — drives the "Сохранить изменения" button and banner.
+  const [editingSkill, setEditingSkill] = useState<{ skillId: string; name: string } | null>(null)
 
   const planner = usePlannerSession(sessionId)
   const run = useRunStream(activeRunId)
@@ -46,6 +49,18 @@ export default function App() {
     },
     [ensureSession, planner],
   )
+
+  const handleEditSkill = useCallback(async (skillId: string, name: string) => {
+    setNotice(null)
+    try {
+      const started = await startEditSession(skillId)
+      setActiveRunId(null)
+      setSessionId(started.session_id)
+      setEditingSkill({ skillId: started.skill_id, name })
+    } catch (e) {
+      setNotice(e instanceof Error ? e.message : String(e))
+    }
+  }, [])
 
   const handleCreateSkill = useCallback(async () => {
     if (!sessionId) return
@@ -106,6 +121,7 @@ export default function App() {
             documents={docs.documents}
             defaultDocId={currentDocId}
             onApply={handleApply}
+            onEdit={handleEditSkill}
           />
         </aside>
         <main className="overflow-hidden">
@@ -123,6 +139,7 @@ export default function App() {
               onCancel={planner.cancel}
               onCreateSkill={handleCreateSkill}
               buildingSkill={buildingSkill}
+              editingSkillName={editingSkill?.name ?? null}
             />
           )}
         </main>
@@ -136,6 +153,7 @@ export default function App() {
             // Refresh even on cancel so the created draft appears in the list.
             void skillsHook.refresh()
             setSettingsSkill(null)
+            setEditingSkill(null)
           }}
         />
       )}

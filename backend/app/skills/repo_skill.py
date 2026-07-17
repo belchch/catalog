@@ -123,6 +123,45 @@ def list_skills(db: Database, status: str | None = None) -> list[dict]:
     return result
 
 
+def update_skill(
+    db: Database,
+    skill_id: str,
+    *,
+    name: str,
+    description: str,
+    config: SkillConfig,
+    status: str | None = None,
+) -> SkillRecord | None:
+    """Fully overwrite name/description/config on an existing skill (CATALOG-17 edit).
+
+    Unlike :func:`update_skill_config` (a narrow model/provider/reasoning
+    override for the settings modal), this replaces the whole frozen config —
+    the counterpart of :func:`create_skill` for the "edit an existing skill"
+    flow. ``status`` is only applied when given (edit-after-committed drops
+    back to ``draft``; a draft-edited skill stays draft). Returns ``None`` if
+    the skill does not exist.
+    """
+    record = get_skill(db, skill_id)
+    if record is None:
+        return None
+    new_status = status if status is not None else record.status
+    now = _now_iso()
+    with db.connect() as conn:
+        conn.execute(
+            "UPDATE skill SET name = ?, description = ?, config_json = ?, "
+            "status = ?, updated_at = ? WHERE id = ?",
+            (name, description, config.to_json(), new_status, now, skill_id),
+        )
+    return replace(
+        record,
+        name=name,
+        description=description,
+        config=config,
+        status=new_status,
+        updated_at=now,
+    )
+
+
 def update_status(db: Database, skill_id: str, status: str) -> None:
     """Transition a skill's status (e.g. ``draft`` -> ``committed``)."""
     now = _now_iso()
