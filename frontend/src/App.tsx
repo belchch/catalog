@@ -117,7 +117,11 @@ export default function App() {
           skillId={settingsSkill.skillId}
           preview={settingsSkill.preview}
           onSave={handleSkillConfigured}
-          onClose={() => setSettingsSkill(null)}
+          onClose={() => {
+            // Refresh even on cancel so the created draft appears in the list.
+            void skillsHook.refresh()
+            setSettingsSkill(null)
+          }}
         />
       )}
     </div>

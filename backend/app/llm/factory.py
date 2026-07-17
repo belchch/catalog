@@ -63,3 +63,20 @@ def select_provider(
         return providers["openrouter"]
     # Defensive: should not happen (openrouter is always created).
     return next(iter(providers.values()))
+
+
+def provider_for_skill(
+    providers: dict[str, LLMProvider] | None,
+    active: LLMProvider,
+    provider_name: str,
+) -> LLMProvider:
+    """Resolve the provider a skill configured (CATALOG-6).
+
+    A skill may pin a specific ``provider`` (chosen in the settings modal). If it
+    names an available provider, that one is used; otherwise the app's active
+    provider is used (back-compat for skills without a pinned provider, or when
+    the named provider is no longer configured).
+    """
+    if provider_name and providers and provider_name in providers:
+        return providers[provider_name]
+    return active

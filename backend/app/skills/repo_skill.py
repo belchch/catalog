@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import sqlite3
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 
 from app.skills.config import SkillConfig, compute_tags
@@ -163,4 +163,5 @@ def update_skill_config(
             "UPDATE skill SET config_json = ?, updated_at = ? WHERE id = ?",
             (config.to_json(), now, skill_id),
         )
-    return get_skill(db, skill_id)
+    # Reflect the mutation in-memory rather than re-reading the row.
+    return replace(record, config=config, updated_at=now)

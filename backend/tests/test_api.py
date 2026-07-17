@@ -267,6 +267,39 @@ def test_list_providers_endpoint(client) -> None:
     assert any(p["active"] for p in data)
 
 
+def test_provider_for_skill_resolves_pinned_provider() -> None:
+    """A skill's pinned provider is used at apply; unknown/empty falls back (CATALOG-6)."""
+    from app.llm.factory import provider_for_skill
+
+    active = object()
+    zai = object()
+    providers = {"openrouter": object(), "zai": zai}
+
+    assert provider_for_skill(providers, active, "zai") is zai
+    # Empty provider name -> active provider.
+    assert provider_for_skill(providers, active, "") is active
+    # Unknown provider name -> active provider (graceful fallback).
+    assert provider_for_skill(providers, active, "nope") is active
+    # No providers dict -> active provider.
+    assert provider_for_skill(None, active, "zai") is active
+
+
+def test_build_persists_provider_and_reasoning(client, provider, db) -> None:
+    """Build carries provider/reasoning from the model's tool args (CATALOG-6)."""
+    session_id = client.post("/sessions").json()["id"]
+    add_message(db, session_id=session_id, role="user", content="make a skill")
+    call = _build_skill_call(name="S")
+    call.arguments["provider"] = "zai"
+    call.arguments["reasoning"] = "high"
+    provider.script = [_completion(tool_calls=[call])]
+
+    skill_id = client.post(f"/sessions/{session_id}/skills").json()["skill_id"]
+    skill = get_skill(db, skill_id)
+    assert skill is not None
+    assert skill.config.provider == "zai"
+    assert skill.config.reasoning == "high"
+
+
 def test_build_skill_invalid_allowed_tools_returns_422(client, provider, db) -> None:
     session_id = client.post("/sessions").json()["id"]
     add_message(db, session_id=session_id, role="user", content="make a skill")

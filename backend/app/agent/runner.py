@@ -115,8 +115,8 @@ async def _run_agent_core(
                     reasoning_parts.append(delta.reasoning)
             # Stream mode does not parse tool_calls from SSE in this slice;
             # the run finishes at end of stream.
-            reasoning = "".join(reasoning_parts) or None
-            trace.entries[-1].data = {"content": text, "reasoning": reasoning}
+            reasoning_text = "".join(reasoning_parts) or None
+            trace.entries[-1].data = {"content": text, "reasoning": reasoning_text}
             history.append(Message(role="assistant", content=text))
             finish_stream = FinishEvent(text, "stop", capped=False, usage={})
             yield finish_stream
