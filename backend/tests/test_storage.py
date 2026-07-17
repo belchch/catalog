@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 
 from app.documents.extract import extract_text
-from app.documents.ingest import ingest_file
+from app.documents.ingest import ingest_file, slugify
 from app.documents.tools import build_document_tools
 from app.storage.db import Database
 from app.storage.repo_document import (
@@ -83,8 +83,8 @@ def test_ingest_md_and_read(db: Database, tmp_path: Path) -> None:
     row = ingest_file(db, tmp_path, filename="note.md", content=b"# Hello\nworld")
     assert row.kind == "md"
     assert row.title == "note"
-    # Row id and on-disk filename agree (single source of truth).
-    assert row.path == f"documents/{row.id}.md"
+    # On-disk filename is a readable slug plus the id's short suffix.
+    assert row.path == f"documents/note-{row.id[:8]}.md"
     # File written verbatim.
     assert (tmp_path / row.path).read_bytes() == b"# Hello\nworld"
 
@@ -106,7 +106,7 @@ def test_ingest_docx_and_read(db: Database, tmp_path: Path) -> None:
     row = ingest_file(db, tmp_path, filename="report.docx", content=content)
     assert row.kind == "docx"
     assert row.title == "report"
-    assert row.path == f"documents/{row.id}.docx"
+    assert row.path == f"documents/report-{row.id[:8]}.docx"
 
     text = extract_text(str(tmp_path / row.path), row.kind)
     assert text == "First paragraph\nSecond paragraph"
@@ -115,6 +115,63 @@ def test_ingest_docx_and_read(db: Database, tmp_path: Path) -> None:
 def test_unsupported_format_raises(db: Database, tmp_path: Path) -> None:
     with pytest.raises(ValueError):
         ingest_file(db, tmp_path, filename="file.pdf", content=b"%PDF-1.4")
+
+
+def test_slugify_transliterates_cyrillic() -> None:
+    assert slugify("Пример Документ") == "primer-dokument"
+
+
+def test_slugify_sanitizes_spaces_and_special_chars() -> None:
+    assert slugify("  My File!! (v2).final  ") == "my-file-v2-final"
+
+
+def test_slugify_empty_or_blank_returns_empty() -> None:
+    assert slugify("") == ""
+    assert slugify("   ") == ""
+    assert slugify("---") == ""
+
+
+def test_slugify_caps_length() -> None:
+    long_name = "a" * 100
+    slug = slugify(long_name)
+    assert len(slug) <= 60
+
+
+def test_ingest_cyrillic_filename_uses_readable_slug(db: Database, tmp_path: Path) -> None:
+    row = ingest_file(
+        db, tmp_path, filename="Пример Документ.md", content=b"content"
+    )
+    assert row.title == "Пример Документ"
+    assert row.path == f"documents/primer-dokument-{row.id[:8]}.md"
+    assert (tmp_path / row.path).read_bytes() == b"content"
+
+
+def test_ingest_blank_filename_falls_back_to_doc_id(db: Database, tmp_path: Path) -> None:
+    row = ingest_file(db, tmp_path, filename="   .md", content=b"content")
+    assert row.path == f"documents/{row.id}.md"
+    assert (tmp_path / row.path).read_bytes() == b"content"
+
+
+def test_ingest_path_id_prefix_matches_row_id(db: Database, tmp_path: Path) -> None:
+    row = ingest_file(db, tmp_path, filename="Отчёт по продажам.md", content=b"x")
+    stem = row.path.removeprefix("documents/").removesuffix(".md")
+    assert stem.endswith(row.id[:8])
+    assert row.id.startswith(row.id[:8])
+
+
+def test_ingest_docx_extension_still_validated(db: Database, tmp_path: Path) -> None:
+    import docx
+
+    doc = docx.Document()
+    doc.add_paragraph("Текст")
+    src = tmp_path / "src.docx"
+    doc.save(str(src))
+
+    row = ingest_file(
+        db, tmp_path, filename="Годовой отчёт.docx", content=src.read_bytes()
+    )
+    assert row.kind == "docx"
+    assert row.path == f"documents/godovoy-otchyot-{row.id[:8]}.docx"
 
 
 def test_read_unknown_doc_error(db: Database, tmp_path: Path) -> None:
