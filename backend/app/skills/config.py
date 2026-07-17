@@ -61,6 +61,12 @@ class SkillConfig:
     # ``None`` for an arbitrary-length list. ``None`` (the default) keeps the
     # legacy "any number >= 1" behaviour, so old configs deserialize unchanged.
     input_arity: int | None = None
+    # LLM provider name for this skill (CATALOG-6), e.g. ``"openrouter"`` or
+    # ``"zai"``. Empty = the app's active provider (back-compat default).
+    provider: str = ""
+    # Selected reasoning variant (CATALOG-6), e.g. ``"low"``/``"medium"``/
+    # ``"high"`` for a reasoning-capable model. Empty = no explicit reasoning.
+    reasoning: str = ""
 
     def to_json(self) -> str:
         """Serialize to a JSON string (stable, utf-8 friendly)."""
@@ -83,6 +89,8 @@ class SkillConfig:
                 "code": self.code,
                 "non_determinism_reason": self.non_determinism_reason,
                 "input_arity": self.input_arity,
+                "provider": self.provider,
+                "reasoning": self.reasoning,
             },
             ensure_ascii=False,
         )
@@ -116,6 +124,8 @@ class SkillConfig:
             code=data.get("code", ""),
             non_determinism_reason=data.get("non_determinism_reason", ""),
             input_arity=data.get("input_arity"),
+            provider=data.get("provider", ""),
+            reasoning=data.get("reasoning", ""),
         )
 
 

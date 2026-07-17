@@ -13,13 +13,25 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, HTTPException
 
 from app.api.deps import get_db, get_provider, get_settings, get_tools
-from app.api.schemas import CommitOut, SkillBuilt, SkillOut
+from app.api.schemas import (
+    CommitOut,
+    SkillBuilt,
+    SkillConfigureRequest,
+    SkillOut,
+    SkillPreview,
+)
 from app.config import Settings
 from app.llm.base import LLMProvider, Message, ToolSpec
 from app.llm.log_context import prompt_log_context
 from app.agent.registry import ToolRegistry
 from app.skills.config import SkillConfig, VerifyCheck
-from app.skills.repo_skill import create_skill, get_skill, list_skills, update_status
+from app.skills.repo_skill import (
+    create_skill,
+    get_skill,
+    list_skills,
+    update_status,
+    update_skill_config,
+)
 from app.skills.script_runner import ScriptValidationError, validate_script
 from app.skills.verify import registered_checks
 from app.storage.db import Database
@@ -146,6 +158,8 @@ def _args_to_config(args: dict, default_model: str) -> SkillConfig:
         code=args.get("code") or "",
         non_determinism_reason=args.get("non_determinism_reason") or "",
         input_arity=args.get("input_arity"),
+        provider=args.get("provider") or "",
+        reasoning=args.get("reasoning") or "",
     )
 
 
@@ -264,6 +278,20 @@ async def build_skill_from_session(
     )
 
 
+def _preview(config: SkillConfig) -> SkillPreview:
+    """Build the :class:`SkillPreview` shown in the settings modal (CATALOG-6)."""
+    return SkillPreview(
+        name=config.name,
+        description=config.description,
+        kind=config.kind,
+        model=config.model,
+        provider=config.provider,
+        reasoning=config.reasoning,
+        input_arity=config.input_arity,
+        allowed_tools=list(config.allowed_tools),
+    )
+
+
 @router.post("/sessions/{session_id}/skills", response_model=SkillBuilt)
 async def build_skill_endpoint(
     session_id: str,
@@ -281,7 +309,42 @@ async def build_skill_endpoint(
         settings=settings,
         session_id=session_id,
     )
-    return SkillBuilt(skill_id=skill_id)
+    record = get_skill(db, skill_id)
+    assert record is not None  # just created
+    # CATALOG-6: return a preview so the UI opens the settings modal before
+    # the user commits, instead of silently dropping a draft.
+    return SkillBuilt(skill_id=skill_id, config=_preview(record.config))
+
+
+@router.patch("/skills/{skill_id}/configure", response_model=SkillBuilt)
+async def configure_skill_endpoint(
+    skill_id: str,
+    req: SkillConfigureRequest,
+    db: Database = Depends(get_db),
+) -> SkillBuilt:
+    """Apply the user's model/provider/reasoning choices from the settings modal.
+
+    Only fields the user changed are overridden; the rest of the frozen config
+    is preserved. The skill must still be a draft (CATALOG-6: configure before
+    commit).
+    """
+    skill = get_skill(db, skill_id)
+    if skill is None:
+        raise HTTPException(status_code=404, detail="skill not found")
+    if skill.status != "draft":
+        raise HTTPException(
+            status_code=409,
+            detail="skill can only be configured while in draft",
+        )
+    updated = update_skill_config(
+        db,
+        skill_id,
+        model=req.model,
+        provider=req.provider,
+        reasoning=req.reasoning,
+    )
+    assert updated is not None
+    return SkillBuilt(skill_id=skill_id, config=_preview(updated.config))
 
 
 @router.post("/skills/{skill_id}/commit", response_model=CommitOut)

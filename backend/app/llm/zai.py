@@ -26,12 +26,26 @@ from app.llm.openai_compatible import OpenAICompatibleProvider
 
 # Hardcoded GLM model catalog (z.ai /models is unreliable). Context lengths
 # are the documented maximums; update here when z.ai ships new models.
+# GLM "thinking"/"X" models expose an explicit reasoning mode (CATALOG-6).
+_REASONING_VARIANTS = ["low", "medium", "high"]
 _ZAI_MODELS: list[ModelInfo] = [
-    ModelInfo(id="glm-4.6", name="GLM-4.6", context_length=131072),
+    ModelInfo(
+        id="glm-4.6",
+        name="GLM-4.6",
+        context_length=131072,
+        supports_reasoning=True,
+        reasoning_variants=list(_REASONING_VARIANTS),
+    ),
     ModelInfo(id="glm-4.5", name="GLM-4.5", context_length=131072),
     ModelInfo(id="glm-4.5-air", name="GLM-4.5-Air", context_length=131072),
     ModelInfo(id="glm-4.5-flash", name="GLM-4.5-Flash", context_length=131072),
-    ModelInfo(id="glm-4.5-x", name="GLM-4.5-X", context_length=131072),
+    ModelInfo(
+        id="glm-4.5-x",
+        name="GLM-4.5-X",
+        context_length=131072,
+        supports_reasoning=True,
+        reasoning_variants=list(_REASONING_VARIANTS),
+    ),
     ModelInfo(id="glm-4-plus", name="GLM-4-Plus", context_length=131072),
 ]
 

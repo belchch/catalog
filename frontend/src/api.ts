@@ -34,8 +34,34 @@ export interface SessionCreated {
   id: string
 }
 
+export interface SkillPreview {
+  name: string
+  description: string | null
+  kind: string
+  model: string
+  provider: string
+  reasoning: string
+  input_arity: number | null
+  allowed_tools: string[]
+}
+
 export interface SkillBuilt {
   skill_id: string
+  config: SkillPreview
+}
+
+export interface ModelOut {
+  id: string
+  name: string
+  context_length: number | null
+  supports_reasoning: boolean
+  reasoning_variants: string[]
+}
+
+export interface ProviderOut {
+  id: string
+  name: string
+  active: boolean
 }
 
 export interface CommitOut {
@@ -102,4 +128,23 @@ export function applySkill(skillId: string, docIds: string[]): Promise<RunCreate
 
 export function getRun(runId: string): Promise<RunOut> {
   return jsonFetch<RunOut>(`/runs/${runId}`)
+}
+
+export function listModels(): Promise<ModelOut[]> {
+  return jsonFetch<ModelOut[]>('/models')
+}
+
+export function listProviders(): Promise<ProviderOut[]> {
+  return jsonFetch<ProviderOut[]>('/providers')
+}
+
+export function configureSkill(
+  skillId: string,
+  settings: { model?: string; provider?: string; reasoning?: string },
+): Promise<SkillBuilt> {
+  return jsonFetch<SkillBuilt>(`/skills/${skillId}/configure`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(settings),
+  })
 }

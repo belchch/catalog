@@ -80,6 +80,7 @@ class FakeProvider:
         tools: list[ToolSpec] | None = None,
         temperature: float = 0.0,
         tool_choice: str = "auto",
+        reasoning: str = "",
     ) -> CompletionResult:
         return self.script.pop(0)
 
@@ -89,6 +90,7 @@ class FakeProvider:
         messages: list[Message],
         tools: list[ToolSpec] | None = None,
         temperature: float = 0.0,
+        reasoning: str = "",
     ) -> Any:
         for chunk in self.stream_script:
             yield StreamDelta(content=chunk)

@@ -180,7 +180,11 @@ def test_build_skill_from_session(client, provider, db) -> None:
 
     resp = client.post(f"/sessions/{session_id}/skills")
     assert resp.status_code == 200, resp.text
-    skill_id = resp.json()["skill_id"]
+    body = resp.json()
+    skill_id = body["skill_id"]
+    # CATALOG-6: build returns a preview config for the settings modal.
+    assert body["config"]["name"] == "Summarizer"
+    assert body["config"]["model"] == "test/model"
 
     skill = get_skill(db, skill_id)
     assert skill is not None
@@ -188,6 +192,79 @@ def test_build_skill_from_session(client, provider, db) -> None:
     assert skill.config.name == "Summarizer"
     assert skill.config.allowed_tools == ["read_document"]
     assert [vc.check for vc in skill.config.verify_checks] == ["non_empty"]
+
+
+def test_configure_skill_updates_model_provider_reasoning(client, provider, db) -> None:
+    """PATCH /skills/{id}/configure overrides model/provider/reasoning (CATALOG-6)."""
+    session_id = client.post("/sessions").json()["id"]
+    add_message(db, session_id=session_id, role="user", content="make a skill")
+    provider.script = [_completion(tool_calls=[_build_skill_call(name="S")])]
+
+    skill_id = client.post(f"/sessions/{session_id}/skills").json()["skill_id"]
+
+    resp = client.patch(
+        f"/skills/{skill_id}/configure",
+        json={"model": "glm-4.6", "provider": "zai", "reasoning": "high"},
+    )
+    assert resp.status_code == 200, resp.text
+    cfg = resp.json()["config"]
+    assert cfg["model"] == "glm-4.6"
+    assert cfg["provider"] == "zai"
+    assert cfg["reasoning"] == "high"
+
+    # Persisted in config_json.
+    skill = get_skill(db, skill_id)
+    assert skill is not None
+    assert skill.config.model == "glm-4.6"
+    assert skill.config.provider == "zai"
+    assert skill.config.reasoning == "high"
+
+
+def test_configure_skill_requires_draft(client, provider, db) -> None:
+    """Configure is rejected (409) once the skill is committed."""
+    session_id = client.post("/sessions").json()["id"]
+    add_message(db, session_id=session_id, role="user", content="make a skill")
+    provider.script = [_completion(tool_calls=[_build_skill_call(name="S")])]
+    skill_id = client.post(f"/sessions/{session_id}/skills").json()["skill_id"]
+    update_status(db, skill_id, "committed")
+
+    resp = client.patch(f"/skills/{skill_id}/configure", json={"model": "other"})
+    assert resp.status_code == 409
+
+
+def test_list_models_endpoint(client, provider, monkeypatch) -> None:
+    """GET /models returns the active provider catalog with reasoning info."""
+    from app.llm.base import ModelInfo
+
+    async def _models() -> list[ModelInfo]:
+        return [
+            ModelInfo(
+                id="glm-4.6",
+                name="GLM-4.6",
+                context_length=131072,
+                supports_reasoning=True,
+                reasoning_variants=["low", "medium", "high"],
+            )
+        ]
+
+    monkeypatch.setattr(provider, "list_models", _models)
+    resp = client.get("/models")
+    assert resp.status_code == 200, resp.text
+    data = resp.json()
+    assert len(data) == 1
+    assert data[0]["id"] == "glm-4.6"
+    assert data[0]["supports_reasoning"] is True
+    assert data[0]["reasoning_variants"] == ["low", "medium", "high"]
+
+
+def test_list_providers_endpoint(client) -> None:
+    """GET /providers returns at least one provider, the active one flagged."""
+    resp = client.get("/providers")
+    assert resp.status_code == 200, resp.text
+    data = resp.json()
+    assert isinstance(data, list)
+    assert len(data) >= 1
+    assert any(p["active"] for p in data)
 
 
 def test_build_skill_invalid_allowed_tools_returns_422(client, provider, db) -> None:

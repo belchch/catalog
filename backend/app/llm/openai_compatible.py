@@ -200,6 +200,7 @@ class OpenAICompatibleProvider:
         tools: list[ToolSpec] | None = None,
         temperature: float = 0.0,
         tool_choice: str = "auto",
+        reasoning: str = "",
     ) -> CompletionResult:
         body: dict[str, Any] = {
             "model": model,
@@ -209,6 +210,11 @@ class OpenAICompatibleProvider:
         if tools is not None:
             body["tools"] = tool_specs_to_dicts(tools)
             body["tool_choice"] = tool_choice
+        # CATALOG-6: propagate the selected reasoning variant into the request.
+        # OpenRouter convention ``reasoning: {"effort": ...}``; harmless for
+        # providers that ignore it (e.g. z.ai, where reasoning is model-driven).
+        if reasoning:
+            body["reasoning"] = {"effort": reasoning}
 
         logger.info(
             "complete request: model=%s messages=%d tools=%s temperature=%.1f",
@@ -325,6 +331,7 @@ class OpenAICompatibleProvider:
         messages: list[Message],
         tools: list[ToolSpec] | None = None,
         temperature: float = 0.0,
+        reasoning: str = "",
     ) -> AsyncIterator[StreamDelta]:
         body: dict[str, Any] = {
             "model": model,
@@ -334,6 +341,8 @@ class OpenAICompatibleProvider:
         }
         if tools is not None:
             body["tools"] = tool_specs_to_dicts(tools)
+        if reasoning:
+            body["reasoning"] = {"effort": reasoning}
 
         logger.info(
             "stream_complete request: model=%s messages=%d tools=%s temperature=%.1f",

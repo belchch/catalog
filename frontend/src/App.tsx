@@ -1,8 +1,9 @@
 import { useCallback, useState } from 'react'
-import { buildSkill, createSession } from './api.ts'
+import { buildSkill, createSession, type SkillPreview } from './api.ts'
 import { Chat } from './components/Chat.tsx'
 import { DocumentList } from './components/DocumentList.tsx'
 import { RunView } from './components/RunView.tsx'
+import { SkillSettingsModal } from './components/SkillSettingsModal.tsx'
 import { SkillsPanel } from './components/SkillsPanel.tsx'
 import { useDocuments } from './hooks/useDocuments.ts'
 import { usePlannerSession } from './hooks/usePlannerSession.ts'
@@ -18,6 +19,8 @@ export default function App() {
   const [buildingSkill, setBuildingSkill] = useState(false)
   const [notice, setNotice] = useState<string | null>(null)
   const [activeRunId, setActiveRunId] = useState<string | null>(null)
+  // CATALOG-6: skill being configured in the pre-save settings modal.
+  const [settingsSkill, setSettingsSkill] = useState<{ skillId: string; preview: SkillPreview } | null>(null)
 
   const planner = usePlannerSession(sessionId)
   const run = useRunStream(activeRunId)
@@ -46,15 +49,21 @@ export default function App() {
     setBuildingSkill(true)
     setNotice(null)
     try {
-      await buildSkill(sessionId)
-      await skillsHook.refresh()
-      setNotice('Скилл создан (draft). Сделайте коммит, затем примените к документу.')
+      const built = await buildSkill(sessionId)
+      // CATALOG-6: open the settings modal with the preview config instead of
+      // silently dropping the draft — the user finalizes model/provider/reasoning.
+      setSettingsSkill({ skillId: built.skill_id, preview: built.config })
     } catch (e) {
       setNotice(e instanceof Error ? e.message : String(e))
     } finally {
       setBuildingSkill(false)
     }
-  }, [sessionId, skillsHook])
+  }, [sessionId])
+
+  const handleSkillConfigured = useCallback(async () => {
+    await skillsHook.refresh()
+    setNotice('Скилл настроен (draft). Сделайте коммит, затем примените к документу.')
+  }, [skillsHook])
 
   const handleApply = useCallback(
     async (skillId: string, docIds: string[]) => {
@@ -103,6 +112,14 @@ export default function App() {
           )}
         </main>
       </div>
+      {settingsSkill && (
+        <SkillSettingsModal
+          skillId={settingsSkill.skillId}
+          preview={settingsSkill.preview}
+          onSave={handleSkillConfigured}
+          onClose={() => setSettingsSkill(null)}
+        />
+      )}
     </div>
   )
 }

@@ -27,7 +27,7 @@ import httpx
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api import documents, runs, sessions, skills
+from app.api import documents, models, runs, sessions, skills
 from app.config import Settings, get_settings
 from app.documents.tools import build_document_tools
 from app.llm.factory import build_providers, select_provider
@@ -76,6 +76,7 @@ app.include_router(documents.router)
 app.include_router(sessions.router)
 app.include_router(skills.router)
 app.include_router(runs.router)
+app.include_router(models.router)
 
 
 @app.get("/health")

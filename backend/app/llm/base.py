@@ -34,6 +34,10 @@ class ModelInfo:
     id: str
     name: str
     context_length: int | None = None
+    # Whether the model supports an explicit reasoning/"thinking" mode, and the
+    # selectable variants (CATALOG-6). Empty list when unknown/not applicable.
+    supports_reasoning: bool = False
+    reasoning_variants: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -72,6 +76,7 @@ class LLMProvider(Protocol):
         tools: list[ToolSpec] | None = None,
         temperature: float = 0.0,
         tool_choice: str = "auto",
+        reasoning: str = "",
     ) -> CompletionResult: ...
 
     async def stream_complete(
@@ -80,6 +85,7 @@ class LLMProvider(Protocol):
         messages: list[Message],
         tools: list[ToolSpec] | None = None,
         temperature: float = 0.0,
+        reasoning: str = "",
     ) -> AsyncIterator[StreamDelta]: ...
 
 

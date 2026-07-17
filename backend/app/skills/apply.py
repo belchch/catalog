@@ -205,6 +205,7 @@ async def _apply_core(
                     max_iterations=skill.max_iterations,
                     use_stream=False,
                     trace=trace,
+                    reasoning=skill.reasoning,
                 ):
                     yield event
                     # Inner agent events are already logged by _run_agent_core

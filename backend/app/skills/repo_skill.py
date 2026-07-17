@@ -131,3 +131,36 @@ def update_status(db: Database, skill_id: str, status: str) -> None:
             "UPDATE skill SET status = ?, updated_at = ? WHERE id = ?",
             (status, now, skill_id),
         )
+
+
+def update_skill_config(
+    db: Database,
+    skill_id: str,
+    *,
+    model: str | None = None,
+    provider: str | None = None,
+    reasoning: str | None = None,
+) -> SkillRecord | None:
+    """Override selected config fields and persist (CATALOG-6 settings modal).
+
+    Only the arguments that are not ``None`` are applied; the rest of the
+    frozen config is preserved. Returns the updated record (or ``None`` if the
+    skill does not exist). Intended for ``draft`` skills before commit.
+    """
+    record = get_skill(db, skill_id)
+    if record is None:
+        return None
+    config = record.config
+    if model is not None:
+        config.model = model
+    if provider is not None:
+        config.provider = provider
+    if reasoning is not None:
+        config.reasoning = reasoning
+    now = _now_iso()
+    with db.connect() as conn:
+        conn.execute(
+            "UPDATE skill SET config_json = ?, updated_at = ? WHERE id = ?",
+            (config.to_json(), now, skill_id),
+        )
+    return get_skill(db, skill_id)

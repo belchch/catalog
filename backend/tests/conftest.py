@@ -62,12 +62,14 @@ class FakeProvider:
         tools: list[ToolSpec] | None = None,
         temperature: float = 0.0,
         tool_choice: str = "auto",
+        reasoning: str = "",
     ) -> CompletionResult:
         self.requests.append(
             {
                 "model": model,
                 "tools": [t.name for t in tools] if tools else None,
                 "n_messages": len(messages),
+                "reasoning": reasoning,
             }
         )
         if not self.script:
@@ -80,6 +82,7 @@ class FakeProvider:
         messages: list[Message],
         tools: list[ToolSpec] | None = None,
         temperature: float = 0.0,
+        reasoning: str = "",
     ) -> Any:
         yield StreamDelta(content="")
 

@@ -76,3 +76,42 @@ class RunCreated(BaseModel):
 
 class SkillBuilt(BaseModel):
     skill_id: str
+    # Preview of the generated config so the UI can populate the settings
+    # modal before the user finalizes (CATALOG-6).
+    config: SkillPreview
+
+
+class SkillPreview(BaseModel):
+    name: str
+    description: str | None = None
+    kind: str = "agent"
+    model: str
+    provider: str = ""
+    reasoning: str = ""
+    input_arity: int | None = None
+    allowed_tools: list[str] = Field(default_factory=list)
+
+
+class SkillConfigureRequest(BaseModel):
+    """User adjustments applied in the pre-save settings modal (CATALOG-6).
+
+    Only the supplied fields are overridden; the rest of the config is kept.
+    """
+
+    model: str | None = None
+    provider: str | None = None
+    reasoning: str | None = None
+
+
+class ModelOut(BaseModel):
+    id: str
+    name: str
+    context_length: int | None = None
+    supports_reasoning: bool = False
+    reasoning_variants: list[str] = Field(default_factory=list)
+
+
+class ProviderOut(BaseModel):
+    id: str
+    name: str
+    active: bool = False

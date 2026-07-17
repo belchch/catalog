@@ -87,6 +87,37 @@ def test_complete_collects_reasoning_content() -> None:
 
 
 # --------------------------------------------------------------------------- #
+# complete — reasoning variant reaches the request body (CATALOG-6)
+# --------------------------------------------------------------------------- #
+
+
+def test_complete_sends_reasoning_variant_in_body() -> None:
+    async def _handler(request: httpx.Request) -> httpx.Response:
+        body = json.loads(request.content)
+        # The selected reasoning variant must reach the provider request body.
+        assert body["reasoning"] == {"effort": "high"}
+        return httpx.Response(
+            200,
+            json={
+                "choices": [
+                    {"message": {"role": "assistant", "content": "ok"}, "finish_reason": "stop"}
+                ],
+                "usage": {},
+            },
+        )
+
+    async def _run() -> None:
+        provider = _make_provider(_handler)
+        await provider.complete(
+            model="m",
+            messages=[Message(role="user", content="hi")],
+            reasoning="high",
+        )
+
+    asyncio.run(_run())
+
+
+# --------------------------------------------------------------------------- #
 # complete — tool_calls parsing
 # --------------------------------------------------------------------------- #
 

@@ -48,6 +48,7 @@ class _GoldenProvider:
         tools: list[ToolSpec] | None = None,
         temperature: float = 0.0,
         tool_choice: str = "auto",
+        reasoning: str = "",
     ) -> CompletionResult:
         self.calls += 1
         if self.calls == 1:
@@ -112,6 +113,7 @@ class _GoldenProvider:
         messages: list[Message],
         tools: list[ToolSpec] | None = None,
         temperature: float = 0.0,
+        reasoning: str = "",
     ) -> Any:
         yield StreamDelta(content="")
 

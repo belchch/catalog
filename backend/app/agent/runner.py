@@ -82,6 +82,7 @@ async def _run_agent_core(
     max_iterations: int,
     use_stream: bool,
     trace: Trace,
+    reasoning: str = "",
 ) -> AsyncIterator[AgentEvent]:
     """Shared loop: streams events and records ``trace``.
 
@@ -105,7 +106,7 @@ async def _run_agent_core(
             text = ""
             reasoning_parts: list[str] = []
             async for delta in provider.stream_complete(
-                model, history, tools.specs(), temperature
+                model, history, tools.specs(), temperature, reasoning=reasoning
             ):
                 if delta.content:
                     text += delta.content
@@ -122,7 +123,9 @@ async def _run_agent_core(
             log_agent_event(finish_stream)
             return
 
-        resp = await provider.complete(model, history, tools.specs(), temperature)
+        resp = await provider.complete(
+            model, history, tools.specs(), temperature, reasoning=reasoning
+        )
         trace.entries[-1].data = {
             "finish_reason": resp.finish_reason,
             "content": resp.content,
@@ -189,6 +192,7 @@ async def run_agent(
     temperature: float = 0.0,
     max_iterations: int = 8,
     use_stream: bool = True,
+    reasoning: str = "",
 ) -> AsyncIterator[AgentEvent]:
     """Run the function-calling loop, streaming :data:`AgentEvent` items."""
     trace = Trace()
@@ -202,6 +206,7 @@ async def run_agent(
         max_iterations=max_iterations,
         use_stream=use_stream,
         trace=trace,
+        reasoning=reasoning,
     ):
         yield event
 
@@ -216,6 +221,7 @@ async def run_agent_collect(
     temperature: float = 0.0,
     max_iterations: int = 8,
     use_stream: bool = True,
+    reasoning: str = "",
 ) -> tuple[str | None, Trace, bool]:
     """Drain :func:`run_agent` and return ``(final_text, trace, capped)``."""
     trace = Trace()
@@ -231,6 +237,7 @@ async def run_agent_collect(
         max_iterations=max_iterations,
         use_stream=use_stream,
         trace=trace,
+        reasoning=reasoning,
     ):
         if isinstance(event, FinishEvent):
             final_text = event.text

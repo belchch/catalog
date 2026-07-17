@@ -47,6 +47,7 @@ class ScriptProvider:
         tools: list[ToolSpec] | None = None,
         temperature: float = 0.0,
         tool_choice: str = "auto",
+        reasoning: str = "",
     ) -> CompletionResult:
         self.seen_tools.append(list(tools) if tools else None)
         return self.script.pop(0)
@@ -57,6 +58,7 @@ class ScriptProvider:
         messages: list[Message],
         tools: list[ToolSpec] | None = None,
         temperature: float = 0.0,
+        reasoning: str = "",
     ) -> Any:
         yield StreamDelta(content="")
 
