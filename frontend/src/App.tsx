@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   buildSkill,
   createSession,
@@ -12,51 +12,83 @@ import { Chat } from './components/Chat.tsx'
 import { DocumentList } from './components/DocumentList.tsx'
 import { ModelSelector } from './components/ModelSelector.tsx'
 import { RunView } from './components/RunView.tsx'
+import { SessionsPanel } from './components/SessionsPanel.tsx'
 import { SkillSettingsModal } from './components/SkillSettingsModal.tsx'
 import { SkillsPanel } from './components/SkillsPanel.tsx'
 import { useDocuments } from './hooks/useDocuments.ts'
 import { usePlannerSession } from './hooks/usePlannerSession.ts'
 import { useRunStream } from './hooks/useRunStream.ts'
+import { useSessions } from './hooks/useSessions.ts'
 import { useSettings } from './hooks/useSettings.ts'
 import { useSkills } from './hooks/useSkills.ts'
+
+const SESSION_STORAGE_KEY = 'catalog.sessionId'
+
+function readStoredSessionId(): string | null {
+  try {
+    return localStorage.getItem(SESSION_STORAGE_KEY)
+  } catch {
+    return null
+  }
+}
+
+function writeStoredSessionId(id: string | null): void {
+  try {
+    if (id) localStorage.setItem(SESSION_STORAGE_KEY, id)
+    else localStorage.removeItem(SESSION_STORAGE_KEY)
+  } catch {}
+}
 
 export default function App() {
   const docs = useDocuments()
   const skillsHook = useSkills()
   const settingsHook = useSettings()
+  const sessions = useSessions()
 
-  const [sessionId, setSessionId] = useState<string | null>(null)
+  const [sessionId, setSessionId] = useState<string | null>(() => readStoredSessionId())
   const [currentDocId, setCurrentDocId] = useState<string | null>(null)
   const [buildingSkill, setBuildingSkill] = useState(false)
   const [notice, setNotice] = useState<string | null>(null)
   const [activeRunId, setActiveRunId] = useState<string | null>(null)
-  // CATALOG-6: skill being configured in the pre-save settings modal.
   const [settingsSkill, setSettingsSkill] = useState<{ skillId: string; preview: SkillPreview } | null>(null)
-  // CATALOG-17: set while the chat is editing an existing skill (vs. building
-  // a brand new one) — drives the "Сохранить изменения" button and banner.
   const [editingSkill, setEditingSkill] = useState<{ skillId: string; name: string } | null>(null)
-  // CATALOG-18: the doc a "на экран" result was just saved into, plus its
-  // in-flight state — cleared whenever a new run starts.
   const [savedResultDoc, setSavedResultDoc] = useState<DocumentOut | null>(null)
   const [savingResult, setSavingResult] = useState(false)
 
-  const planner = usePlannerSession(sessionId)
+  const handleSessionInvalid = useCallback(() => {
+    writeStoredSessionId(null)
+    setSessionId(null)
+    setEditingSkill(null)
+  }, [])
+
+  const planner = usePlannerSession(sessionId, { onSessionInvalid: handleSessionInvalid })
   const run = useRunStream(activeRunId)
 
-  // "В док" runs create their result document server-side — refresh the list
-  // so it shows up without the user having to click "Обновить".
+  useEffect(() => {
+    writeStoredSessionId(sessionId)
+  }, [sessionId])
+
   useEffect(() => {
     if (run.finished && run.status === 'ok' && run.outputDocId) {
       void docs.refresh()
     }
   }, [run.finished, run.status, run.outputDocId, docs])
 
+  const wasStreamingRef = useRef(false)
+  useEffect(() => {
+    if (wasStreamingRef.current && !planner.streaming) {
+      void sessions.refresh()
+    }
+    wasStreamingRef.current = planner.streaming
+  }, [planner.streaming, sessions])
+
   const ensureSession = useCallback(async (): Promise<string> => {
     if (sessionId) return sessionId
     const created = await createSession()
     setSessionId(created.id)
+    void sessions.refresh()
     return created.id
-  }, [sessionId])
+  }, [sessionId, sessions])
 
   const handleSend = useCallback(
     async (text: string) => {
@@ -70,6 +102,39 @@ export default function App() {
     [ensureSession, planner],
   )
 
+  const handleSelectSession = useCallback(
+    (id: string) => {
+      if (id === sessionId) return
+      setActiveRunId(null)
+      setEditingSkill(null)
+      setSessionId(id)
+    },
+    [sessionId],
+  )
+
+  const handleNewChat = useCallback(() => {
+    setActiveRunId(null)
+    setEditingSkill(null)
+    setSessionId(null)
+  }, [])
+
+  const handleDeleteSession = useCallback(
+    async (id: string) => {
+      setNotice(null)
+      try {
+        await sessions.remove(id)
+        if (id === sessionId) {
+          setActiveRunId(null)
+          setEditingSkill(null)
+          setSessionId(null)
+        }
+      } catch (e) {
+        setNotice(e instanceof Error ? e.message : String(e))
+      }
+    },
+    [sessions, sessionId],
+  )
+
   const handleEditSkill = useCallback(async (skillId: string, name: string) => {
     setNotice(null)
     try {
@@ -77,10 +142,11 @@ export default function App() {
       setActiveRunId(null)
       setSessionId(started.session_id)
       setEditingSkill({ skillId: started.skill_id, name })
+      void sessions.refresh()
     } catch (e) {
       setNotice(e instanceof Error ? e.message : String(e))
     }
-  }, [])
+  }, [sessions])
 
   const handleCreateSkill = useCallback(async () => {
     if (!sessionId) return
@@ -88,8 +154,6 @@ export default function App() {
     setNotice(null)
     try {
       const built = await buildSkill(sessionId)
-      // CATALOG-6: open the settings modal with the preview config instead of
-      // silently dropping the draft — the user finalizes model/provider/reasoning.
       setSettingsSkill({ skillId: built.skill_id, preview: built.config })
     } catch (e) {
       setNotice(e instanceof Error ? e.message : String(e))
@@ -154,6 +218,13 @@ export default function App() {
       )}
       <div className="grid flex-1 grid-cols-1 overflow-hidden md:grid-cols-[320px_1fr]">
         <aside className="flex flex-col gap-4 overflow-y-auto border-r border-slate-800 p-3">
+          <SessionsPanel
+            sessions={sessions}
+            currentSessionId={sessionId}
+            onSelect={handleSelectSession}
+            onNewChat={handleNewChat}
+            onDelete={(id) => void handleDeleteSession(id)}
+          />
           <DocumentList docs={docs} currentDocId={currentDocId} onSelect={setCurrentDocId} />
           <SkillsPanel
             skills={skillsHook}
@@ -197,7 +268,6 @@ export default function App() {
           preview={settingsSkill.preview}
           onSave={handleSkillConfigured}
           onClose={() => {
-            // Refresh even on cancel so the created draft appears in the list.
             void skillsHook.refresh()
             setSettingsSkill(null)
             setEditingSkill(null)

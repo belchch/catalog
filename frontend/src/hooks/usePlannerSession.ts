@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { listSessionMessages, type MessageOut } from '../api.ts'
 import {
   connectPlanner,
   formatToolArgs,
@@ -23,14 +24,41 @@ export interface UsePlannerSessionResult {
   cancel: () => void
 }
 
-/**
- * Drives the planner WebSocket for a session.
- *
- * Outgoing messages are buffered until the socket is open, so `send` can be
- * called immediately after the session id is set (the connect effect runs on
- * the next render and flushes the buffer on open).
- */
-export function usePlannerSession(sessionId: string | null): UsePlannerSessionResult {
+export interface UsePlannerSessionOptions {
+  onSessionInvalid?: () => void
+}
+
+function mapStoredMessages(raw: MessageOut[]): PlannerMessage[] {
+  const out: PlannerMessage[] = []
+  for (const m of raw) {
+    if (m.role === 'user' || m.role === 'assistant') {
+      if (m.content === null) continue
+      out.push({ role: m.role, content: m.content })
+      continue
+    }
+    if (m.role === 'tool') {
+      const toolName = m.tool_name ?? undefined
+      let content: string
+      if (m.content) {
+        try {
+          const parsed = JSON.parse(m.content) as { ok?: boolean }
+          content = `← ${toolName ?? 'tool'}: ${parsed.ok ? 'ok' : 'fail'}`
+        } catch {
+          content = m.content
+        }
+      } else {
+        content = `← ${toolName ?? 'tool'}: fail`
+      }
+      out.push({ role: 'tool', toolName, content })
+    }
+  }
+  return out
+}
+
+export function usePlannerSession(
+  sessionId: string | null,
+  options?: UsePlannerSessionOptions,
+): UsePlannerSessionResult {
   const [messages, setMessages] = useState<PlannerMessage[]>([])
   const [streaming, setStreaming] = useState(false)
   const [cancelling, setCancelling] = useState(false)
@@ -42,15 +70,31 @@ export function usePlannerSession(sessionId: string | null): UsePlannerSessionRe
   const assistantBufferRef = useRef<string>('')
   const pendingRef = useRef<string[]>([])
   const readyRef = useRef<boolean>(false)
+  const streamingRef = useRef<boolean>(false)
+  const skipHydrateRef = useRef<boolean>(false)
   const prevSessionRef = useRef<string | null>(null)
-  // CATALOG-23: an `error` frame is always followed by the server closing the
-  // socket. Without this flag `onClose` would also show "Соединение
-  // закрыто", duplicating/masking the actual error message for the user.
   const hadErrorRef = useRef<boolean>(false)
+  const onSessionInvalidRef = useRef(options?.onSessionInvalid)
+  onSessionInvalidRef.current = options?.onSessionInvalid
+
+  const resetLocal = useCallback(() => {
+    setMessages([])
+    setStreaming(false)
+    setCancelling(false)
+    setClosed(false)
+    setError(null)
+    setSuggestions([])
+    assistantBufferRef.current = ''
+    pendingRef.current = []
+    streamingRef.current = false
+    skipHydrateRef.current = false
+    hadErrorRef.current = false
+  }, [])
 
   const handleEvent = useCallback((e: ServerEvent) => {
     switch (e.type) {
       case 'token': {
+        skipHydrateRef.current = true
         assistantBufferRef.current += e.delta
         const text = assistantBufferRef.current
         setMessages((prev) => {
@@ -63,6 +107,7 @@ export function usePlannerSession(sessionId: string | null): UsePlannerSessionRe
         break
       }
       case 'tool_call':
+        skipHydrateRef.current = true
         setMessages((prev) => [
           ...prev,
           {
@@ -73,6 +118,7 @@ export function usePlannerSession(sessionId: string | null): UsePlannerSessionRe
         ])
         break
       case 'tool_result':
+        skipHydrateRef.current = true
         setMessages((prev) => [
           ...prev,
           {
@@ -84,6 +130,7 @@ export function usePlannerSession(sessionId: string | null): UsePlannerSessionRe
         break
       case 'finish':
         assistantBufferRef.current = ''
+        streamingRef.current = false
         setStreaming(false)
         setCancelling(false)
         break
@@ -92,9 +139,14 @@ export function usePlannerSession(sessionId: string | null): UsePlannerSessionRe
         break
       case 'error':
         hadErrorRef.current = true
-        setError(e.message)
+        streamingRef.current = false
         setStreaming(false)
         setCancelling(false)
+        if (/session not found/i.test(e.message)) {
+          onSessionInvalidRef.current?.()
+          break
+        }
+        setError(e.message)
         break
       case 'step':
       case 'verify':
@@ -105,19 +157,46 @@ export function usePlannerSession(sessionId: string | null): UsePlannerSessionRe
   }, [])
 
   useEffect(() => {
-    if (!sessionId) return
+    if (!sessionId) {
+      resetLocal()
+      prevSessionRef.current = null
+      return
+    }
+
     if (prevSessionRef.current !== null && prevSessionRef.current !== sessionId) {
-      setMessages([])
-      setStreaming(false)
-      setClosed(false)
-      setError(null)
-      setSuggestions([])
-      assistantBufferRef.current = ''
-      pendingRef.current = []
-      hadErrorRef.current = false
+      resetLocal()
     }
     prevSessionRef.current = sessionId
     readyRef.current = false
+    skipHydrateRef.current =
+      streamingRef.current ||
+      assistantBufferRef.current.length > 0 ||
+      pendingRef.current.length > 0
+
+    let cancelled = false
+
+    void listSessionMessages(sessionId).then(
+      (raw) => {
+        if (cancelled || skipHydrateRef.current) return
+        if (
+          streamingRef.current ||
+          assistantBufferRef.current.length > 0 ||
+          pendingRef.current.length > 0
+        ) {
+          return
+        }
+        setMessages(mapStoredMessages(raw))
+      },
+      (e: unknown) => {
+        if (cancelled) return
+        const msg = e instanceof Error ? e.message : String(e)
+        if (msg.startsWith('404')) {
+          onSessionInvalidRef.current?.()
+          return
+        }
+        setError(msg)
+      },
+    )
 
     const conn = connectPlanner(sessionId, handleEvent, {
       onOpen: () => {
@@ -128,24 +207,24 @@ export function usePlannerSession(sessionId: string | null): UsePlannerSessionRe
       },
       onClose: () => {
         readyRef.current = false
-        // A close that follows a reported `error` is expected (the server
-        // closes the socket after sending it) — the error message alone is
-        // the useful signal, so don't also show "Соединение закрыто".
         if (!hadErrorRef.current) setClosed(true)
       },
     })
     connRef.current = conn
     return () => {
+      cancelled = true
       conn.close()
       connRef.current = null
       readyRef.current = false
     }
-  }, [sessionId, handleEvent])
+  }, [sessionId, handleEvent, resetLocal])
 
   const send = useCallback((text: string) => {
     const trimmed = text.trim()
     if (!trimmed) return
+    skipHydrateRef.current = true
     setMessages((prev) => [...prev, { role: 'user', content: trimmed }])
+    streamingRef.current = true
     setStreaming(true)
     setSuggestions([])
     assistantBufferRef.current = ''

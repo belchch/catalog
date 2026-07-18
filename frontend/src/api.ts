@@ -39,6 +39,25 @@ export interface SessionCreated {
   id: string
 }
 
+export interface SessionOut {
+  id: string
+  status: string
+  created_at: string
+  updated_at: string
+  title: string | null
+  skill_id: string | null
+}
+
+export interface MessageOut {
+  id: number
+  session_id: string
+  role: string
+  content: string | null
+  tool_name: string | null
+  tool_call_id: string | null
+  created_at: string
+}
+
 export interface EditStarted {
   session_id: string
   skill_id: string
@@ -113,6 +132,31 @@ export function uploadDocument(file: File): Promise<DocumentOut> {
 
 export function createSession(): Promise<SessionCreated> {
   return jsonFetch<SessionCreated>('/sessions', { method: 'POST' })
+}
+
+export function listSessions(params?: {
+  limit?: number
+  offset?: number
+  status?: string
+}): Promise<SessionOut[]> {
+  const qs = new URLSearchParams()
+  if (params?.limit != null) qs.set('limit', String(params.limit))
+  if (params?.offset != null) qs.set('offset', String(params.offset))
+  if (params?.status) qs.set('status', params.status)
+  const q = qs.toString()
+  return jsonFetch<SessionOut[]>(`/sessions${q ? `?${q}` : ''}`)
+}
+
+export function listSessionMessages(sessionId: string): Promise<MessageOut[]> {
+  return jsonFetch<MessageOut[]>(`/sessions/${sessionId}/messages`)
+}
+
+export async function deleteSession(sessionId: string): Promise<void> {
+  const res = await fetch(`${API_URL}/sessions/${sessionId}`, { method: 'DELETE' })
+  if (!res.ok) {
+    const body = await res.text().catch(() => '')
+    throw new Error(`${res.status} ${res.statusText}${body ? `: ${body}` : ''}`)
+  }
 }
 
 export function buildSkill(sessionId: string): Promise<SkillBuilt> {
