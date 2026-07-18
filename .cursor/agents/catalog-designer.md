@@ -1,7 +1,7 @@
 ---
 name: catalog-designer
 description: Проектирует UI одного шага pipeline (план CATALOG-*, помеченный как UI) и записывает дизайн-спеку в отдельный файл CATALOG-NN.design.md. Пишет только этот файл — не трогает код и git. Запускается parent-оркестратором catalog-pipeline ОДИН раз в начале UI-шага (до цикла генерации).
-model: claude-opus-4-8[effort=high]
+model: glm-5.2
 readonly: false
 ---
 
