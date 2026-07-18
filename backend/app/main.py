@@ -37,6 +37,7 @@ from app.llm.zai import DEFAULT_ZAI_MODEL
 from app.logging_config import setup_logging
 from app.storage.db import Database
 from app.storage.git import ensure_repo
+from app.storage.repo_document import reconcile_orphans
 
 # Configure stdout logging at import time so every ``app.*`` log line carries
 # the correlation context. Runs once when ``app.main`` is first imported
@@ -77,6 +78,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.workspace = settings.workspace_dir
     app.state.tools = build_document_tools(db, settings.workspace_dir)
     app.state.settings = settings
+    reconcile_orphans(db, settings.workspace_dir)
     try:
         yield
     finally:

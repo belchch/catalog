@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import json
 import sqlite3
 import uuid
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from pathlib import Path
 
 from app.storage.db import Database
 
@@ -86,3 +88,70 @@ def list_documents_by_kind(db: Database, kind: str) -> list[DocumentRow]:
             (kind,),
         ).fetchall()
     return [_row_to_document(r) for r in rows]
+
+
+def _nullify_skill_run_refs(conn: sqlite3.Connection, doc_id: str) -> None:
+    conn.execute(
+        "UPDATE skill_run SET output_doc_id = NULL WHERE output_doc_id = ?",
+        (doc_id,),
+    )
+    rows = conn.execute(
+        "SELECT id, input_doc_id, input_doc_ids FROM skill_run"
+    ).fetchall()
+    for row in rows:
+        raw_ids = row["input_doc_ids"]
+        ids: list[str]
+        if raw_ids:
+            try:
+                ids = list(json.loads(raw_ids))
+            except (json.JSONDecodeError, TypeError):
+                ids = [row["input_doc_id"]] if row["input_doc_id"] else []
+        elif row["input_doc_id"]:
+            ids = [row["input_doc_id"]]
+        else:
+            ids = []
+        if doc_id not in ids and row["input_doc_id"] != doc_id:
+            continue
+        new_ids = [i for i in ids if i != doc_id]
+        first = new_ids[0] if new_ids else None
+        conn.execute(
+            "UPDATE skill_run SET input_doc_id = ?, input_doc_ids = ? WHERE id = ?",
+            (
+                first,
+                json.dumps(new_ids, ensure_ascii=False) if new_ids else None,
+                row["id"],
+            ),
+        )
+
+
+def delete_document(
+    db: Database,
+    workspace_dir: str | Path,
+    doc_id: str,
+) -> DocumentRow | None:
+    workspace = Path(workspace_dir)
+    with db.connect() as conn:
+        row = conn.execute(
+            f"SELECT {_SELECT_COLS} FROM document WHERE id = ?",  # noqa: S608
+            (doc_id,),
+        ).fetchone()
+        if row is None:
+            return None
+        doc = _row_to_document(row)
+        file_path = workspace / doc.path
+        if file_path.is_file():
+            file_path.unlink()
+        _nullify_skill_run_refs(conn, doc_id)
+        conn.execute("DELETE FROM document WHERE id = ?", (doc_id,))
+    return doc
+
+
+def reconcile_orphans(db: Database, workspace_dir: str | Path) -> list[str]:
+    workspace = Path(workspace_dir)
+    removed: list[str] = []
+    for doc in list_documents(db):
+        if not (workspace / doc.path).is_file():
+            deleted = delete_document(db, workspace, doc.id)
+            if deleted is not None:
+                removed.append(deleted.id)
+    return removed

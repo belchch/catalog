@@ -31,16 +31,16 @@ _нет — комментариев к задаче не было_
 
 ## План действий
 
-1. `delete_document`: удалить файл (если есть) + строку БД; для `skill_run` — nullify doc ids или оставить историю (зафиксировать одно).
+1. `delete_document`: удалить файл (если есть) + строку БД; для `skill_run` — **nullify** (`input_doc_id` / `output_doc_id` → NULL, id убрать из `input_doc_ids`); история run (status/trace/result_text) сохраняется.
 2. `reconcile_orphans(workspace)`: для каждой строки проверить `Path(workspace)/path.exists()`; отсутствующие → delete.
-3. Вызов: на `GET /documents` (лёгкий sync) и/или явный endpoint + startup.
+3. Вызов: на `GET /documents` (лёгкий sync), `POST /documents/reconcile`, startup lifespan, `list_documents` tool.
 4. `DELETE /documents/{id}` для явного удаления из UI (если UI позже — API готов).
-5. Тесты: создать doc + удалить файл с диска → reconcile убирает строку; DELETE убирает файл и строку.
+5. Тесты: создать doc + удалить файл с диска → reconcile убирает строку; DELETE убирает файл и строку; skill_run refs nullify.
 
 ## Критерии приёмки (Definition of Done)
 
-- [ ] Файл удалён из vault → после sync/reconcile нет orphan в `GET /documents`.
-- [ ] `DELETE /documents/{id}` удаляет файл и запись (или 404).
-- [ ] Поведение `skill_run` ссылок документировано в плане/коде и покрыто тестом.
-- [ ] Чтение/apply не оставляют вечные призраки после cleanup.
-- [ ] `ruff` / `pytest` зелёные.
+- [x] Файл удалён из vault → после sync/reconcile нет orphan в `GET /documents`.
+- [x] `DELETE /documents/{id}` удаляет файл и запись (или 404).
+- [x] Поведение `skill_run` ссылок документировано в плане/коде и покрыто тестом.
+- [x] Чтение/apply не оставляют вечные призраки после cleanup.
+- [x] `ruff` / `pytest` зелёные.

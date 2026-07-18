@@ -8,7 +8,7 @@ from app.agent.registry import ToolRegistry
 from app.documents.extract import extract_text
 from app.llm.base import ToolSpec
 from app.storage.db import Database
-from app.storage.repo_document import get_document, list_documents
+from app.storage.repo_document import get_document, list_documents, reconcile_orphans
 
 
 def build_document_tools(db: Database, workspace_dir: str | Path) -> ToolRegistry:
@@ -20,6 +20,7 @@ def build_document_tools(db: Database, workspace_dir: str | Path) -> ToolRegistr
     reg = ToolRegistry()
 
     async def _list_documents() -> list[dict[str, str]]:
+        reconcile_orphans(db, workspace)
         return [
             {"id": row.id, "title": row.title, "kind": row.kind}
             for row in list_documents(db)

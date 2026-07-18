@@ -134,6 +134,65 @@ def test_upload_unsupported_format(client) -> None:
     assert "unsupported" in resp.json()["detail"].lower()
 
 
+def test_delete_document(client, db) -> None:
+    from pathlib import Path
+
+    from app.storage.repo_document import get_document
+
+    uploaded = client.post(
+        "/documents", files={"file": ("note.md", b"# Title\n", "text/markdown")}
+    )
+    assert uploaded.status_code == 200
+    doc_id = uploaded.json()["id"]
+    row = get_document(db, doc_id)
+    assert row is not None
+    workspace = Path(client.app.state.workspace)
+    assert (workspace / row.path).is_file()
+
+    deleted = client.delete(f"/documents/{doc_id}")
+    assert deleted.status_code == 204
+    assert get_document(db, doc_id) is None
+    assert not (workspace / row.path).exists()
+
+    missing = client.delete(f"/documents/{doc_id}")
+    assert missing.status_code == 404
+
+
+def test_list_documents_reconciles_orphans(client, db) -> None:
+    from pathlib import Path
+
+    from app.storage.repo_document import get_document
+
+    kept_id = _upload(client, "keep.md", b"keep")
+    orphan_id = _upload(client, "gone.md", b"gone")
+    orphan = get_document(db, orphan_id)
+    assert orphan is not None
+    (Path(client.app.state.workspace) / orphan.path).unlink()
+
+    listing = client.get("/documents")
+    assert listing.status_code == 200
+    ids = [d["id"] for d in listing.json()]
+    assert kept_id in ids
+    assert orphan_id not in ids
+    assert get_document(db, orphan_id) is None
+
+
+def test_reconcile_documents_endpoint(client, db) -> None:
+    from pathlib import Path
+
+    from app.storage.repo_document import get_document
+
+    orphan_id = _upload(client, "gone.md", b"gone")
+    orphan = get_document(db, orphan_id)
+    assert orphan is not None
+    (Path(client.app.state.workspace) / orphan.path).unlink()
+
+    resp = client.post("/documents/reconcile")
+    assert resp.status_code == 200
+    assert resp.json()["removed"] == [orphan_id]
+    assert get_document(db, orphan_id) is None
+
+
 # --------------------------------------------------------------------------- #
 # Planner WebSocket
 # --------------------------------------------------------------------------- #

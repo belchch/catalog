@@ -10,12 +10,16 @@ from app.documents.extract import extract_text
 from app.documents.ingest import ingest_file, slugify
 from app.documents.tools import build_document_tools
 from app.storage.db import Database
+from app.agent.trace import Trace
+from app.skills.repo_run import create_run, finish_run, get_run
 from app.storage.repo_document import (
     DocumentRow,
     create_document,
+    delete_document,
     get_document,
     list_documents,
     list_documents_by_kind,
+    reconcile_orphans,
 )
 
 
@@ -248,3 +252,72 @@ def test_row_factory_is_set(db: Database) -> None:
     # connect() must yield connections whose rows are sqlite3.Row.
     with db.connect() as conn:
         assert conn.row_factory is sqlite3.Row
+
+
+def test_delete_document_removes_file_and_row(db: Database, tmp_path: Path) -> None:
+    row = ingest_file(db, tmp_path, filename="note.md", content=b"body")
+    assert (tmp_path / row.path).is_file()
+
+    deleted = delete_document(db, tmp_path, row.id)
+    assert deleted is not None
+    assert deleted.id == row.id
+    assert not (tmp_path / row.path).exists()
+    assert get_document(db, row.id) is None
+    assert delete_document(db, tmp_path, row.id) is None
+
+
+def test_reconcile_orphans_removes_missing_files(db: Database, tmp_path: Path) -> None:
+    kept = ingest_file(db, tmp_path, filename="keep.md", content=b"keep")
+    orphan = ingest_file(db, tmp_path, filename="gone.md", content=b"gone")
+    (tmp_path / orphan.path).unlink()
+
+    removed = reconcile_orphans(db, tmp_path)
+    assert removed == [orphan.id]
+    assert get_document(db, orphan.id) is None
+    assert get_document(db, kept.id) is not None
+    assert (tmp_path / kept.path).is_file()
+
+
+def test_delete_document_nullifies_skill_run_refs(db: Database, tmp_path: Path) -> None:
+    input_a = ingest_file(db, tmp_path, filename="a.md", content=b"a")
+    input_b = ingest_file(db, tmp_path, filename="b.md", content=b"b")
+    output = ingest_file(db, tmp_path, filename="out.md", content=b"out")
+    run_id = create_run(
+        db, skill_id="skill1", session_id=None, input_doc_ids=[input_a.id, input_b.id]
+    )
+    finish_run(
+        db,
+        run_id,
+        status="ok",
+        output_doc_id=output.id,
+        trace=Trace(),
+        result_text="done",
+    )
+
+    delete_document(db, tmp_path, input_a.id)
+    delete_document(db, tmp_path, output.id)
+
+    run = get_run(db, run_id)
+    assert run is not None
+    assert run["status"] == "ok"
+    assert run["result_text"] == "done"
+    assert run["input_doc_id"] == input_b.id
+    assert run["input_doc_ids"] == [input_b.id]
+    assert run["output_doc_id"] is None
+
+
+def test_list_documents_tool_reconciles_orphans(db: Database, tmp_path: Path) -> None:
+    kept = ingest_file(db, tmp_path, filename="keep.md", content=b"keep")
+    orphan = ingest_file(db, tmp_path, filename="gone.md", content=b"gone")
+    (tmp_path / orphan.path).unlink()
+    reg = build_document_tools(db, tmp_path)
+    entry = reg.get("list_documents")
+    assert entry is not None
+    _, list_fn = entry
+
+    async def _run() -> list[dict]:
+        return await list_fn()
+
+    items = asyncio.run(_run())
+    assert [it["id"] for it in items] == [kept.id]
+    assert get_document(db, orphan.id) is None
