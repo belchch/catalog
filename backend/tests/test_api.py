@@ -462,6 +462,44 @@ def test_configure_skill_updates_model_provider_reasoning(client, provider, db) 
     assert skill.config.reasoning == "high"
 
 
+def test_configure_skill_saves_input_arity(client, provider, db) -> None:
+    session_id = client.post("/sessions").json()["id"]
+    add_message(db, session_id=session_id, role="user", content="make a skill")
+    provider.script = [_completion(tool_calls=[_build_skill_call(name="S")])]
+    skill_id = client.post(f"/sessions/{session_id}/skills").json()["skill_id"]
+
+    resp = client.patch(f"/skills/{skill_id}/configure", json={"input_arity": 2})
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["config"]["input_arity"] == 2
+    skill = get_skill(db, skill_id)
+    assert skill is not None
+    assert skill.config.input_arity == 2
+
+    resp = client.patch(f"/skills/{skill_id}/configure", json={"input_arity": 1})
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["config"]["input_arity"] == 1
+    skill = get_skill(db, skill_id)
+    assert skill is not None
+    assert skill.config.input_arity == 1
+
+    resp = client.patch(f"/skills/{skill_id}/configure", json={"input_arity": None})
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["config"]["input_arity"] is None
+    skill = get_skill(db, skill_id)
+    assert skill is not None
+    assert skill.config.input_arity is None
+
+    resp = client.patch(f"/skills/{skill_id}/configure", json={"model": "other"})
+    assert resp.status_code == 200, resp.text
+    skill = get_skill(db, skill_id)
+    assert skill is not None
+    assert skill.config.input_arity is None
+    assert skill.config.model == "other"
+
+    resp = client.patch(f"/skills/{skill_id}/configure", json={"input_arity": 3})
+    assert resp.status_code == 422
+
+
 def test_configure_skill_requires_draft(client, provider, db) -> None:
     """Configure is rejected (409) once the skill is committed."""
     session_id = client.post("/sessions").json()["id"]
@@ -800,6 +838,30 @@ def test_list_skills_endpoint_returns_tags(client, db) -> None:
     assert by_name["ScriptSkill"]["tags"] == ["python"]
 
 
+def test_list_skills_returns_input_arity(client, db) -> None:
+    config = SkillConfig(
+        name="PairMerger",
+        description="needs two docs",
+        system_prompt="Merge.",
+        allowed_tools=["read_document"],
+        model="test/model",
+        input_arity=2,
+    )
+    create_skill(
+        db,
+        name=config.name,
+        description=config.description,
+        config=config,
+        status="committed",
+    )
+    _seed_committed_skill(db, name="AnyList")
+
+    rows = client.get("/skills").json()
+    by_name = {r["name"]: r for r in rows}
+    assert by_name["PairMerger"]["input_arity"] == 2
+    assert by_name["AnyList"]["input_arity"] is None
+
+
 # --------------------------------------------------------------------------- #
 # Apply (run create / stream / get)
 # --------------------------------------------------------------------------- #
@@ -1010,6 +1072,55 @@ def test_apply_arity_mismatch_returns_422(client, db) -> None:
     resp = client.post(f"/skills/{skill_id}/apply", json={"doc_ids": [doc_id]})
     assert resp.status_code == 422
     assert "expects 2 input" in resp.json()["detail"]
+
+
+def test_apply_arity_one_rejects_two_docs(client, db) -> None:
+    doc_a = _upload(client, "a.md", b"alpha")
+    doc_b = _upload(client, "b.md", b"beta")
+    config = SkillConfig(
+        name="Single",
+        description="one doc only",
+        system_prompt="Process one document.",
+        allowed_tools=["read_document"],
+        model="test/model",
+        max_iterations=4,
+        max_retries=1,
+        verify_checks=[VerifyCheck("non_empty")],
+        input_arity=1,
+    )
+    skill_id = create_skill(
+        db, name=config.name, description=config.description, config=config, status="committed"
+    )
+    resp = client.post(
+        f"/skills/{skill_id}/apply", json={"doc_ids": [doc_a, doc_b]}
+    )
+    assert resp.status_code == 422
+    assert "expects 1 input" in resp.json()["detail"]
+
+
+def test_apply_list_arity_accepts_multiple_docs(client, provider, db) -> None:
+    doc_a = _upload(client, "a.md", b"alpha")
+    doc_b = _upload(client, "b.md", b"beta")
+    config = SkillConfig(
+        name="Lister",
+        description="any number of docs",
+        system_prompt="Process the documents.",
+        allowed_tools=["read_document"],
+        model="test/model",
+        max_iterations=4,
+        max_retries=1,
+        verify_checks=[VerifyCheck("non_empty")],
+        input_arity=None,
+    )
+    skill_id = create_skill(
+        db, name=config.name, description=config.description, config=config, status="committed"
+    )
+    provider.script = [_completion("# Result\n\nOk.")]
+    resp = client.post(
+        f"/skills/{skill_id}/apply", json={"doc_ids": [doc_a, doc_b]}
+    )
+    assert resp.status_code == 200, resp.text
+    assert "run_id" in resp.json()
 
 
 def test_apply_requires_at_least_one_doc(client, db) -> None:

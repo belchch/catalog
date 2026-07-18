@@ -13,6 +13,7 @@ import sqlite3
 import uuid
 from dataclasses import dataclass, replace
 from datetime import datetime, timezone
+from typing import cast
 
 from app.skills.config import SkillConfig, compute_tags
 from app.storage.db import Database
@@ -103,11 +104,13 @@ def list_skills(db: Database, status: str | None = None) -> list[dict]:
             config = SkillConfig.from_json(r["config_json"])
             config_kind = config.kind
             config_tags = compute_tags(config)
+            config_input_arity = config.input_arity
         except (ValueError, KeyError):
             # Unparseable/legacy config: degrade to the agent defaults so the
             # row still renders on the UI with an ``ai`` tag.
             config_kind = "agent"
             config_tags = ["ai"]
+            config_input_arity = None
         result.append(
             {
                 "id": r["id"],
@@ -118,6 +121,7 @@ def list_skills(db: Database, status: str | None = None) -> list[dict]:
                 "updated_at": r["updated_at"],
                 "kind": config_kind,
                 "tags": config_tags,
+                "input_arity": config_input_arity,
             }
         )
     return result
@@ -172,6 +176,9 @@ def update_status(db: Database, skill_id: str, status: str) -> None:
         )
 
 
+_UNSET = object()
+
+
 def update_skill_config(
     db: Database,
     skill_id: str,
@@ -179,12 +186,15 @@ def update_skill_config(
     model: str | None = None,
     provider: str | None = None,
     reasoning: str | None = None,
+    input_arity: int | None | object = _UNSET,
 ) -> SkillRecord | None:
     """Override selected config fields and persist (CATALOG-6 settings modal).
 
-    Only the arguments that are not ``None`` are applied; the rest of the
-    frozen config is preserved. Returns the updated record (or ``None`` if the
-    skill does not exist). Intended for ``draft`` skills before commit.
+    For ``model``/``provider``/``reasoning``, only non-``None`` arguments are
+    applied. For ``input_arity``, pass an explicit value (including ``None``
+    for the document-list mode) or omit the argument to leave it unchanged.
+    Returns the updated record (or ``None`` if the skill does not exist).
+    Intended for ``draft`` skills before commit.
     """
     record = get_skill(db, skill_id)
     if record is None:
@@ -196,6 +206,8 @@ def update_skill_config(
         config.provider = provider
     if reasoning is not None:
         config.reasoning = reasoning
+    if input_arity is not _UNSET:
+        config.input_arity = cast(int | None, input_arity)
     now = _now_iso()
     with db.connect() as conn:
         conn.execute(

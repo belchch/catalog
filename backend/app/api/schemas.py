@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 
 class DocumentOut(BaseModel):
@@ -22,6 +22,8 @@ class SkillOut(BaseModel):
     # Derived capability tags (CATALOG-8): "python" (deterministic code) and/or
     # "ai" (LLM-driven). Computed from the config by the skills endpoint.
     tags: list[str] = Field(default_factory=list)
+    # Input mode (CATALOG-4): 1, 2, or null (= document list / any >= 1).
+    input_arity: int | None = None
 
 
 class ApplyRequest(BaseModel):
@@ -130,11 +132,21 @@ class SkillConfigureRequest(BaseModel):
     """User adjustments applied in the pre-save settings modal (CATALOG-6).
 
     Only the supplied fields are overridden; the rest of the config is kept.
+    ``input_arity`` uses presence in the request body: omitted = leave
+    unchanged; ``1`` / ``2`` = fixed count; ``null`` = document list (any >= 1).
     """
 
     model: str | None = None
     provider: str | None = None
     reasoning: str | None = None
+    input_arity: int | None = None
+
+    @field_validator("input_arity")
+    @classmethod
+    def _allowed_input_arity(cls, value: int | None) -> int | None:
+        if value is not None and value not in (1, 2):
+            raise ValueError("input_arity must be 1, 2, or null (document list)")
+        return value
 
 
 class ModelOut(BaseModel):

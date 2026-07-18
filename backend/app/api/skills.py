@@ -438,13 +438,14 @@ async def configure_skill_endpoint(
             status_code=409,
             detail="skill can only be configured while in draft",
         )
-    updated = update_skill_config(
-        db,
-        skill_id,
-        model=req.model,
-        provider=req.provider,
-        reasoning=req.reasoning,
-    )
+    configure_kwargs: dict = {
+        "model": req.model,
+        "provider": req.provider,
+        "reasoning": req.reasoning,
+    }
+    if "input_arity" in req.model_fields_set:
+        configure_kwargs["input_arity"] = req.input_arity
+    updated = update_skill_config(db, skill_id, **configure_kwargs)
     assert updated is not None
     return SkillBuilt(skill_id=skill_id, config=_preview(updated.config))
 
@@ -474,6 +475,7 @@ async def list_skills_endpoint(
             created_at=r["created_at"],
             kind=r.get("kind", "agent"),
             tags=r.get("tags", []),
+            input_arity=r.get("input_arity"),
         )
         for r in rows
     ]
