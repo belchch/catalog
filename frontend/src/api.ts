@@ -18,6 +18,7 @@ export interface SkillOut {
   // Derived capability tags (CATALOG-8): "python" (deterministic code) and/or
   // "ai" (LLM-driven). Computed by the backend from the skill config.
   tags: string[]
+  input_arity: number | null
 }
 
 export interface RunOut {
@@ -208,7 +209,12 @@ export function listProviders(): Promise<ProviderOut[]> {
 
 export function configureSkill(
   skillId: string,
-  settings: { model?: string; provider?: string; reasoning?: string },
+  settings: {
+    model?: string
+    provider?: string
+    reasoning?: string
+    input_arity?: number | null
+  },
 ): Promise<SkillBuilt> {
   return jsonFetch<SkillBuilt>(`/skills/${skillId}/configure`, {
     method: 'PATCH',

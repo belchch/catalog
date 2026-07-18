@@ -15,15 +15,23 @@ interface SkillSettingsModalProps {
   onClose: () => void
 }
 
-/**
- * Pre-save settings modal (CATALOG-6): lets the user pick model / provider /
- * reasoning variant before the skill is committed. Options are loaded from the
- * backend (/models, /providers). Reasoning variants come from the selected
- * model's catalog entry.
- */
+type InputArity = 1 | 2 | null
+
+function initialArity(value: number | null | undefined): InputArity {
+  if (value === 1 || value === 2 || value === null) return value
+  return 1
+}
+
+const ARITY_OPTIONS: { value: InputArity; label: string }[] = [
+  { value: 1, label: '1 документ' },
+  { value: 2, label: '2 документа' },
+  { value: null, label: 'Список' },
+]
+
 export function SkillSettingsModal({ skillId, preview, onSave, onClose }: SkillSettingsModalProps) {
   const [models, setModels] = useState<ModelOut[]>([])
   const [providers, setProviders] = useState<ProviderOut[]>([])
+  const [inputArity, setInputArity] = useState<InputArity>(() => initialArity(preview.input_arity))
   const [model, setModel] = useState(preview.model)
   const [provider, setProvider] = useState(preview.provider)
   const [reasoning, setReasoning] = useState(preview.reasoning)
@@ -52,7 +60,12 @@ export function SkillSettingsModal({ skillId, preview, onSave, onClose }: SkillS
     setSaving(true)
     setError(null)
     try {
-      await configureSkill(skillId, { model, provider, reasoning })
+      await configureSkill(skillId, {
+        model,
+        provider,
+        reasoning,
+        input_arity: inputArity,
+      })
       await onSave()
       onClose()
     } catch (e) {
@@ -78,6 +91,49 @@ export function SkillSettingsModal({ skillId, preview, onSave, onClose }: SkillS
           </button>
         </div>
         <p className="mb-3 truncate text-xs text-slate-400">{preview.name}</p>
+
+        <div className="mb-2">
+          <div className="mb-1 text-[11px] text-slate-400">Вход</div>
+          <div
+            role="radiogroup"
+            aria-label="Вход"
+            className="flex flex-wrap gap-1"
+            onKeyDown={(e) => {
+              const idx = ARITY_OPTIONS.findIndex((o) => o.value === inputArity)
+              if (e.key === 'ArrowRight' || e.key === 'ArrowDown') {
+                e.preventDefault()
+                setInputArity(ARITY_OPTIONS[(idx + 1) % ARITY_OPTIONS.length].value)
+              } else if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') {
+                e.preventDefault()
+                setInputArity(
+                  ARITY_OPTIONS[(idx - 1 + ARITY_OPTIONS.length) % ARITY_OPTIONS.length].value,
+                )
+              }
+            }}
+          >
+            {ARITY_OPTIONS.map((opt) => {
+              const active = inputArity === opt.value
+              return (
+                <button
+                  key={String(opt.value)}
+                  type="button"
+                  role="radio"
+                  aria-checked={active}
+                  tabIndex={active ? 0 : -1}
+                  className={
+                    'rounded px-2 py-1 text-[11px] ' +
+                    (active
+                      ? 'bg-indigo-600 text-white'
+                      : 'bg-slate-800 text-slate-300 hover:bg-slate-700')
+                  }
+                  onClick={() => setInputArity(opt.value)}
+                >
+                  {opt.label}
+                </button>
+              )
+            })}
+          </div>
+        </div>
 
         <label className="mb-2 block text-[11px] text-slate-400">
           Провайдер
