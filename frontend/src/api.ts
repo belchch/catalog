@@ -173,6 +173,14 @@ export function commitSkill(skillId: string): Promise<CommitOut> {
   return jsonFetch<CommitOut>(`/skills/${skillId}/commit`, { method: 'POST' })
 }
 
+export async function deleteSkill(skillId: string): Promise<void> {
+  const res = await fetch(`${API_URL}/skills/${skillId}`, { method: 'DELETE' })
+  if (!res.ok) {
+    const body = await res.text().catch(() => '')
+    throw new Error(`${res.status} ${res.statusText}${body ? `: ${body}` : ''}`)
+  }
+}
+
 export function listSkills(status?: string): Promise<SkillOut[]> {
   const qs = status ? `?status=${encodeURIComponent(status)}` : ''
   return jsonFetch<SkillOut[]>(`/skills${qs}`)

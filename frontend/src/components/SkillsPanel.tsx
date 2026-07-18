@@ -9,6 +9,7 @@ interface SkillsPanelProps {
   defaultDocId: string | null
   onApply: (skillId: string, docIds: string[], mode: ApplyMode) => void
   onEdit: (skillId: string, name: string) => void
+  onDelete: (skillId: string) => void
 }
 
 type InputArity = 1 | 2 | null
@@ -68,8 +69,16 @@ function mode2Hint(slots: (string | null)[]): string | null {
   return null
 }
 
-export function SkillsPanel({ skills, documents, defaultDocId, onApply, onEdit }: SkillsPanelProps) {
+export function SkillsPanel({
+  skills,
+  documents,
+  defaultDocId,
+  onApply,
+  onEdit,
+  onDelete,
+}: SkillsPanelProps) {
   const [target, setTarget] = useState<Record<string, SkillTarget>>({})
+  const [confirmId, setConfirmId] = useState<string | null>(null)
   const validDocIds = new Set(documents.map((d) => d.id))
 
   const slotsFor = (skill: SkillOut): (string | null)[] => {
@@ -112,6 +121,7 @@ export function SkillsPanel({ skills, documents, defaultDocId, onApply, onEdit }
           const valid = isSelectionValid(arity, slots)
           const docIds = applyDocIds(arity, slots)
           const hint = arity === 2 ? mode2Hint(slots) : null
+          const confirming = confirmId === s.id
 
           return (
             <li key={s.id} className="rounded-md border border-slate-800 bg-slate-900/60 p-2">
@@ -148,6 +158,7 @@ export function SkillsPanel({ skills, documents, defaultDocId, onApply, onEdit }
               )}
               <div className="mt-2 flex flex-wrap items-center gap-1.5">
                 <button
+                  type="button"
                   className="rounded bg-slate-700 px-2 py-1 text-[11px] text-slate-200"
                   onClick={() => onEdit(s.id, s.name)}
                 >
@@ -155,12 +166,56 @@ export function SkillsPanel({ skills, documents, defaultDocId, onApply, onEdit }
                 </button>
                 {s.status === 'draft' && (
                   <button
+                    type="button"
                     className="rounded bg-slate-700 px-2 py-1 text-[11px] text-slate-200"
                     onClick={() => void skills.commit(s.id)}
                   >
                     Коммит
                   </button>
                 )}
+                <div
+                  className="flex flex-wrap items-center gap-1.5"
+                  onBlur={(e) => {
+                    const container = e.currentTarget
+                    const skillId = s.id
+                    requestAnimationFrame(() => {
+                      if (!container.contains(document.activeElement)) {
+                        setConfirmId((id) => (id === skillId ? null : id))
+                      }
+                    })
+                  }}
+                >
+                  {confirming ? (
+                    <>
+                      <button
+                        type="button"
+                        autoFocus
+                        className="rounded bg-red-600/80 px-2 py-1 text-[11px] text-white"
+                        onClick={() => {
+                          setConfirmId(null)
+                          onDelete(s.id)
+                        }}
+                      >
+                        Удалить
+                      </button>
+                      <button
+                        type="button"
+                        className="rounded bg-slate-700 px-2 py-1 text-[11px] text-slate-300"
+                        onClick={() => setConfirmId(null)}
+                      >
+                        Отмена
+                      </button>
+                    </>
+                  ) : (
+                    <button
+                      type="button"
+                      className="rounded bg-slate-700 px-2 py-1 text-[11px] text-red-400 hover:bg-slate-800"
+                      onClick={() => setConfirmId(s.id)}
+                    >
+                      Удалить
+                    </button>
+                  )}
+                </div>
                 {s.status === 'committed' && (
                   <div className="relative flex w-full flex-col gap-1.5">
                     {documents.length === 0 && (

@@ -148,6 +148,19 @@ export default function App() {
     }
   }, [sessions])
 
+  const handleDeleteSkill = useCallback(
+    async (skillId: string) => {
+      try {
+        await skillsHook.remove(skillId)
+        if (editingSkill?.skillId === skillId) {
+          setEditingSkill(null)
+          setSessionId(null)
+        }
+      } catch {}
+    },
+    [skillsHook, editingSkill],
+  )
+
   const handleCreateSkill = useCallback(async () => {
     if (!sessionId) return
     setBuildingSkill(true)
@@ -232,6 +245,7 @@ export default function App() {
             defaultDocId={currentDocId}
             onApply={handleApply}
             onEdit={handleEditSkill}
+            onDelete={(id) => void handleDeleteSkill(id)}
           />
         </aside>
         <main className="overflow-hidden">
