@@ -152,6 +152,20 @@ def test_ingest_blank_filename_falls_back_to_doc_id(db: Database, tmp_path: Path
     assert (tmp_path / row.path).read_bytes() == b"content"
 
 
+def test_ingest_garbage_filename_falls_back_to_doc_id(db: Database, tmp_path: Path) -> None:
+    row = ingest_file(db, tmp_path, filename="@@@!!!.md", content=b"content")
+    assert row.title == "@@@!!!"
+    assert row.path == f"documents/{row.id}.md"
+    assert (tmp_path / row.path).read_bytes() == b"content"
+
+
+def test_ingest_primer_md_keeps_original_title(db: Database, tmp_path: Path) -> None:
+    row = ingest_file(db, tmp_path, filename="Пример.md", content=b"# hi")
+    assert row.title == "Пример"
+    assert row.path == f"documents/primer-{row.id[:8]}.md"
+    assert not row.path.endswith(f"/{row.id}.md")
+
+
 def test_ingest_path_id_prefix_matches_row_id(db: Database, tmp_path: Path) -> None:
     row = ingest_file(db, tmp_path, filename="Отчёт по продажам.md", content=b"x")
     stem = row.path.removeprefix("documents/").removesuffix(".md")
