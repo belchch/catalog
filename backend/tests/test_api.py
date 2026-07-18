@@ -7,7 +7,10 @@ provider is a :class:`FakeProvider` whose ``script`` is populated per test.
 
 from __future__ import annotations
 
+import json
+
 from app.llm.base import CompletionResult, ToolCall
+
 from app.skills.config import SkillConfig, VerifyCheck, compute_tags
 from app.skills.repo_skill import create_skill, get_skill, update_status
 from app.storage.repo_message import add_message, list_messages
@@ -225,6 +228,62 @@ def test_ws_session_planner(client, provider, db) -> None:
     roles = [m["role"] for m in msgs]
     assert roles.count("user") >= 1
     assert roles.count("assistant") >= 1
+
+
+def test_ws_session_attach_documents_and_prompt(client, provider, db) -> None:
+    session_id = client.post("/sessions").json()["id"]
+    doc_a = _upload(client, "alpha.md", b"# Alpha\n")
+    doc_b = _upload(client, "beta.md", b"# Beta\n")
+    provider.script = [_completion("план по документам")]
+
+    payload = {
+        "type": "user",
+        "content": "работай с этими",
+        "doc_ids": [doc_a, doc_b],
+    }
+    with client.websocket_connect(f"/sessions/{session_id}") as ws:
+        ws.send_text(json.dumps(payload))
+        frames: list[dict] = []
+        while True:
+            frame = ws.receive_json()
+            frames.append(frame)
+            if frame.get("type") == "finish":
+                break
+
+    session_docs = next(f for f in frames if f["type"] == "session_docs")
+    assert {d["id"] for d in session_docs["documents"]} == {doc_a, doc_b}
+    titles = {d["title"] for d in session_docs["documents"]}
+    assert "alpha" in titles
+    assert "beta" in titles
+
+    listing = client.get(f"/sessions/{session_id}/documents")
+    assert listing.status_code == 200
+    listed_ids = [d["id"] for d in listing.json()]
+    assert set(listed_ids) == {doc_a, doc_b}
+
+    provider.script = [_completion("ещё раз")]
+    with client.websocket_connect(f"/sessions/{session_id}") as ws:
+        ws.send_text(json.dumps(payload))
+        while True:
+            frame = ws.receive_json()
+            if frame.get("type") == "finish":
+                break
+
+    listing2 = client.get(f"/sessions/{session_id}/documents").json()
+    assert len(listing2) == 2
+
+    assert provider.requests
+    system = provider.requests[0]["messages"][0]
+    assert system.role == "system"
+    assert doc_a in system.content
+    assert doc_b in system.content
+    assert "alpha" in system.content
+    assert "beta" in system.content
+
+
+def test_get_session_documents_404(client) -> None:
+    resp = client.get("/sessions/missing/documents")
+    assert resp.status_code == 404
 
 
 def test_parse_suggestions_extracts_and_strips() -> None:

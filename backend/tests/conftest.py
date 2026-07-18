@@ -70,6 +70,7 @@ class FakeProvider:
                 "tools": [t.name for t in tools] if tools else None,
                 "n_messages": len(messages),
                 "reasoning": reasoning,
+                "messages": messages,
             }
         )
         if not self.script:

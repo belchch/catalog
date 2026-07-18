@@ -142,6 +142,7 @@ def delete_document(
         if file_path.is_file():
             file_path.unlink()
         _nullify_skill_run_refs(conn, doc_id)
+        conn.execute("DELETE FROM session_document WHERE document_id = ?", (doc_id,))
         conn.execute("DELETE FROM document WHERE id = ?", (doc_id,))
     return doc
 

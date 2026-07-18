@@ -29,7 +29,7 @@ from app.agent import run_agent
 from app.agent.events import FinishEvent, ToolResultEvent
 from app.agent.registry import ToolRegistry
 from app.api.deps import agent_event_to_frame, get_db
-from app.api.schemas import MessageOut, SessionCreated, SessionOut
+from app.api.schemas import DocumentOut, MessageOut, SessionCreated, SessionOut
 from app.config import Settings
 from app.llm.base import Message
 from app.llm.log_context import prompt_log_context
@@ -41,6 +41,8 @@ from app.storage.repo_session import (
     get_session,
     list_sessions,
 )
+from app.storage.repo_session_document import attach_documents, list_session_documents
+
 
 router = APIRouter()
 
@@ -89,17 +91,50 @@ def parse_suggestions(text: str) -> tuple[str, list[str]]:
     return clean, items
 
 
-def _parse_user_payload(raw: str) -> str:
-    """Accept either plain text or ``{"type":"user","content":"..."}`` JSON."""
+def _parse_user_payload(raw: str) -> tuple[str, list[str]]:
     try:
         data = json.loads(raw)
     except (json.JSONDecodeError, TypeError):
-        return raw
+        return raw, []
     if isinstance(data, dict) and data.get("type") == "user":
-        return str(data.get("content", ""))
+        content = str(data.get("content", ""))
+        raw_ids = data.get("doc_ids") or []
+        doc_ids = (
+            [str(d) for d in raw_ids if d]
+            if isinstance(raw_ids, list)
+            else []
+        )
+        return content, doc_ids
     if isinstance(data, dict) and isinstance(data.get("content"), str):
-        return data["content"]
-    return raw
+        return data["content"], []
+    return raw, []
+
+
+def _planner_system_prompt(db: Database, session_id: str) -> str:
+    docs = list_session_documents(db, session_id)
+    if not docs:
+        return PLANNER_SYSTEM_PROMPT
+    lines = [PLANNER_SYSTEM_PROMPT, "", "Привязанные к сессии документы:"]
+    for doc in docs:
+        lines.append(f"- {doc.id}: {doc.title}")
+    return "\n".join(lines)
+
+
+def _session_docs_frame(db: Database, session_id: str) -> dict:
+    docs = list_session_documents(db, session_id)
+    return {
+        "type": "session_docs",
+        "documents": [
+            {
+                "id": d.id,
+                "title": d.title,
+                "kind": d.kind,
+                "created_at": d.created_at,
+            }
+            for d in docs
+        ],
+    }
+
 
 
 def _is_cancel_frame(raw: str) -> bool:
@@ -186,6 +221,20 @@ async def list_session_messages_endpoint(
     return [MessageOut(**m) for m in list_messages(db, session_id)]
 
 
+@router.get("/sessions/{session_id}/documents", response_model=list[DocumentOut])
+async def list_session_documents_endpoint(
+    session_id: str,
+    db: Database = Depends(get_db),
+) -> list[DocumentOut]:
+    if get_session(db, session_id) is None:
+        raise HTTPException(status_code=404, detail="session not found")
+    return [
+        DocumentOut(id=d.id, title=d.title, kind=d.kind, created_at=d.created_at)
+        for d in list_session_documents(db, session_id)
+    ]
+
+
+
 @router.delete("/sessions/{session_id}", status_code=204)
 async def delete_session_endpoint(
     session_id: str,
@@ -205,14 +254,8 @@ async def _run_planner_turn(
     tools: ToolRegistry,
     db: Database,
     session_id: str,
+    system_prompt: str,
 ) -> tuple[str | None, bool, bool, str | None]:
-    """Run one planner agent turn, streaming frames, concurrently with a cancel listener.
-
-    Returns ``(final_text, final_capped, cancelled, buffered_frame)``. The
-    ``buffered_frame`` is a non-cancel client frame that arrived while the agent
-    was running (the UI normally disables input during streaming, but we hold
-    onto one such frame so it is not silently lost).
-    """
     state: dict[str, object] = {"final_text": None, "final_capped": False}
 
     async def _agent_loop() -> None:
@@ -220,11 +263,12 @@ async def _run_planner_turn(
             async for event in run_agent(
                 provider=provider,
                 model=model,
-                system_prompt=PLANNER_SYSTEM_PROMPT,
+                system_prompt=system_prompt,
                 messages=messages,
                 tools=tools,
                 use_stream=False,
             ):
+
                 frame = agent_event_to_frame(event)
                 if frame is not None:
                     await websocket.send_json(frame)
@@ -327,7 +371,10 @@ async def session_ws(
             if _is_cancel_frame(raw) or _is_keepalive_frame(raw):
                 continue
 
-            content = _parse_user_payload(raw)
+            content, doc_ids = _parse_user_payload(raw)
+            if doc_ids:
+                attach_documents(db, session_id, doc_ids)
+                await websocket.send_json(_session_docs_frame(db, session_id))
             add_message(db, session_id=session_id, role="user", content=content)
 
             messages = _conversation_messages(db, session_id)
@@ -348,6 +395,7 @@ async def session_ws(
                 tools=tools,
                 db=db,
                 session_id=session_id,
+                system_prompt=_planner_system_prompt(db, session_id),
             )
 
             # Emit the final assistant text as a single token frame (collect

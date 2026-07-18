@@ -21,6 +21,9 @@ from app.storage.repo_document import (
     list_documents_by_kind,
     reconcile_orphans,
 )
+from app.storage.repo_session import create_session
+from app.storage.repo_session_document import attach_documents, list_session_documents
+
 
 
 @pytest.fixture()
@@ -40,6 +43,7 @@ def test_schema_creates_all_tables(db: Database) -> None:
     assert {
         "document",
         "session",
+        "session_document",
         "message",
         "skill",
         "skill_run",
@@ -51,6 +55,7 @@ def test_init_schema_is_idempotent(db: Database) -> None:
     assert {
         "document",
         "session",
+        "session_document",
         "message",
         "skill",
         "skill_run",
@@ -81,6 +86,20 @@ def test_list_documents_and_by_kind(db: Database) -> None:
     assert len(list_documents_by_kind(db, "md")) == 2
     assert len(list_documents_by_kind(db, "docx")) == 1
     assert list_documents_by_kind(db, "result_md") == []
+
+
+def test_attach_documents_idempotent(db: Database) -> None:
+    session_id = create_session(db)
+    a = create_document(db, title="Alpha", path="documents/a.md", kind="md")
+    b = create_document(db, title="Beta", path="documents/b.md", kind="md")
+
+    attach_documents(db, session_id, [a.id, b.id])
+    attach_documents(db, session_id, [a.id, b.id])
+    attach_documents(db, session_id, ["missing-id"])
+
+    docs = list_session_documents(db, session_id)
+    assert [d.id for d in docs] == [a.id, b.id]
+    assert [d.title for d in docs] == ["Alpha", "Beta"]
 
 
 def test_ingest_md_and_read(db: Database, tmp_path: Path) -> None:

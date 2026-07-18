@@ -21,6 +21,14 @@ CREATE TABLE IF NOT EXISTS session(
   title TEXT,
   updated_at TEXT NOT NULL
 );                                -- status: planning|done
+CREATE TABLE IF NOT EXISTS session_document(
+  session_id TEXT NOT NULL,
+  document_id TEXT NOT NULL,
+  attached_at TEXT NOT NULL,
+  PRIMARY KEY (session_id, document_id),
+  FOREIGN KEY (session_id) REFERENCES session(id),
+  FOREIGN KEY (document_id) REFERENCES document(id)
+);
 CREATE TABLE IF NOT EXISTS message(
   id INTEGER PRIMARY KEY AUTOINCREMENT, session_id TEXT NOT NULL,
   role TEXT NOT NULL, content TEXT, tool_name TEXT, tool_call_id TEXT,
