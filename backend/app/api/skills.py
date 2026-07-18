@@ -504,6 +504,9 @@ async def list_skills_endpoint(
             kind=r.get("kind", "agent"),
             tags=r.get("tags", []),
             input_arity=r.get("input_arity"),
+            provider=r.get("provider"),
+            model=r.get("model"),
+            reasoning=r.get("reasoning"),
         )
         for r in rows
     ]

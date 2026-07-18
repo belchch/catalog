@@ -1102,6 +1102,35 @@ def test_list_skills_returns_input_arity(client, db) -> None:
     assert by_name["AnyList"]["input_arity"] is None
 
 
+def test_list_skills_returns_model_params(client, db) -> None:
+    configured = SkillConfig(
+        name="Configured",
+        description="has model params",
+        system_prompt="Do it.",
+        allowed_tools=["read_document"],
+        model="glm-4.6",
+        provider="zai",
+        reasoning="high",
+    )
+    create_skill(
+        db,
+        name=configured.name,
+        description=configured.description,
+        config=configured,
+        status="committed",
+    )
+    _seed_committed_skill(db, name="Defaults")
+
+    rows = client.get("/skills").json()
+    by_name = {r["name"]: r for r in rows}
+    assert by_name["Configured"]["provider"] == "zai"
+    assert by_name["Configured"]["model"] == "glm-4.6"
+    assert by_name["Configured"]["reasoning"] == "high"
+    assert by_name["Defaults"]["model"] == "test/model"
+    assert by_name["Defaults"]["provider"] is None
+    assert by_name["Defaults"]["reasoning"] is None
+
+
 # --------------------------------------------------------------------------- #
 # Apply (run create / stream / get)
 # --------------------------------------------------------------------------- #

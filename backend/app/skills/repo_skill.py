@@ -106,12 +106,18 @@ def list_skills(db: Database, status: str | None = None) -> list[dict]:
             config_kind = config.kind
             config_tags = compute_tags(config)
             config_input_arity = config.input_arity
+            config_model = config.model or None
+            config_provider = config.provider or None
+            config_reasoning = config.reasoning or None
         except (ValueError, KeyError):
             # Unparseable/legacy config: degrade to the agent defaults so the
             # row still renders on the UI with an ``ai`` tag.
             config_kind = "agent"
             config_tags = ["ai"]
             config_input_arity = None
+            config_model = None
+            config_provider = None
+            config_reasoning = None
         result.append(
             {
                 "id": r["id"],
@@ -123,6 +129,9 @@ def list_skills(db: Database, status: str | None = None) -> list[dict]:
                 "kind": config_kind,
                 "tags": config_tags,
                 "input_arity": config_input_arity,
+                "model": config_model,
+                "provider": config_provider,
+                "reasoning": config_reasoning,
             }
         )
     return result

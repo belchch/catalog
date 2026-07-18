@@ -24,6 +24,9 @@ class SkillOut(BaseModel):
     tags: list[str] = Field(default_factory=list)
     # Input mode (CATALOG-4): 1, 2, or null (= document list / any >= 1).
     input_arity: int | None = None
+    provider: str | None = None
+    model: str | None = None
+    reasoning: str | None = None
 
 
 class ApplyRequest(BaseModel):
