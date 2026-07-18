@@ -29,16 +29,6 @@ export function DocumentList({ docs, currentDocId, onSelect }: DocumentListProps
 
   return (
     <div className="flex flex-col gap-2">
-      <div className="flex items-center justify-between">
-        <h2 className="text-sm font-semibold text-slate-200">Документы</h2>
-        <button
-          className="rounded bg-slate-800 px-2 py-1 text-xs text-slate-300 disabled:opacity-50"
-          onClick={() => void docs.refresh()}
-          disabled={docs.loading}
-        >
-          {docs.loading ? '…' : 'Обновить'}
-        </button>
-      </div>
       <label className="cursor-pointer rounded-md border border-dashed border-slate-700 px-3 py-2 text-center text-xs text-slate-400 hover:border-slate-500">
         {uploading ? 'Загрузка…' : '+ Загрузить .md / .docx'}
         <input
