@@ -16,10 +16,12 @@ interface ChatProps {
   streaming: boolean
   cancelling: boolean
   closed: boolean
+  reconnecting: boolean
   error: string | null
   suggestions: string[]
   onSend: (text: string) => void
   onCancel: () => void
+  onReconnect: () => void
   onCreateSkill: () => void
   buildingSkill: boolean
   // CATALOG-17: name of the skill being edited, or null for a regular
@@ -32,10 +34,12 @@ export function Chat({
   streaming,
   cancelling,
   closed,
+  reconnecting,
   error,
   suggestions,
   onSend,
   onCancel,
+  onReconnect,
   onCreateSkill,
   buildingSkill,
   editingSkillName,
@@ -87,7 +91,27 @@ export function Chat({
         {streaming && (
           <div className="my-2 text-xs text-slate-400">●●● планировщик думает…</div>
         )}
-        {closed && <div className="my-2 text-xs text-amber-400">Соединение закрыто</div>}
+        {(closed || reconnecting) && (
+          <div
+            className="my-2 flex items-center gap-2 text-xs"
+            role="status"
+            aria-live="polite"
+            aria-busy={reconnecting}
+          >
+            <span className="text-amber-400">
+              {reconnecting ? 'Переподключаю…' : 'Соединение закрыто'}
+            </span>
+            <button
+              type="button"
+              className="rounded-md border border-slate-700 px-2 py-1 text-xs text-slate-300 transition-colors hover:border-indigo-500 hover:bg-slate-800 disabled:opacity-50"
+              onClick={onReconnect}
+              disabled={reconnecting}
+              aria-busy={reconnecting}
+            >
+              {reconnecting ? 'Переподключаю…' : 'Переподключить'}
+            </button>
+          </div>
+        )}
         {error && <div className="my-2 text-xs text-red-400">Ошибка: {error}</div>}
         <div ref={bottomRef} />
       </div>

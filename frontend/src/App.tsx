@@ -251,10 +251,12 @@ export default function App() {
               streaming={planner.streaming}
               cancelling={planner.cancelling}
               closed={planner.closed}
+              reconnecting={planner.reconnecting}
               error={planner.error}
               suggestions={planner.suggestions}
               onSend={handleSend}
               onCancel={planner.cancel}
+              onReconnect={planner.reconnect}
               onCreateSkill={handleCreateSkill}
               buildingSkill={buildingSkill}
               editingSkillName={editingSkill?.name ?? null}

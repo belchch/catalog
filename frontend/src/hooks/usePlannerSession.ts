@@ -18,10 +18,12 @@ export interface UsePlannerSessionResult {
   streaming: boolean
   cancelling: boolean
   closed: boolean
+  reconnecting: boolean
   error: string | null
   suggestions: string[]
   send: (text: string) => void
   cancel: () => void
+  reconnect: () => void
 }
 
 export interface UsePlannerSessionOptions {
@@ -63,8 +65,10 @@ export function usePlannerSession(
   const [streaming, setStreaming] = useState(false)
   const [cancelling, setCancelling] = useState(false)
   const [closed, setClosed] = useState(false)
+  const [reconnecting, setReconnecting] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [suggestions, setSuggestions] = useState<string[]>([])
+  const [reconnectNonce, setReconnectNonce] = useState(0)
 
   const connRef = useRef<PlannerConnection | null>(null)
   const assistantBufferRef = useRef<string>('')
@@ -82,6 +86,7 @@ export function usePlannerSession(
     setStreaming(false)
     setCancelling(false)
     setClosed(false)
+    setReconnecting(false)
     setError(null)
     setSuggestions([])
     assistantBufferRef.current = ''
@@ -167,6 +172,7 @@ export function usePlannerSession(
       resetLocal()
     }
     prevSessionRef.current = sessionId
+    setClosed(false)
     readyRef.current = false
     skipHydrateRef.current =
       streamingRef.current ||
@@ -174,6 +180,7 @@ export function usePlannerSession(
       pendingRef.current.length > 0
 
     let cancelled = false
+    let intentionalClose = false
 
     void listSessionMessages(sessionId).then(
       (raw) => {
@@ -201,23 +208,28 @@ export function usePlannerSession(
     const conn = connectPlanner(sessionId, handleEvent, {
       onOpen: () => {
         readyRef.current = true
+        setClosed(false)
+        setReconnecting(false)
         const queued = pendingRef.current
         pendingRef.current = []
         for (const text of queued) connRef.current?.send(text)
       },
       onClose: () => {
         readyRef.current = false
+        if (intentionalClose) return
+        setReconnecting(false)
         if (!hadErrorRef.current) setClosed(true)
       },
     })
     connRef.current = conn
     return () => {
+      intentionalClose = true
       cancelled = true
       conn.close()
       connRef.current = null
       readyRef.current = false
     }
-  }, [sessionId, handleEvent, resetLocal])
+  }, [sessionId, handleEvent, resetLocal, reconnectNonce])
 
   const send = useCallback((text: string) => {
     const trimmed = text.trim()
@@ -241,5 +253,25 @@ export function usePlannerSession(
     setCancelling(true)
   }, [])
 
-  return { messages, streaming, cancelling, closed, error, suggestions, send, cancel }
+  const reconnect = useCallback(() => {
+    if (!sessionId) return
+    setReconnecting(true)
+    setClosed(false)
+    setError(null)
+    hadErrorRef.current = false
+    setReconnectNonce((n) => n + 1)
+  }, [sessionId])
+
+  return {
+    messages,
+    streaming,
+    cancelling,
+    closed,
+    reconnecting,
+    error,
+    suggestions,
+    send,
+    cancel,
+    reconnect,
+  }
 }
