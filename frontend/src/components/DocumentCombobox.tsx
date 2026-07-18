@@ -7,6 +7,7 @@ type DocumentComboboxProps = {
   placeholder: string
   disabled?: boolean
   triggerClassName?: string
+  placement?: 'bottom' | 'top'
 } & (
   | {
       multiple?: false
@@ -28,6 +29,7 @@ export function DocumentCombobox(props: DocumentComboboxProps) {
     multiple = false,
     disabled = false,
     triggerClassName,
+    placement = 'bottom',
   } = props
   const [open, setOpen] = useState(false)
   const [filter, setFilter] = useState('')
@@ -93,15 +95,7 @@ export function DocumentCombobox(props: DocumentComboboxProps) {
   }
 
   return (
-    <div
-      ref={rootRef}
-      className="relative"
-      onBlur={(e) => {
-        if (!rootRef.current?.contains(e.relatedTarget as Node)) {
-          close()
-        }
-      }}
-    >
+    <div ref={rootRef} className="relative">
       <button
         type="button"
         role="combobox"
@@ -136,7 +130,10 @@ export function DocumentCombobox(props: DocumentComboboxProps) {
           id={listId}
           role="listbox"
           aria-multiselectable={multiple || undefined}
-          className="absolute z-10 mt-1 max-h-48 w-full overflow-y-auto rounded border border-slate-700 bg-slate-900 shadow-xl"
+          className={
+            'absolute z-10 max-h-48 w-full overflow-y-auto rounded border border-slate-700 bg-slate-900 shadow-xl ' +
+            (placement === 'top' ? 'bottom-full mb-1' : 'mt-1')
+          }
           onKeyDown={(e) => {
             if (e.key === 'Escape') {
               e.preventDefault()

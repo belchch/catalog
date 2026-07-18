@@ -208,6 +208,7 @@ export function Chat({
               ariaLabel="Добавить документы в сессию"
               placeholder="+ документ"
               disabled={streaming}
+              placement="top"
               triggerClassName="flex w-full items-center justify-between rounded-full border border-slate-700 bg-slate-800/60 px-3 py-1 text-left text-xs text-slate-200 hover:border-indigo-500 hover:bg-slate-800 disabled:opacity-50"
             />
           </div>
