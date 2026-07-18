@@ -14,7 +14,7 @@ import json
 import httpx
 
 from app.llm.base import Message
-from app.llm.zai import ZaiProvider
+from app.llm.zai import DEFAULT_ZAI_MODEL, ZaiProvider
 
 BASE = "https://api.z.ai/api/paas/v4"
 API_KEY = "zai-jwt-token"
@@ -37,27 +37,25 @@ def _make_provider(
     )
 
 
-# --------------------------------------------------------------------------- #
-# list_models — hardcoded GLM catalog (no network)
-# --------------------------------------------------------------------------- #
-
-
 def test_list_models_returns_hardcoded_catalog() -> None:
     async def _run() -> None:
-        # No handler needed: list_models does not hit the network.
         transport = httpx.MockTransport(lambda req: httpx.Response(404))
         client = httpx.AsyncClient(transport=transport)
         provider = ZaiProvider(client=client, api_key=API_KEY, base_url=BASE)
         models = await provider.list_models()
         ids = [m.id for m in models]
+        assert DEFAULT_ZAI_MODEL in ids
+        assert "glm-5.2" in ids
+        assert "glm-4.7" in ids
         assert "glm-4.6" in ids
         assert "glm-4.5" in ids
-        assert "glm-4.5-flash" in ids
-        # Context length is populated from the hardcoded catalog.
-        glm46 = next(m for m in models if m.id == "glm-4.6")
-        assert glm46.context_length == 131072
-        assert glm46.name == "GLM-4.6"
-        # Returns a fresh copy each call (callers may mutate).
+        assert "glm-4.5-x" not in ids
+        assert "glm-4-plus" not in ids
+        glm52 = next(m for m in models if m.id == "glm-5.2")
+        assert glm52.context_length == 1048576
+        assert glm52.name == "GLM-5.2"
+        assert glm52.supports_reasoning is True
+        assert glm52.reasoning_variants == ["high", "max"]
         models2 = await provider.list_models()
         assert models is not models2
         assert [m.id for m in models2] == ids
@@ -65,14 +63,14 @@ def test_list_models_returns_hardcoded_catalog() -> None:
     asyncio.run(_run())
 
 
-# --------------------------------------------------------------------------- #
-# complete — reasoning_content from a thinking model
-# --------------------------------------------------------------------------- #
-
-
 async def _handler_complete_reasoning(request: httpx.Request) -> httpx.Response:
     assert request.url.path == "/api/paas/v4/chat/completions"
     assert request.headers["authorization"] == f"Bearer {API_KEY}"
+    body = json.loads(request.content)
+    assert body["model"] == "glm-5.2"
+    assert body["thinking"] == {"type": "enabled"}
+    assert body["reasoning_effort"] == "max"
+    assert "reasoning" not in body
     return httpx.Response(
         200,
         json={
@@ -95,8 +93,9 @@ def test_complete_collects_reasoning() -> None:
     async def _run() -> None:
         provider = _make_provider(_handler_complete_reasoning)
         result = await provider.complete(
-            model="glm-4.6",
+            model="glm-5.2",
             messages=[Message(role="user", content="Capital of France?")],
+            reasoning="max",
         )
         assert result.content == "Paris"
         assert result.reasoning == "The capital of France is Paris."
@@ -105,9 +104,32 @@ def test_complete_collects_reasoning() -> None:
     asyncio.run(_run())
 
 
-# --------------------------------------------------------------------------- #
-# stream_complete — reasoning_content in SSE deltas
-# --------------------------------------------------------------------------- #
+def test_complete_strips_zai_model_prefix() -> None:
+    async def _run() -> None:
+        async def handler(request: httpx.Request) -> httpx.Response:
+            body = json.loads(request.content)
+            assert body["model"] == "glm-4.6"
+            return httpx.Response(
+                200,
+                json={
+                    "choices": [
+                        {
+                            "message": {"role": "assistant", "content": "ok"},
+                            "finish_reason": "stop",
+                        }
+                    ],
+                    "usage": {},
+                },
+            )
+
+        provider = _make_provider(handler)
+        result = await provider.complete(
+            model="zai/glm-4.6",
+            messages=[Message(role="user", content="hi")],
+        )
+        assert result.content == "ok"
+
+    asyncio.run(_run())
 
 
 async def _handler_stream_reasoning(request: httpx.Request) -> httpx.Response:
@@ -141,11 +163,6 @@ def test_stream_collects_content_and_reasoning() -> None:
         assert reasoning_parts == ["step 1"]
 
     asyncio.run(_run())
-
-
-# --------------------------------------------------------------------------- #
-# 401 — z.ai-specific message
-# --------------------------------------------------------------------------- #
 
 
 def test_auth_error_message_is_zai_specific() -> None:

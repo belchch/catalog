@@ -21,33 +21,60 @@ See ADR-0013.
 
 from __future__ import annotations
 
+from typing import Any
+
 from app.llm.base import ModelInfo
 from app.llm.openai_compatible import OpenAICompatibleProvider
 
-# Hardcoded GLM model catalog (z.ai /models is unreliable). Context lengths
-# are the documented maximums; update here when z.ai ships new models.
-# GLM "thinking"/"X" models expose an explicit reasoning mode (CATALOG-6).
-_REASONING_VARIANTS = ["low", "medium", "high"]
+_REASONING_VARIANTS = ["high", "max"]
 _ZAI_MODELS: list[ModelInfo] = [
+    ModelInfo(
+        id="glm-5.2",
+        name="GLM-5.2",
+        context_length=1048576,
+        supports_reasoning=True,
+        reasoning_variants=list(_REASONING_VARIANTS),
+    ),
+    ModelInfo(
+        id="glm-5.1",
+        name="GLM-5.1",
+        context_length=200000,
+        supports_reasoning=True,
+        reasoning_variants=list(_REASONING_VARIANTS),
+    ),
+    ModelInfo(
+        id="glm-5",
+        name="GLM-5",
+        context_length=200000,
+        supports_reasoning=True,
+        reasoning_variants=list(_REASONING_VARIANTS),
+    ),
+    ModelInfo(
+        id="glm-5-turbo",
+        name="GLM-5-Turbo",
+        context_length=200000,
+        supports_reasoning=True,
+        reasoning_variants=list(_REASONING_VARIANTS),
+    ),
+    ModelInfo(
+        id="glm-4.7",
+        name="GLM-4.7",
+        context_length=200000,
+        supports_reasoning=True,
+        reasoning_variants=list(_REASONING_VARIANTS),
+    ),
     ModelInfo(
         id="glm-4.6",
         name="GLM-4.6",
-        context_length=131072,
+        context_length=200000,
         supports_reasoning=True,
         reasoning_variants=list(_REASONING_VARIANTS),
     ),
     ModelInfo(id="glm-4.5", name="GLM-4.5", context_length=131072),
     ModelInfo(id="glm-4.5-air", name="GLM-4.5-Air", context_length=131072),
-    ModelInfo(id="glm-4.5-flash", name="GLM-4.5-Flash", context_length=131072),
-    ModelInfo(
-        id="glm-4.5-x",
-        name="GLM-4.5-X",
-        context_length=131072,
-        supports_reasoning=True,
-        reasoning_variants=list(_REASONING_VARIANTS),
-    ),
-    ModelInfo(id="glm-4-plus", name="GLM-4-Plus", context_length=131072),
 ]
+
+DEFAULT_ZAI_MODEL = "glm-5.2"
 
 
 class ZaiProvider(OpenAICompatibleProvider):
@@ -71,6 +98,18 @@ class ZaiProvider(OpenAICompatibleProvider):
             backoff_base=backoff_base,
             auth_error_message="Invalid z.ai API key — check ZAI_API_KEY in .env",
         )
+
+    def _normalize_model(self, model: str) -> str:
+        prefix = f"{self._provider_name}/"
+        if model.startswith(prefix):
+            return model[len(prefix) :]
+        return model
+
+    def _apply_reasoning(self, body: dict[str, Any], reasoning: str) -> None:
+        if not reasoning:
+            return
+        body["thinking"] = {"type": "enabled"}
+        body["reasoning_effort"] = reasoning
 
     async def list_models(self) -> list[ModelInfo]:
         """Return the hardcoded GLM catalog (z.ai /models is unreliable)."""

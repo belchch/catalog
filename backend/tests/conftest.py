@@ -99,6 +99,9 @@ def settings(tmp_path: Path) -> Settings:
         workspace_dir=str(tmp_path / "ws"),
         prompt_log_dir=str(tmp_path / "ws" / "prompt_logs"),
         default_model="test/model",
+        app_provider="",
+        zai_api_key="",
+        api_key="test-key",
     )
 
 

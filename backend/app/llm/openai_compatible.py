@@ -127,6 +127,13 @@ class OpenAICompatibleProvider:
             context_length=int(ctx) if ctx is not None else None,
         )
 
+    def _normalize_model(self, model: str) -> str:
+        return model
+
+    def _apply_reasoning(self, body: dict[str, Any], reasoning: str) -> None:
+        if reasoning:
+            body["reasoning"] = {"effort": reasoning}
+
     # --- HTTP with retry ---------------------------------------------------
 
     async def _post_with_retry(
@@ -220,6 +227,7 @@ class OpenAICompatibleProvider:
         tool_choice: str = "auto",
         reasoning: str = "",
     ) -> CompletionResult:
+        model = self._normalize_model(model)
         body: dict[str, Any] = {
             "model": model,
             "messages": [message_to_dict(m) for m in messages],
@@ -228,11 +236,7 @@ class OpenAICompatibleProvider:
         if tools is not None:
             body["tools"] = tool_specs_to_dicts(tools)
             body["tool_choice"] = tool_choice
-        # CATALOG-6: propagate the selected reasoning variant into the request.
-        # OpenRouter convention ``reasoning: {"effort": ...}``; harmless for
-        # providers that ignore it (e.g. z.ai, where reasoning is model-driven).
-        if reasoning:
-            body["reasoning"] = {"effort": reasoning}
+        self._apply_reasoning(body, reasoning)
 
         logger.info(
             "complete request: model=%s messages=%d tools=%s temperature=%.1f",
@@ -351,6 +355,7 @@ class OpenAICompatibleProvider:
         temperature: float = 0.0,
         reasoning: str = "",
     ) -> AsyncIterator[StreamDelta]:
+        model = self._normalize_model(model)
         body: dict[str, Any] = {
             "model": model,
             "messages": [message_to_dict(m) for m in messages],
@@ -359,8 +364,7 @@ class OpenAICompatibleProvider:
         }
         if tools is not None:
             body["tools"] = tool_specs_to_dicts(tools)
-        if reasoning:
-            body["reasoning"] = {"effort": reasoning}
+        self._apply_reasoning(body, reasoning)
 
         logger.info(
             "stream_complete request: model=%s messages=%d tools=%s temperature=%.1f",

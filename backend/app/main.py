@@ -33,6 +33,7 @@ from app.config import Settings, get_settings
 from app.documents.tools import build_document_tools
 from app.llm.factory import build_providers, select_provider
 from app.llm.openrouter import build_debug_hooks
+from app.llm.zai import DEFAULT_ZAI_MODEL
 from app.logging_config import setup_logging
 from app.storage.db import Database
 from app.storage.git import ensure_repo
@@ -59,12 +60,20 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.http_client = http_client
     providers = build_providers(settings, http_client)
     app.state.providers = providers
-    app.state.provider = select_provider(providers, settings.app_provider)
+    selected = select_provider(providers, settings.app_provider)
+    app.state.provider = selected
     # CATALOG-14: mutable runtime selection of the active provider/model. Seeded
     # from env (frozen Settings); switchable at runtime via POST /settings. The
     # frozen Settings remain the source of API keys and the initial default.
-    app.state.active_provider = settings.app_provider or next(iter(providers), "openrouter")
-    app.state.active_model = settings.default_model
+    active_name = next(
+        (name for name, inst in providers.items() if inst is selected),
+        next(iter(providers), "openrouter"),
+    )
+    app.state.active_provider = active_name
+    default_model = settings.default_model
+    if active_name == "zai" and ("/" in default_model or not default_model):
+        default_model = DEFAULT_ZAI_MODEL
+    app.state.active_model = default_model
     app.state.workspace = settings.workspace_dir
     app.state.tools = build_document_tools(db, settings.workspace_dir)
     app.state.settings = settings
