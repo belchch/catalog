@@ -31,12 +31,14 @@ const ARITY_OPTIONS: { value: InputArity; label: string }[] = [
 export function SkillSettingsModal({ skillId, preview, onSave, onClose }: SkillSettingsModalProps) {
   const [models, setModels] = useState<ModelOut[]>([])
   const [providers, setProviders] = useState<ProviderOut[]>([])
+  const [name, setName] = useState(preview.name)
   const [inputArity, setInputArity] = useState<InputArity>(() => initialArity(preview.input_arity))
   const [model, setModel] = useState(preview.model)
   const [provider, setProvider] = useState(preview.provider)
   const [reasoning, setReasoning] = useState(preview.reasoning)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const nameInvalid = name.trim().length === 0
 
   useEffect(() => {
     void (async () => {
@@ -65,6 +67,7 @@ export function SkillSettingsModal({ skillId, preview, onSave, onClose }: SkillS
         provider,
         reasoning,
         input_arity: inputArity,
+        name: name.trim(),
       })
       await onSave()
       onClose()
@@ -90,7 +93,19 @@ export function SkillSettingsModal({ skillId, preview, onSave, onClose }: SkillS
             ✕
           </button>
         </div>
-        <p className="mb-3 truncate text-xs text-slate-400">{preview.name}</p>
+        <label className="mb-2 block text-[11px] text-slate-400">
+          Имя
+          <input
+            type="text"
+            className={`mt-1 ${fieldCls}`}
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            disabled={saving}
+          />
+          {nameInvalid && (
+            <span className="mt-1 block text-[10px] text-red-400">Имя не может быть пустым</span>
+          )}
+        </label>
 
         <div className="mb-2">
           <div className="mb-1 text-[11px] text-slate-400">Вход</div>
@@ -206,7 +221,7 @@ export function SkillSettingsModal({ skillId, preview, onSave, onClose }: SkillS
           <button
             className="rounded bg-indigo-600 px-3 py-1 text-xs text-white disabled:opacity-50"
             onClick={() => void handleSave()}
-            disabled={saving}
+            disabled={saving || nameInvalid}
           >
             {saving ? 'Сохранение…' : 'Сохранить'}
           </button>

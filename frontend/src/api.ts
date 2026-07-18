@@ -226,12 +226,21 @@ export function configureSkill(
     provider?: string
     reasoning?: string
     input_arity?: number | null
+    name?: string
   },
 ): Promise<SkillBuilt> {
   return jsonFetch<SkillBuilt>(`/skills/${skillId}/configure`, {
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(settings),
+  })
+}
+
+export function renameSkill(skillId: string, name: string): Promise<SkillOut> {
+  return jsonFetch<SkillOut>(`/skills/${skillId}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name }),
   })
 }
 

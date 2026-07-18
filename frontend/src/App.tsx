@@ -246,6 +246,7 @@ export default function App() {
             onApply={handleApply}
             onEdit={handleEditSkill}
             onDelete={(id) => void handleDeleteSkill(id)}
+            onRename={(id, name) => skillsHook.rename(id, name)}
           />
         </aside>
         <main className="overflow-hidden">

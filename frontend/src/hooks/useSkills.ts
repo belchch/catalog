@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import type { ApplyMode, SkillOut } from '../api.ts'
-import { applySkill, commitSkill, deleteSkill, listSkills } from '../api.ts'
+import { applySkill, commitSkill, deleteSkill, listSkills, renameSkill } from '../api.ts'
 
 export interface UseSkillsResult {
   skills: SkillOut[]
@@ -10,6 +10,7 @@ export interface UseSkillsResult {
   commit: (skillId: string) => Promise<void>
   apply: (skillId: string, docIds: string[], mode?: ApplyMode) => Promise<string>
   remove: (skillId: string) => Promise<void>
+  rename: (skillId: string, name: string) => Promise<void>
 }
 
 export function useSkills(): UseSkillsResult {
@@ -55,9 +56,22 @@ export function useSkills(): UseSkillsResult {
     }
   }, [])
 
+  const rename = useCallback(async (skillId: string, name: string) => {
+    setError(null)
+    try {
+      const updated = await renameSkill(skillId, name)
+      setSkills((prev) =>
+        prev.map((s) => (s.id === skillId ? { ...s, name: updated.name } : s)),
+      )
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+      throw e
+    }
+  }, [])
+
   useEffect(() => {
     void refresh()
   }, [refresh])
 
-  return { skills, loading, error, refresh, commit, apply, remove }
+  return { skills, loading, error, refresh, commit, apply, remove, rename }
 }

@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import type { ApplyMode, DocumentOut, SkillOut } from '../api.ts'
 import type { UseSkillsResult } from '../hooks/useSkills.ts'
 import { DocumentCombobox } from './DocumentCombobox.tsx'
@@ -10,6 +10,7 @@ interface SkillsPanelProps {
   onApply: (skillId: string, docIds: string[], mode: ApplyMode) => void
   onEdit: (skillId: string, name: string) => void
   onDelete: (skillId: string) => void
+  onRename: (skillId: string, name: string) => Promise<void>
 }
 
 type InputArity = 1 | 2 | null
@@ -76,9 +77,14 @@ export function SkillsPanel({
   onApply,
   onEdit,
   onDelete,
+  onRename,
 }: SkillsPanelProps) {
   const [target, setTarget] = useState<Record<string, SkillTarget>>({})
   const [confirmId, setConfirmId] = useState<string | null>(null)
+  const [renameId, setRenameId] = useState<string | null>(null)
+  const [renameValue, setRenameValue] = useState('')
+  const [renameSaving, setRenameSaving] = useState(false)
+  const renameSavingRef = useRef(false)
   const validDocIds = new Set(documents.map((d) => d.id))
 
   const slotsFor = (skill: SkillOut): (string | null)[] => {
@@ -99,6 +105,39 @@ export function SkillsPanel({
 
   const setSlots = (skillId: string, arity: InputArity, slots: (string | null)[]) => {
     setTarget((prev) => ({ ...prev, [skillId]: { arity, slots } }))
+  }
+
+  const clearRename = () => {
+    renameSavingRef.current = false
+    setRenameId(null)
+    setRenameValue('')
+    setRenameSaving(false)
+  }
+
+  const startRename = (skill: SkillOut) => {
+    setConfirmId(null)
+    setRenameId(skill.id)
+    setRenameValue(skill.name)
+    renameSavingRef.current = false
+    setRenameSaving(false)
+  }
+
+  const saveRename = async (skillId: string, currentName: string) => {
+    const trimmed = renameValue.trim()
+    if (!trimmed) return
+    if (trimmed === currentName) {
+      clearRename()
+      return
+    }
+    renameSavingRef.current = true
+    setRenameSaving(true)
+    try {
+      await onRename(skillId, trimmed)
+      clearRename()
+    } catch {
+      renameSavingRef.current = false
+      setRenameSaving(false)
+    }
   }
 
   return (
@@ -122,12 +161,78 @@ export function SkillsPanel({
           const docIds = applyDocIds(arity, slots)
           const hint = arity === 2 ? mode2Hint(slots) : null
           const confirming = confirmId === s.id
+          const renaming = renameId === s.id
+          const renameEmpty = renameValue.trim().length === 0
 
           return (
             <li key={s.id} className="rounded-md border border-slate-800 bg-slate-900/60 p-2">
               <div className="flex items-center justify-between gap-2">
-                <span className="truncate text-xs font-medium text-slate-200">{s.name}</span>
-                <div className="flex items-center gap-1.5">
+                {renaming ? (
+                  <div
+                    className="flex min-w-0 flex-1 flex-wrap items-center gap-1.5"
+                    onBlur={(e) => {
+                      const container = e.currentTarget
+                      requestAnimationFrame(() => {
+                        if (renameSavingRef.current) return
+                        if (!container.contains(document.activeElement)) {
+                          clearRename()
+                        }
+                      })
+                    }}
+                  >
+                    <input
+                      type="text"
+                      className="min-w-0 flex-1 rounded bg-slate-800 px-2 py-1 text-xs text-slate-100 disabled:opacity-50"
+                      value={renameValue}
+                      aria-label="Имя скила"
+                      autoFocus
+                      disabled={renameSaving}
+                      onChange={(e) => setRenameValue(e.target.value)}
+                      onFocus={(e) => {
+                        const len = e.target.value.length
+                        e.target.setSelectionRange(len, len)
+                      }}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                          e.preventDefault()
+                          void saveRename(s.id, s.name)
+                        } else if (e.key === 'Escape') {
+                          e.preventDefault()
+                          clearRename()
+                        }
+                      }}
+                    />
+                    <button
+                      type="button"
+                      className="rounded bg-indigo-600 px-2 py-1 text-[11px] text-white disabled:opacity-50"
+                      disabled={renameSaving || renameEmpty}
+                      onClick={() => void saveRename(s.id, s.name)}
+                    >
+                      {renameSaving ? '…' : 'Сохранить'}
+                    </button>
+                    <button
+                      type="button"
+                      className="rounded bg-slate-700 px-2 py-1 text-[11px] text-slate-200 disabled:opacity-50"
+                      disabled={renameSaving}
+                      onClick={clearRename}
+                    >
+                      Отмена
+                    </button>
+                  </div>
+                ) : (
+                  <div className="flex min-w-0 items-center gap-1">
+                    <span className="truncate text-xs font-medium text-slate-200">{s.name}</span>
+                    <button
+                      type="button"
+                      className="shrink-0 text-slate-400 hover:text-slate-200"
+                      aria-label="Переименовать"
+                      onClick={() => startRename(s)}
+                    >
+                      ✎
+                    </button>
+                  </div>
+                )}
+                <div className="flex shrink-0 items-center gap-1.5">
                   {s.tags.map((tag) => (
                     <span
                       key={tag}
@@ -160,7 +265,10 @@ export function SkillsPanel({
                 <button
                   type="button"
                   className="rounded bg-slate-700 px-2 py-1 text-[11px] text-slate-200"
-                  onClick={() => onEdit(s.id, s.name)}
+                  onClick={() => {
+                    clearRename()
+                    onEdit(s.id, s.name)
+                  }}
                 >
                   Редактировать
                 </button>
@@ -210,7 +318,10 @@ export function SkillsPanel({
                     <button
                       type="button"
                       className="rounded bg-slate-700 px-2 py-1 text-[11px] text-red-400 hover:bg-slate-800"
-                      onClick={() => setConfirmId(s.id)}
+                      onClick={() => {
+                        clearRename()
+                        setConfirmId(s.id)
+                      }}
                     >
                       Удалить
                     </button>
