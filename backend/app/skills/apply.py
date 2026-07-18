@@ -181,7 +181,9 @@ async def _apply_core(
             log_agent_event(script_start)
             t0 = time.perf_counter()
             try:
-                text = await run_script_async(skill.code, doc_text)
+                text = await run_script_async(
+                    skill.code, doc_text, documents=doc_texts
+                )
             except ScriptRuntimeError as exc:
                 script_error = ScriptEvent(
                     stage="error", error=str(exc), duration=time.perf_counter() - t0

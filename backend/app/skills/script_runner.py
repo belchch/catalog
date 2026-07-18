@@ -12,10 +12,10 @@ two cooperating pieces:
   the usual footguns (``eval``/``exec``/``compile``/``open``/``breakpoint``).
 - :func:`run_script` — runtime execution in a restricted namespace: a tiny
   allow-list of builtins, a curated set of safe stdlib modules, and a wall-clock
-  timeout. The script receives the document text in
-  ``document`` (alias ``input_text``) and returns its result either by
-  ``return``-ing a string from a ``main()`` function, by assigning a global
-  ``result`` variable, or via captured ``print`` output.
+  timeout. The script receives input as ``document`` (alias ``input_text``,
+  joined text) and ``documents`` (``list[str]`` of each input). It returns
+  its result by ``return`` from ``main()`` / ``main(document)`` /
+  ``main(documents)``, by assigning a global ``result``, or via ``print``.
 
 This is deliberately a *process-local* sandbox (option (a) of the plan's
 sandbox decision): simple and dependency-free, with defence in depth (AST
@@ -28,6 +28,7 @@ the hardened subprocess executor tracked as future work in ADR-0014.
 from __future__ import annotations
 
 import ast
+import inspect
 import signal
 from typing import Any
 
@@ -230,7 +231,9 @@ def _timeout_handler(signum: int, frame: Any) -> None:  # noqa: ARG001
     raise _ScriptTimeoutError("script exceeded the time limit")
 
 
-def _build_globals(document: str) -> dict[str, Any]:
+def _build_globals(
+    document: str, documents: list[str] | None = None
+) -> dict[str, Any]:
     """Build the restricted globals namespace for a script run."""
     captured: list[str] = []
 
@@ -242,6 +245,7 @@ def _build_globals(document: str) -> dict[str, Any]:
     builtins = dict(_SAFE_BUILTINS)
     builtins["print"] = _capture_print
 
+    docs = list(documents) if documents is not None else [document]
     namespace: dict[str, Any] = {
         "__builtins__": builtins,
         # Pre-resolved safe modules (no import machinery needed).
@@ -249,11 +253,37 @@ def _build_globals(document: str) -> dict[str, Any]:
         # Input contract.
         "document": document,
         "input_text": document,
+        "documents": docs,
         # Output sink inspected after execution.
         "result": None,
         "_captured": captured,
     }
     return namespace
+
+
+def _call_main(main: Any, namespace: dict[str, Any]) -> Any:
+    try:
+        sig = inspect.signature(main)
+    except (TypeError, ValueError):
+        return main()
+
+    kwargs: dict[str, Any] = {}
+    for name, param in sig.parameters.items():
+        if param.kind in (
+            inspect.Parameter.VAR_POSITIONAL,
+            inspect.Parameter.VAR_KEYWORD,
+        ):
+            continue
+        if name == "documents":
+            kwargs[name] = namespace["documents"]
+        elif name in ("document", "input_text", "doc_text"):
+            kwargs[name] = namespace["document"]
+        elif param.default is not inspect.Parameter.empty:
+            continue
+
+    bound = sig.bind(**kwargs)
+    bound.apply_defaults()
+    return main(*bound.args, **bound.kwargs)
 
 
 def _extract_result(namespace: dict[str, Any]) -> str:
@@ -264,10 +294,10 @@ def _extract_result(namespace: dict[str, Any]) -> str:
         return result
     if result is not None:
         return str(result)
-    # 2. A ``main()`` function that returns a string.
+    # 2. A ``main`` function that returns a string (any supported signature).
     main = namespace.get("main")
     if callable(main):
-        out = main()
+        out = _call_main(main, namespace)
         if isinstance(out, str):
             return out
         if out is not None:
@@ -285,13 +315,15 @@ def run_script(
     doc_text: str,
     params: dict | None = None,
     *,
+    documents: list[str] | None = None,
     timeout_seconds: float = DEFAULT_TIMEOUT_SECONDS,
     memory_bytes: int = DEFAULT_MEMORY_BYTES,
 ) -> str:
     """Execute a validated script over ``doc_text`` and return its result string.
 
     The script is run synchronously in the current process inside a restricted
-    namespace (see module docstring). A wall-clock ``timeout_seconds`` bounds
+    namespace (see module docstring). ``documents`` is the per-document list
+    (defaults to ``[doc_text]``). A wall-clock ``timeout_seconds`` bounds
     runaway scripts. ``memory_bytes`` is accepted for API stability but is a
     no-op in-process (memory isolation is deferred to the subprocess executor,
     see ADR-0014).
@@ -303,7 +335,8 @@ def run_script(
     # a committed script is only as trustworthy as its last validation.
     validate_script(code)
 
-    namespace = _build_globals(doc_text)
+    docs = list(documents) if documents is not None else [doc_text]
+    namespace = _build_globals(doc_text, docs)
     if params:
         namespace["params"] = params
 
@@ -342,6 +375,7 @@ async def run_script_async(
     doc_text: str,
     params: dict | None = None,
     *,
+    documents: list[str] | None = None,
     timeout_seconds: float = DEFAULT_TIMEOUT_SECONDS,
     memory_bytes: int = DEFAULT_MEMORY_BYTES,
 ) -> str:
@@ -359,6 +393,7 @@ async def run_script_async(
         code,
         doc_text,
         params,
+        documents=documents,
         timeout_seconds=timeout_seconds,
         memory_bytes=memory_bytes,
     )

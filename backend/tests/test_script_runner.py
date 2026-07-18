@@ -104,6 +104,26 @@ def test_run_script_result_via_main() -> None:
     assert out == "HELLO WORLD"
 
 
+def test_run_script_main_documents() -> None:
+    code = "def main(documents):\n    return '\\n'.join(d.upper() for d in documents)\n"
+    out = run_script(
+        code, "hello", documents=["hello", "world"], memory_bytes=_TEST_MEM
+    )
+    assert out == "HELLO\nWORLD"
+
+
+def test_run_script_main_document_arg() -> None:
+    code = "def main(document):\n    return document[::-1]\n"
+    out = run_script(code, "abc", memory_bytes=_TEST_MEM)
+    assert out == "cba"
+
+
+def test_run_script_documents_global_defaults_to_single() -> None:
+    code = "result = str(len(documents)) + ':' + documents[0]\n"
+    out = run_script(code, "solo", memory_bytes=_TEST_MEM)
+    assert out == "1:solo"
+
+
 def test_run_script_result_via_global() -> None:
     code = "result = document.replace('a', 'A')\n"
     out = run_script(code, "banana", memory_bytes=_TEST_MEM)

@@ -58,9 +58,9 @@ BUILD_SKILL_SYSTEM_PROMPT = (
     "текста/данных без суждений и рассуждений (форматирование, подсчёт, "
     "регулярные преобразования, парсинг, сортировка) — выбери kind=\"script\" "
     "и напиши валидный Python-код в поле code: без import, без open/eval/exec; "
-    "входной текст документа доступен в переменной document; результат "
-    "возвращается через return из функции main(), через присваивание глобальной "
-    "переменной result или через print. Если задача требует суждений, "
+    "вход: document/input_text (склеенный текст) и documents (list[str] по "
+    "каждому входу); результат — return из main()/main(document)/main(documents), "
+    "глобальная result или print. Если задача требует суждений, "
     "рассуждений или творческой обработки — выбери kind=\"agent\" и ОБЯЗАТЕЛЬНО "
     "заполни non_determinism_reason объяснением, почему детерминизм невозможен. "
     "Для agent также заполни system_prompt (полная инструкция агенту), "
@@ -87,7 +87,8 @@ _BUILD_SKILL_PARAMETERS = {
             "type": "string",
             "description": (
                 "Python source for kind=script skills. No import/open/eval/exec; "
-                "input in `document`; output via main()/result/print."
+                "input via `document`/`documents`; output via "
+                "main()/main(document)/main(documents)/result/print."
             ),
         },
         "input_arity": {
