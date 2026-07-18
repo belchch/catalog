@@ -50,6 +50,7 @@ export function Chat({
   const [input, setInput] = useState('')
   const [selectedDocIds, setSelectedDocIds] = useState<string[]>([])
   const bottomRef = useRef<HTMLDivElement>(null)
+  const textareaRef = useRef<HTMLTextAreaElement>(null)
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -58,6 +59,13 @@ export function Chat({
   useEffect(() => {
     setSelectedDocIds([])
   }, [sessionId])
+
+  useEffect(() => {
+    const el = textareaRef.current
+    if (!el) return
+    el.style.height = 'auto'
+    el.style.height = `${el.scrollHeight}px`
+  }, [input])
 
   const submit = () => {
     const text = input.trim()
@@ -204,14 +212,20 @@ export function Chat({
             />
           </div>
         </div>
-        <div className="flex gap-2">
-          <input
-            className="flex-1 rounded-md bg-slate-800 px-3 py-2 text-sm text-slate-100 outline-none placeholder:text-slate-500 disabled:opacity-50"
+        <div className="flex items-end gap-2">
+          <textarea
+            ref={textareaRef}
+            rows={1}
+            className="max-h-40 flex-1 resize-none overflow-y-auto rounded-md bg-slate-800 px-3 py-2 text-sm text-slate-100 outline-none placeholder:text-slate-500 disabled:opacity-50"
             placeholder="Сообщение планировщику…"
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={(e) => {
-              if (e.key === 'Enter') submit()
+              if (e.key !== 'Enter') return
+              if (e.shiftKey || e.ctrlKey || e.metaKey || e.altKey) return
+              if (e.nativeEvent.isComposing || e.keyCode === 229) return
+              e.preventDefault()
+              submit()
             }}
             disabled={streaming}
           />
