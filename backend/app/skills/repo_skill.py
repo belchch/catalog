@@ -16,6 +16,7 @@ from datetime import datetime, timezone
 from typing import cast
 
 from app.skills.config import SkillConfig, compute_tags
+from app.skills.repo_run import delete_runs_for_skill
 from app.storage.db import Database
 
 
@@ -174,6 +175,19 @@ def update_status(db: Database, skill_id: str, status: str) -> None:
             "UPDATE skill SET status = ?, updated_at = ? WHERE id = ?",
             (status, now, skill_id),
         )
+
+
+def delete_skill(db: Database, skill_id: str) -> bool:
+    if get_skill(db, skill_id) is None:
+        return False
+    delete_runs_for_skill(db, skill_id)
+    with db.connect() as conn:
+        conn.execute(
+            "UPDATE session SET skill_id = NULL WHERE skill_id = ?",
+            (skill_id,),
+        )
+        conn.execute("DELETE FROM skill WHERE id = ?", (skill_id,))
+    return True
 
 
 _UNSET = object()

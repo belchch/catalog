@@ -34,6 +34,7 @@ from app.skills.config import SkillConfig, VerifyCheck
 from app.skills.repo_skill import (
     SkillRecord,
     create_skill,
+    delete_skill,
     get_skill,
     list_skills,
     update_skill,
@@ -479,3 +480,11 @@ async def list_skills_endpoint(
         )
         for r in rows
     ]
+
+
+@router.delete("/skills/{skill_id}", status_code=204)
+async def delete_skill_endpoint(
+    skill_id: str, db: Database = Depends(get_db)
+) -> None:
+    if not delete_skill(db, skill_id):
+        raise HTTPException(status_code=404, detail="skill not found")

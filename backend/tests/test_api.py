@@ -815,6 +815,50 @@ def test_commit_skill(client, db) -> None:
     assert skill.status == "committed"
 
 
+def test_delete_draft_skill(client, db) -> None:
+    skill_id = create_skill(
+        db,
+        name="DraftToDelete",
+        description="draft",
+        config=SkillConfig(
+            name="DraftToDelete",
+            description="draft",
+            system_prompt="x",
+            allowed_tools=["read_document"],
+            model="test/model",
+        ),
+        status="draft",
+    )
+
+    resp = client.delete(f"/skills/{skill_id}")
+    assert resp.status_code == 204
+    assert get_skill(db, skill_id) is None
+    ids = [r["id"] for r in client.get("/skills").json()]
+    assert skill_id not in ids
+
+
+def test_delete_committed_skill_cascades_runs(client, db) -> None:
+    from app.skills.repo_run import create_run, get_run
+
+    skill_id = _seed_committed_skill(db, name="CommittedToDelete")
+    doc_id = _upload(client, "in.md", b"body")
+    run_id = create_run(
+        db, skill_id=skill_id, session_id=None, input_doc_ids=[doc_id]
+    )
+
+    resp = client.delete(f"/skills/{skill_id}")
+    assert resp.status_code == 204
+    assert get_skill(db, skill_id) is None
+    assert get_run(db, run_id) is None
+    ids = [r["id"] for r in client.get("/skills").json()]
+    assert skill_id not in ids
+
+
+def test_delete_skill_missing_returns_404(client) -> None:
+    resp = client.delete("/skills/does-not-exist")
+    assert resp.status_code == 404
+
+
 def test_list_skills(client, db) -> None:
     first = _seed_committed_skill(db, name="First")
     _seed_committed_skill(db, name="Second")

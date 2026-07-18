@@ -96,6 +96,15 @@ def set_output_doc_id(db: Database, run_id: str, output_doc_id: str) -> None:
         )
 
 
+def delete_runs_for_skill(db: Database, skill_id: str) -> int:
+    with db.connect() as conn:
+        cur = conn.execute(
+            "DELETE FROM skill_run WHERE skill_id = ?",
+            (skill_id,),
+        )
+        return int(cur.rowcount)
+
+
 def get_run(db: Database, run_id: str) -> dict | None:
     """Fetch a skill_run row as a dict, or ``None`` if not found.
 
