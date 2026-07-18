@@ -7,6 +7,7 @@ import {
   type ProviderOut,
   type SkillPreview,
 } from '../api.ts'
+import { ModelCombobox } from './ModelCombobox.tsx'
 
 interface SkillSettingsModalProps {
   skillId: string
@@ -167,24 +168,20 @@ export function SkillSettingsModal({ skillId, preview, onSave, onClose }: SkillS
           </select>
         </label>
 
-        <label className="mb-2 block text-[11px] text-slate-400">
-          Модель
-          <select
-            className={`mt-1 ${fieldCls}`}
+        <div className="mb-2">
+          <div className="mb-1 text-[11px] text-slate-400">Модель</div>
+          <ModelCombobox
+            models={models}
             value={model}
-            onChange={(e) => {
-              setModel(e.target.value)
+            onChange={(id) => {
+              setModel(id)
               setReasoning('')
             }}
-          >
-            {models.length === 0 && <option value={preview.model}>{preview.model}</option>}
-            {models.map((m) => (
-              <option key={m.id} value={m.id}>
-                {m.name}
-              </option>
-            ))}
-          </select>
-        </label>
+            disabled={models.length === 0}
+            ariaLabel="Модель"
+            triggerClassName="flex w-full items-center justify-between rounded bg-slate-800 px-2 py-1 text-left text-xs text-slate-100 disabled:opacity-50"
+          />
+        </div>
 
         <label className="mb-4 block text-[11px] text-slate-400">
           Режим рассуждений
