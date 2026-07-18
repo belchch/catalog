@@ -21,6 +21,7 @@ from __future__ import annotations
 import asyncio
 import json
 import re
+from contextlib import suppress
 
 from fastapi import APIRouter, Depends, HTTPException, Response, WebSocket, WebSocketDisconnect
 
@@ -65,6 +66,8 @@ STARTER_SUGGESTIONS = [
     "Какие документы уже есть?",
 ]
 
+WS_KEEPALIVE_INTERVAL_S = 30.0
+
 # Matches a ``<suggestions>…</suggestions>`` block (case-insensitive,
 # spans newlines). Only the first occurrence is parsed/stripped.
 _SUGGESTIONS_RE = re.compile(r"<suggestions>(.*?)</suggestions>", re.IGNORECASE | re.DOTALL)
@@ -106,6 +109,36 @@ def _is_cancel_frame(raw: str) -> bool:
     except (json.JSONDecodeError, TypeError):
         return False
     return isinstance(data, dict) and data.get("type") == "cancel"
+
+
+def _is_keepalive_frame(raw: str) -> bool:
+    try:
+        data = json.loads(raw)
+    except (json.JSONDecodeError, TypeError):
+        return False
+    return isinstance(data, dict) and data.get("type") in ("ping", "pong")
+
+
+async def _receive_text_with_keepalive(websocket: WebSocket) -> str:
+    while True:
+        receive_task = asyncio.create_task(websocket.receive_text())
+        sleep_task = asyncio.create_task(asyncio.sleep(WS_KEEPALIVE_INTERVAL_S))
+        try:
+            done, pending = await asyncio.wait(
+                {receive_task, sleep_task},
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+            for task in pending:
+                task.cancel()
+                with suppress(asyncio.CancelledError):
+                    await task
+            if receive_task in done:
+                return receive_task.result()
+            await websocket.send_json({"type": "ping"})
+        except BaseException:
+            receive_task.cancel()
+            sleep_task.cancel()
+            raise
 
 
 def _conversation_messages(db: Database, session_id: str) -> list[Message]:
@@ -289,10 +322,9 @@ async def session_ws(
                 raw = buffered
                 buffered = None
             else:
-                raw = await websocket.receive_text()
+                raw = await _receive_text_with_keepalive(websocket)
 
-            # A cancel frame with nothing running is a no-op.
-            if _is_cancel_frame(raw):
+            if _is_cancel_frame(raw) or _is_keepalive_frame(raw):
                 continue
 
             content = _parse_user_payload(raw)

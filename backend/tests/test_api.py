@@ -257,6 +257,22 @@ def test_planner_uses_active_model(client, provider, db) -> None:
     assert provider.requests[0]["model"] == "glm-4.6"
 
 
+def test_ws_session_idle_keepalive(client, monkeypatch) -> None:
+    """Idle planner WS emits ping frames before the typical ~5 min proxy timeout (CATALOG-23)."""
+    import app.api.sessions as sessions_mod
+
+    monkeypatch.setattr(sessions_mod, "WS_KEEPALIVE_INTERVAL_S", 0.05)
+    session_id = client.post("/sessions").json()["id"]
+
+    with client.websocket_connect(f"/sessions/{session_id}") as ws:
+        assert ws.receive_json()["type"] == "suggestions"
+        ping = ws.receive_json()
+        assert ping == {"type": "ping"}
+        ws.send_text('{"type":"pong"}')
+        ping2 = ws.receive_json()
+        assert ping2 == {"type": "ping"}
+
+
 def test_ws_session_cancel(client, provider, db) -> None:
     """Cancelling a running planner turn sends finish{cancelled} and keeps the session alive (CATALOG-11)."""
     from tests.conftest import FakeProvider as _ConfFakeProvider
