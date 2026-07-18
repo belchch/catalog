@@ -78,6 +78,25 @@ class SessionCreated(BaseModel):
     id: str
 
 
+class SessionOut(BaseModel):
+    id: str
+    status: str
+    created_at: str
+    updated_at: str
+    title: str | None = None
+    skill_id: str | None = None
+
+
+class MessageOut(BaseModel):
+    id: int
+    session_id: str
+    role: str
+    content: str | None = None
+    tool_name: str | None = None
+    tool_call_id: str | None = None
+    created_at: str
+
+
 class EditStarted(BaseModel):
     """Response of ``POST /skills/{id}/edit`` (CATALOG-17)."""
 

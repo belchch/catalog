@@ -22,19 +22,24 @@ import asyncio
 import json
 import re
 
-from fastapi import APIRouter, Depends, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, Depends, HTTPException, Response, WebSocket, WebSocketDisconnect
 
 from app.agent import run_agent
 from app.agent.events import FinishEvent, ToolResultEvent
 from app.agent.registry import ToolRegistry
 from app.api.deps import agent_event_to_frame, get_db
-from app.api.schemas import SessionCreated
+from app.api.schemas import MessageOut, SessionCreated, SessionOut
 from app.config import Settings
 from app.llm.base import Message
 from app.llm.log_context import prompt_log_context
 from app.storage.db import Database
 from app.storage.repo_message import add_message, list_messages
-from app.storage.repo_session import create_session, get_session
+from app.storage.repo_session import (
+    create_session,
+    delete_session,
+    get_session,
+    list_sessions,
+)
 
 router = APIRouter()
 
@@ -115,6 +120,47 @@ def _conversation_messages(db: Database, session_id: str) -> list[Message]:
 @router.post("/sessions", response_model=SessionCreated)
 async def create_session_endpoint(db: Database = Depends(get_db)) -> SessionCreated:
     return SessionCreated(id=create_session(db))
+
+
+@router.get("/sessions", response_model=list[SessionOut])
+async def list_sessions_endpoint(
+    limit: int = 50,
+    offset: int = 0,
+    status: str | None = None,
+    db: Database = Depends(get_db),
+) -> list[SessionOut]:
+    rows = list_sessions(db, limit=limit, offset=offset, status=status)
+    return [
+        SessionOut(
+            id=r.id,
+            status=r.status,
+            created_at=r.created_at,
+            updated_at=r.updated_at or r.created_at,
+            title=r.title,
+            skill_id=r.skill_id,
+        )
+        for r in rows
+    ]
+
+
+@router.get("/sessions/{session_id}/messages", response_model=list[MessageOut])
+async def list_session_messages_endpoint(
+    session_id: str,
+    db: Database = Depends(get_db),
+) -> list[MessageOut]:
+    if get_session(db, session_id) is None:
+        raise HTTPException(status_code=404, detail="session not found")
+    return [MessageOut(**m) for m in list_messages(db, session_id)]
+
+
+@router.delete("/sessions/{session_id}", status_code=204)
+async def delete_session_endpoint(
+    session_id: str,
+    db: Database = Depends(get_db),
+) -> Response:
+    if not delete_session(db, session_id):
+        raise HTTPException(status_code=404, detail="session not found")
+    return Response(status_code=204)
 
 
 async def _run_planner_turn(

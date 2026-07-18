@@ -17,7 +17,9 @@ CREATE TABLE IF NOT EXISTS document(
 );
 CREATE TABLE IF NOT EXISTS session(
   id TEXT PRIMARY KEY, status TEXT NOT NULL, created_at TEXT NOT NULL,
-  skill_id TEXT                    -- nullable; set when editing an existing skill (CATALOG-17)
+  skill_id TEXT,                   -- nullable; set when editing an existing skill (CATALOG-17)
+  title TEXT,
+  updated_at TEXT NOT NULL
 );                                -- status: planning|done
 CREATE TABLE IF NOT EXISTS message(
   id INTEGER PRIMARY KEY AUTOINCREMENT, session_id TEXT NOT NULL,
@@ -55,4 +57,6 @@ ADDITIVE_MIGRATIONS: list[tuple[str, str, str]] = [
         "ALTER TABLE skill_run ADD COLUMN persist INTEGER NOT NULL DEFAULT 1",
     ),
     ("skill_run", "result_text", "ALTER TABLE skill_run ADD COLUMN result_text TEXT"),
+    ("session", "title", "ALTER TABLE session ADD COLUMN title TEXT"),
+    ("session", "updated_at", "ALTER TABLE session ADD COLUMN updated_at TEXT"),
 ]

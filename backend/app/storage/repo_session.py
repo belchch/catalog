@@ -13,27 +13,40 @@ from datetime import datetime, timezone
 
 from app.storage.db import Database
 
+_TITLE_MAX_LEN = 80
+
 
 @dataclass
 class SessionRow:
     id: str
     status: str
     created_at: str
-    # Set when this session is editing an existing skill (CATALOG-17); ``None``
-    # for a regular "create a new skill" planning session.
     skill_id: str | None = None
+    title: str | None = None
+    updated_at: str | None = None
 
 
 def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def _title_from_content(content: str) -> str:
+    line = content.strip().splitlines()[0].strip() if content.strip() else ""
+    if len(line) > _TITLE_MAX_LEN:
+        return line[:_TITLE_MAX_LEN].rstrip() + "…"
+    return line
+
+
 def _row_to_session(row: sqlite3.Row) -> SessionRow:
+    created_at = row["created_at"]
+    updated_at = row["updated_at"] if "updated_at" in row.keys() else None
     return SessionRow(
         id=row["id"],
         status=row["status"],
-        created_at=row["created_at"],
+        created_at=created_at,
         skill_id=row["skill_id"],
+        title=row["title"] if "title" in row.keys() else None,
+        updated_at=updated_at or created_at,
     )
 
 
@@ -49,8 +62,9 @@ def create_session(
     now = _now_iso()
     with db.connect() as conn:
         conn.execute(
-            "INSERT INTO session(id, status, created_at, skill_id) VALUES (?, ?, ?, ?)",
-            (session_id, status, now, skill_id),
+            "INSERT INTO session(id, status, created_at, skill_id, title, updated_at) "
+            "VALUES (?, ?, ?, ?, NULL, ?)",
+            (session_id, status, now, skill_id, now),
         )
     return session_id
 
@@ -58,10 +72,77 @@ def create_session(
 def get_session(db: Database, session_id: str) -> SessionRow | None:
     with db.connect() as conn:
         row = conn.execute(
-            "SELECT id, status, created_at, skill_id FROM session WHERE id = ?",  # noqa: S608
+            "SELECT id, status, created_at, skill_id, title, updated_at "
+            "FROM session WHERE id = ?",
             (session_id,),
         ).fetchone()
     return _row_to_session(row) if row is not None else None
+
+
+def list_sessions(
+    db: Database,
+    *,
+    limit: int = 50,
+    offset: int = 0,
+    status: str | None = None,
+) -> list[SessionRow]:
+    params: list[object] = []
+    if status is not None:
+        sql = (
+            "SELECT id, status, created_at, skill_id, title, updated_at "
+            "FROM session WHERE status = ? "
+            "ORDER BY COALESCE(updated_at, created_at) DESC, created_at DESC "
+            "LIMIT ? OFFSET ?"
+        )
+        params.extend([status, limit, offset])
+    else:
+        sql = (
+            "SELECT id, status, created_at, skill_id, title, updated_at "
+            "FROM session "
+            "ORDER BY COALESCE(updated_at, created_at) DESC, created_at DESC "
+            "LIMIT ? OFFSET ?"
+        )
+        params.extend([limit, offset])
+    with db.connect() as conn:
+        rows = conn.execute(sql, params).fetchall()
+    return [_row_to_session(r) for r in rows]
+
+
+def delete_session(db: Database, session_id: str) -> bool:
+    with db.connect() as conn:
+        row = conn.execute(
+            "SELECT id FROM session WHERE id = ?",
+            (session_id,),
+        ).fetchone()
+        if row is None:
+            return False
+        conn.execute("DELETE FROM message WHERE session_id = ?", (session_id,))
+        conn.execute("DELETE FROM session WHERE id = ?", (session_id,))
+    return True
+
+
+def touch_session_activity(
+    db: Database,
+    session_id: str,
+    *,
+    role: str,
+    content: str | None,
+) -> None:
+    now = _now_iso()
+    with db.connect() as conn:
+        if role == "user" and content:
+            title = _title_from_content(content)
+            if title:
+                conn.execute(
+                    "UPDATE session SET updated_at = ?, "
+                    "title = COALESCE(title, ?) WHERE id = ?",
+                    (now, title, session_id),
+                )
+                return
+        conn.execute(
+            "UPDATE session SET updated_at = ? WHERE id = ?",
+            (now, session_id),
+        )
 
 
 def update_session_status(db: Database, session_id: str, status: str) -> None:

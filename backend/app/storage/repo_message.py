@@ -9,6 +9,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 
 from app.storage.db import Database
+from app.storage.repo_session import touch_session_activity
 
 
 def _now_iso() -> str:
@@ -32,7 +33,9 @@ def add_message(
             "tool_call_id, created_at) VALUES (?, ?, ?, ?, ?, ?)",
             (session_id, role, content, tool_name, tool_call_id, now),
         )
-    return int(cur.lastrowid)
+    message_id = int(cur.lastrowid)
+    touch_session_activity(db, session_id, role=role, content=content)
+    return message_id
 
 
 def list_messages(db: Database, session_id: str) -> list[dict]:
