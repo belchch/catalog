@@ -140,6 +140,7 @@ class SkillConfigureRequest(BaseModel):
     provider: str | None = None
     reasoning: str | None = None
     input_arity: int | None = None
+    name: str | None = None
 
     @field_validator("input_arity")
     @classmethod
@@ -147,6 +148,28 @@ class SkillConfigureRequest(BaseModel):
         if value is not None and value not in (1, 2):
             raise ValueError("input_arity must be 1, 2, or null (document list)")
         return value
+
+    @field_validator("name")
+    @classmethod
+    def _non_empty_name(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        stripped = value.strip()
+        if not stripped:
+            raise ValueError("name must be non-empty")
+        return stripped
+
+
+class SkillRenameRequest(BaseModel):
+    name: str
+
+    @field_validator("name")
+    @classmethod
+    def _non_empty_name(cls, value: str) -> str:
+        stripped = value.strip()
+        if not stripped:
+            raise ValueError("name must be non-empty")
+        return stripped
 
 
 class ModelOut(BaseModel):

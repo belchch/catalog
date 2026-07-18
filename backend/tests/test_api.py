@@ -646,6 +646,68 @@ def test_configure_skill_requires_draft(client, provider, db) -> None:
     assert resp.status_code == 409
 
 
+def test_configure_skill_renames_draft(client, provider, db) -> None:
+    session_id = client.post("/sessions").json()["id"]
+    add_message(db, session_id=session_id, role="user", content="make a skill")
+    provider.script = [_completion(tool_calls=[_build_skill_call(name="Old")])]
+    skill_id = client.post(f"/sessions/{session_id}/skills").json()["skill_id"]
+
+    resp = client.patch(
+        f"/skills/{skill_id}/configure",
+        json={"name": "New Name", "model": "glm-4.6"},
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["config"]["name"] == "New Name"
+    assert resp.json()["config"]["model"] == "glm-4.6"
+
+    skill = get_skill(db, skill_id)
+    assert skill is not None
+    assert skill.name == "New Name"
+    assert skill.config.name == "New Name"
+    assert skill.config.model == "glm-4.6"
+
+    listed = client.get("/skills").json()
+    match = next(s for s in listed if s["id"] == skill_id)
+    assert match["name"] == "New Name"
+
+
+def test_rename_committed_skill(client, provider, db) -> None:
+    session_id = client.post("/sessions").json()["id"]
+    add_message(db, session_id=session_id, role="user", content="make a skill")
+    provider.script = [_completion(tool_calls=[_build_skill_call(name="Old")])]
+    skill_id = client.post(f"/sessions/{session_id}/skills").json()["skill_id"]
+    update_status(db, skill_id, "committed")
+
+    resp = client.patch(f"/skills/{skill_id}", json={"name": "Renamed"})
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["id"] == skill_id
+    assert body["name"] == "Renamed"
+    assert body["status"] == "committed"
+
+    skill = get_skill(db, skill_id)
+    assert skill is not None
+    assert skill.name == "Renamed"
+    assert skill.config.name == "Renamed"
+
+    listed = client.get("/skills").json()
+    match = next(s for s in listed if s["id"] == skill_id)
+    assert match["name"] == "Renamed"
+
+
+def test_rename_skill_rejects_empty_name(client, provider, db) -> None:
+    session_id = client.post("/sessions").json()["id"]
+    add_message(db, session_id=session_id, role="user", content="make a skill")
+    provider.script = [_completion(tool_calls=[_build_skill_call(name="S")])]
+    skill_id = client.post(f"/sessions/{session_id}/skills").json()["skill_id"]
+
+    resp = client.patch(f"/skills/{skill_id}", json={"name": "   "})
+    assert resp.status_code == 422
+
+    resp = client.patch(f"/skills/{skill_id}/configure", json={"name": ""})
+    assert resp.status_code == 422
+
+
 def test_list_models_endpoint(client, provider, monkeypatch) -> None:
     """GET /models returns the active provider catalog with reasoning info."""
     from app.llm.base import ModelInfo

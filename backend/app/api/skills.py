@@ -25,12 +25,13 @@ from app.api.schemas import (
     SkillConfigureRequest,
     SkillOut,
     SkillPreview,
+    SkillRenameRequest,
 )
 from app.config import Settings
 from app.llm.base import LLMProvider, Message, ToolSpec
 from app.llm.log_context import prompt_log_context
 from app.agent.registry import ToolRegistry
-from app.skills.config import SkillConfig, VerifyCheck
+from app.skills.config import SkillConfig, VerifyCheck, compute_tags
 from app.skills.repo_skill import (
     SkillRecord,
     create_skill,
@@ -446,9 +447,34 @@ async def configure_skill_endpoint(
     }
     if "input_arity" in req.model_fields_set:
         configure_kwargs["input_arity"] = req.input_arity
+    if req.name is not None:
+        configure_kwargs["name"] = req.name
     updated = update_skill_config(db, skill_id, **configure_kwargs)
     assert updated is not None
     return SkillBuilt(skill_id=skill_id, config=_preview(updated.config))
+
+
+@router.patch("/skills/{skill_id}", response_model=SkillOut)
+async def rename_skill_endpoint(
+    skill_id: str,
+    req: SkillRenameRequest,
+    db: Database = Depends(get_db),
+) -> SkillOut:
+    skill = get_skill(db, skill_id)
+    if skill is None:
+        raise HTTPException(status_code=404, detail="skill not found")
+    updated = update_skill_config(db, skill_id, name=req.name)
+    assert updated is not None
+    return SkillOut(
+        id=updated.id,
+        name=updated.name,
+        description=updated.description,
+        status=updated.status,
+        created_at=updated.created_at,
+        kind=updated.config.kind,
+        tags=compute_tags(updated.config),
+        input_arity=updated.config.input_arity,
+    )
 
 
 @router.post("/skills/{skill_id}/commit", response_model=CommitOut)

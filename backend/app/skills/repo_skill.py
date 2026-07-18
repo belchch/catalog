@@ -201,14 +201,17 @@ def update_skill_config(
     provider: str | None = None,
     reasoning: str | None = None,
     input_arity: int | None | object = _UNSET,
+    name: str | None = None,
 ) -> SkillRecord | None:
     """Override selected config fields and persist (CATALOG-6 settings modal).
 
-    For ``model``/``provider``/``reasoning``, only non-``None`` arguments are
-    applied. For ``input_arity``, pass an explicit value (including ``None``
-    for the document-list mode) or omit the argument to leave it unchanged.
-    Returns the updated record (or ``None`` if the skill does not exist).
-    Intended for ``draft`` skills before commit.
+    For ``model``/``provider``/``reasoning``/``name``, only non-``None``
+    arguments are applied. For ``input_arity``, pass an explicit value
+    (including ``None`` for the document-list mode) or omit the argument to
+    leave it unchanged. When ``name`` is set, both the ``skill.name`` column
+    and ``config.name`` are updated. Returns the updated record (or ``None``
+    if the skill does not exist). Intended for ``draft`` skills before
+    commit; ``name`` alone is also used for committed rename (CATALOG-30).
     """
     record = get_skill(db, skill_id)
     if record is None:
@@ -222,11 +225,21 @@ def update_skill_config(
         config.reasoning = reasoning
     if input_arity is not _UNSET:
         config.input_arity = cast(int | None, input_arity)
+    new_name = record.name
+    if name is not None:
+        config.name = name
+        new_name = name
     now = _now_iso()
     with db.connect() as conn:
-        conn.execute(
-            "UPDATE skill SET config_json = ?, updated_at = ? WHERE id = ?",
-            (config.to_json(), now, skill_id),
-        )
-    # Reflect the mutation in-memory rather than re-reading the row.
-    return replace(record, config=config, updated_at=now)
+        if name is not None:
+            conn.execute(
+                "UPDATE skill SET name = ?, config_json = ?, updated_at = ? "
+                "WHERE id = ?",
+                (new_name, config.to_json(), now, skill_id),
+            )
+        else:
+            conn.execute(
+                "UPDATE skill SET config_json = ?, updated_at = ? WHERE id = ?",
+                (config.to_json(), now, skill_id),
+            )
+    return replace(record, name=new_name, config=config, updated_at=now)
