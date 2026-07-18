@@ -5,6 +5,8 @@ type DocumentComboboxProps = {
   documents: DocumentOut[]
   ariaLabel: string
   placeholder: string
+  disabled?: boolean
+  triggerClassName?: string
 } & (
   | {
       multiple?: false
@@ -19,7 +21,14 @@ type DocumentComboboxProps = {
 )
 
 export function DocumentCombobox(props: DocumentComboboxProps) {
-  const { documents, ariaLabel, placeholder, multiple = false } = props
+  const {
+    documents,
+    ariaLabel,
+    placeholder,
+    multiple = false,
+    disabled = false,
+    triggerClassName,
+  } = props
   const [open, setOpen] = useState(false)
   const [filter, setFilter] = useState('')
   const rootRef = useRef<HTMLDivElement>(null)
@@ -36,6 +45,13 @@ export function DocumentCombobox(props: DocumentComboboxProps) {
     document.addEventListener('mousedown', onPointer)
     return () => document.removeEventListener('mousedown', onPointer)
   }, [open])
+
+  useEffect(() => {
+    if (disabled) {
+      setOpen(false)
+      setFilter('')
+    }
+  }, [disabled])
 
   const selectedIds = multiple
     ? props.multiple === true
@@ -93,8 +109,16 @@ export function DocumentCombobox(props: DocumentComboboxProps) {
         aria-expanded={open}
         aria-controls={listId}
         aria-label={ariaLabel}
-        className="flex w-full items-center justify-between rounded bg-slate-800 px-2 py-1 text-left text-[11px] text-slate-100"
-        onClick={() => setOpen((v) => !v)}
+        aria-disabled={disabled || undefined}
+        disabled={disabled}
+        className={
+          triggerClassName ??
+          'flex w-full items-center justify-between rounded bg-slate-800 px-2 py-1 text-left text-[11px] text-slate-100 disabled:opacity-50'
+        }
+        onClick={() => {
+          if (disabled) return
+          setOpen((v) => !v)
+        }}
         onKeyDown={(e) => {
           if (e.key === 'Escape') {
             e.preventDefault()

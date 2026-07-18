@@ -152,6 +152,10 @@ export function listSessionMessages(sessionId: string): Promise<MessageOut[]> {
   return jsonFetch<MessageOut[]>(`/sessions/${sessionId}/messages`)
 }
 
+export function getSessionDocuments(sessionId: string): Promise<DocumentOut[]> {
+  return jsonFetch<DocumentOut[]>(`/sessions/${sessionId}/documents`)
+}
+
 export async function deleteSession(sessionId: string): Promise<void> {
   const res = await fetch(`${API_URL}/sessions/${sessionId}`, { method: 'DELETE' })
   if (!res.ok) {

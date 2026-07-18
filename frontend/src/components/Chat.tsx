@@ -1,10 +1,9 @@
 import { useEffect, useRef, useState } from 'react'
+import type { DocumentOut } from '../api.ts'
 import type { PlannerMessage } from '../hooks/usePlannerSession.ts'
 import { ChatMessage } from './ChatMessage.tsx'
+import { DocumentCombobox } from './DocumentCombobox.tsx'
 
-// Static starter quick-replies for an empty chat (CATALOG-13). Mirrors the
-// backend STARTER_SUGGESTIONS; shown before a session is connected and for a
-// freshly opened empty session.
 const STARTER_SUGGESTIONS = [
   'Изучи доступные документы',
   'Опиши задачу для скилла',
@@ -19,13 +18,14 @@ interface ChatProps {
   reconnecting: boolean
   error: string | null
   suggestions: string[]
-  onSend: (text: string) => void
+  documents: DocumentOut[]
+  sessionDocuments: DocumentOut[]
+  sessionId: string | null
+  onSend: (text: string, docIds?: string[]) => void
   onCancel: () => void
   onReconnect: () => void
   onCreateSkill: () => void
   buildingSkill: boolean
-  // CATALOG-17: name of the skill being edited, or null for a regular
-  // "build a new skill" session — drives the banner and button label.
   editingSkillName: string | null
 }
 
@@ -37,6 +37,9 @@ export function Chat({
   reconnecting,
   error,
   suggestions,
+  documents,
+  sessionDocuments,
+  sessionId,
   onSend,
   onCancel,
   onReconnect,
@@ -45,26 +48,42 @@ export function Chat({
   editingSkillName,
 }: ChatProps) {
   const [input, setInput] = useState('')
+  const [selectedDocIds, setSelectedDocIds] = useState<string[]>([])
   const bottomRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages])
 
+  useEffect(() => {
+    setSelectedDocIds([])
+  }, [sessionId])
+
   const submit = () => {
     const text = input.trim()
-    if (!text || streaming) return
-    onSend(text)
+    if (streaming) return
+    if (!text && selectedDocIds.length === 0) return
+    onSend(text, selectedDocIds.length > 0 ? selectedDocIds : undefined)
     setInput('')
+    setSelectedDocIds([])
   }
 
-  // CATALOG-13: quick-reply chips. Hidden while streaming; the starter set is
-  // shown for an empty chat, otherwise the model-suggested items are used.
+  const canSubmit = !streaming && (input.trim().length > 0 || selectedDocIds.length > 0)
+
   const visibleSuggestions = streaming
     ? []
     : messages.length === 0
       ? STARTER_SUGGESTIONS
       : suggestions
+
+  const selectedDocs = selectedDocIds
+    .map((id) => documents.find((d) => d.id === id))
+    .filter((d): d is DocumentOut => d != null)
+
+  const removeSelected = (id: string) => {
+    if (streaming) return
+    setSelectedDocIds((prev) => prev.filter((x) => x !== id))
+  }
 
   return (
     <div className="flex h-full flex-col">
@@ -116,6 +135,27 @@ export function Chat({
         <div ref={bottomRef} />
       </div>
       <div className="border-t border-slate-800 p-3">
+        {sessionDocuments.length > 0 && (
+          <section className="mb-2" aria-label="Документы в сессии">
+            <h2 className="mb-1 text-[11px] uppercase tracking-wide text-slate-500">
+              Документы в сессии
+            </h2>
+            <ul className="flex flex-wrap gap-1.5" role="list">
+              {sessionDocuments.map((d) => (
+                <li
+                  key={d.id}
+                  role="listitem"
+                  className="inline-flex items-center gap-1 rounded-full border border-slate-700 bg-slate-800/60 px-2.5 py-1 text-xs text-slate-300"
+                >
+                  <span className="rounded bg-slate-700/60 px-1 text-[10px] uppercase text-slate-400">
+                    {d.kind}
+                  </span>
+                  <span className="truncate">{d.title}</span>
+                </li>
+              ))}
+            </ul>
+          </section>
+        )}
         {visibleSuggestions.length > 0 && (
           <div className="mb-2 flex flex-wrap gap-2">
             {visibleSuggestions.map((s) => (
@@ -130,6 +170,40 @@ export function Chat({
             ))}
           </div>
         )}
+        <div className="mb-2 flex flex-wrap items-center gap-1.5">
+          {selectedDocs.map((d) => (
+            <span
+              key={d.id}
+              className="inline-flex items-center gap-1 rounded-full border border-indigo-500/40 bg-indigo-600/15 px-2.5 py-1 text-xs text-indigo-100"
+            >
+              <span className="rounded bg-slate-700/60 px-1 text-[10px] uppercase text-slate-400">
+                {d.kind}
+              </span>
+              <span className="truncate">{d.title}</span>
+              <button
+                type="button"
+                className="ml-0.5 text-slate-400 hover:text-slate-100 disabled:opacity-50"
+                aria-label={`Убрать ${d.title}`}
+                disabled={streaming}
+                onClick={() => removeSelected(d.id)}
+              >
+                ×
+              </button>
+            </span>
+          ))}
+          <div className="w-44 max-w-[12rem]">
+            <DocumentCombobox
+              multiple
+              documents={documents}
+              values={selectedDocIds}
+              onChange={setSelectedDocIds}
+              ariaLabel="Добавить документы в сессию"
+              placeholder="+ документ"
+              disabled={streaming}
+              triggerClassName="flex w-full items-center justify-between rounded-full border border-slate-700 bg-slate-800/60 px-3 py-1 text-left text-xs text-slate-200 hover:border-indigo-500 hover:bg-slate-800 disabled:opacity-50"
+            />
+          </div>
+        </div>
         <div className="flex gap-2">
           <input
             className="flex-1 rounded-md bg-slate-800 px-3 py-2 text-sm text-slate-100 outline-none placeholder:text-slate-500 disabled:opacity-50"
@@ -153,7 +227,7 @@ export function Chat({
             <button
               className="rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
               onClick={submit}
-              disabled={streaming}
+              disabled={!canSubmit}
             >
               Отправить
             </button>

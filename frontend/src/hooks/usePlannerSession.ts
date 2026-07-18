@@ -1,5 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { listSessionMessages, type MessageOut } from '../api.ts'
+import {
+  getSessionDocuments,
+  listSessionMessages,
+  type DocumentOut,
+  type MessageOut,
+} from '../api.ts'
 import {
   connectPlanner,
   formatToolArgs,
@@ -21,13 +26,19 @@ export interface UsePlannerSessionResult {
   reconnecting: boolean
   error: string | null
   suggestions: string[]
-  send: (text: string) => void
+  sessionDocuments: DocumentOut[]
+  send: (text: string, docIds?: string[]) => void
   cancel: () => void
   reconnect: () => void
 }
 
 export interface UsePlannerSessionOptions {
   onSessionInvalid?: () => void
+}
+
+interface PendingSend {
+  text: string
+  docIds?: string[]
 }
 
 function mapStoredMessages(raw: MessageOut[]): PlannerMessage[] {
@@ -68,11 +79,12 @@ export function usePlannerSession(
   const [reconnecting, setReconnecting] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [suggestions, setSuggestions] = useState<string[]>([])
+  const [sessionDocuments, setSessionDocuments] = useState<DocumentOut[]>([])
   const [reconnectNonce, setReconnectNonce] = useState(0)
 
   const connRef = useRef<PlannerConnection | null>(null)
   const assistantBufferRef = useRef<string>('')
-  const pendingRef = useRef<string[]>([])
+  const pendingRef = useRef<PendingSend[]>([])
   const readyRef = useRef<boolean>(false)
   const streamingRef = useRef<boolean>(false)
   const skipHydrateRef = useRef<boolean>(false)
@@ -89,6 +101,7 @@ export function usePlannerSession(
     setReconnecting(false)
     setError(null)
     setSuggestions([])
+    setSessionDocuments([])
     assistantBufferRef.current = ''
     pendingRef.current = []
     streamingRef.current = false
@@ -141,6 +154,9 @@ export function usePlannerSession(
         break
       case 'suggestions':
         setSuggestions(e.items)
+        break
+      case 'session_docs':
+        setSessionDocuments(e.documents)
         break
       case 'error':
         hadErrorRef.current = true
@@ -205,6 +221,14 @@ export function usePlannerSession(
       },
     )
 
+    void getSessionDocuments(sessionId).then(
+      (docs) => {
+        if (cancelled) return
+        setSessionDocuments(docs)
+      },
+      () => {},
+    )
+
     const conn = connectPlanner(sessionId, handleEvent, {
       onOpen: () => {
         readyRef.current = true
@@ -212,7 +236,9 @@ export function usePlannerSession(
         setReconnecting(false)
         const queued = pendingRef.current
         pendingRef.current = []
-        for (const text of queued) connRef.current?.send(text)
+        for (const item of queued) {
+          connRef.current?.send(item.text, item.docIds)
+        }
       },
       onClose: () => {
         readyRef.current = false
@@ -231,9 +257,10 @@ export function usePlannerSession(
     }
   }, [sessionId, handleEvent, resetLocal, reconnectNonce])
 
-  const send = useCallback((text: string) => {
+  const send = useCallback((text: string, docIds?: string[]) => {
     const trimmed = text.trim()
-    if (!trimmed) return
+    const ids = docIds && docIds.length > 0 ? docIds : undefined
+    if (!trimmed && !ids) return
     skipHydrateRef.current = true
     setMessages((prev) => [...prev, { role: 'user', content: trimmed }])
     streamingRef.current = true
@@ -242,9 +269,9 @@ export function usePlannerSession(
     assistantBufferRef.current = ''
     setError(null)
     if (readyRef.current && connRef.current) {
-      connRef.current.send(trimmed)
+      connRef.current.send(trimmed, ids)
     } else {
-      pendingRef.current.push(trimmed)
+      pendingRef.current.push({ text: trimmed, docIds: ids })
     }
   }, [])
 
@@ -270,6 +297,7 @@ export function usePlannerSession(
     reconnecting,
     error,
     suggestions,
+    sessionDocuments,
     send,
     cancel,
     reconnect,

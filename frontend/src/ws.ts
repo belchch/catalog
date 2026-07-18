@@ -4,7 +4,7 @@
 // is out of scope for this slice: on a close without `finish` the caller shows
 // a "connection closed" notice.
 
-import { wsBaseUrl } from './api.ts'
+import { wsBaseUrl, type DocumentOut } from './api.ts'
 
 export type ServerEvent =
   | { type: 'step'; iteration: number }
@@ -35,6 +35,7 @@ export type ServerEvent =
     }
   | { type: 'reasoning'; text: string }
   | { type: 'suggestions'; items: string[] }
+  | { type: 'session_docs'; documents: DocumentOut[] }
   | {
       type: 'finish'
       capped?: boolean
@@ -47,7 +48,7 @@ export type ServerEvent =
   | { type: 'error'; message: string }
 
 export interface PlannerConnection {
-  send(text: string): void
+  send(text: string, docIds?: string[]): void
   cancel(): void
   close(): void
 }
@@ -83,7 +84,13 @@ export function connectPlanner(
   }
   ws.onclose = () => opts?.onClose?.()
   return {
-    send: (text: string) => ws.send(text),
+    send: (text: string, docIds?: string[]) => {
+      if (docIds && docIds.length > 0) {
+        ws.send(JSON.stringify({ type: 'user', content: text, doc_ids: docIds }))
+      } else {
+        ws.send(text)
+      }
+    },
     cancel: () => ws.send(JSON.stringify({ type: 'cancel' })),
     close: () => ws.close(),
   }

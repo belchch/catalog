@@ -91,10 +91,10 @@ export default function App() {
   }, [sessionId, sessions])
 
   const handleSend = useCallback(
-    async (text: string) => {
+    async (text: string, docIds?: string[]) => {
       try {
         await ensureSession()
-        planner.send(text)
+        planner.send(text, docIds)
       } catch (e) {
         setNotice(e instanceof Error ? e.message : String(e))
       }
@@ -268,6 +268,9 @@ export default function App() {
               reconnecting={planner.reconnecting}
               error={planner.error}
               suggestions={planner.suggestions}
+              documents={docs.documents}
+              sessionDocuments={planner.sessionDocuments}
+              sessionId={sessionId}
               onSend={handleSend}
               onCancel={planner.cancel}
               onReconnect={planner.reconnect}
