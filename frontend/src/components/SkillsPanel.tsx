@@ -207,44 +207,48 @@ export function SkillsPanel({
                       })
                     }}
                   >
-                    <input
-                      type="text"
-                      className="min-w-0 flex-1 rounded bg-slate-800 px-2 py-1 text-xs text-slate-100 disabled:opacity-50"
-                      value={renameValue}
-                      aria-label="Имя скила"
-                      autoFocus
-                      disabled={renameSaving}
-                      onChange={(e) => setRenameValue(e.target.value)}
-                      onFocus={(e) => {
-                        const len = e.target.value.length
-                        e.target.setSelectionRange(len, len)
-                      }}
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter') {
-                          e.preventDefault()
-                          void saveRename(s.id, s.name)
-                        } else if (e.key === 'Escape') {
-                          e.preventDefault()
-                          clearRename()
-                        }
-                      }}
-                    />
-                    <button
-                      type="button"
-                      className="rounded bg-indigo-600 px-2 py-1 text-[11px] text-white disabled:opacity-50"
-                      disabled={renameSaving || renameEmpty}
-                      onClick={() => void saveRename(s.id, s.name)}
-                    >
-                      {renameSaving ? '…' : 'Сохранить'}
-                    </button>
-                    <button
-                      type="button"
-                      className="rounded bg-slate-700 px-2 py-1 text-[11px] text-slate-200 disabled:opacity-50"
-                      disabled={renameSaving}
-                      onClick={clearRename}
-                    >
-                      Отмена
-                    </button>
+                    <div className="flex min-w-[8rem] flex-1 items-center">
+                      <input
+                        type="text"
+                        className="w-full rounded bg-slate-800 px-2 py-1 text-xs text-slate-100 disabled:opacity-50"
+                        value={renameValue}
+                        aria-label="Имя скила"
+                        autoFocus
+                        disabled={renameSaving}
+                        onChange={(e) => setRenameValue(e.target.value)}
+                        onFocus={(e) => {
+                          const len = e.target.value.length
+                          e.target.setSelectionRange(len, len)
+                        }}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') {
+                            e.preventDefault()
+                            void saveRename(s.id, s.name)
+                          } else if (e.key === 'Escape') {
+                            e.preventDefault()
+                            clearRename()
+                          }
+                        }}
+                      />
+                    </div>
+                    <div className="flex shrink-0 items-center gap-1.5">
+                      <button
+                        type="button"
+                        className="rounded bg-indigo-600 px-2 py-1 text-[11px] text-white disabled:opacity-50"
+                        disabled={renameSaving || renameEmpty}
+                        onClick={() => void saveRename(s.id, s.name)}
+                      >
+                        {renameSaving ? '…' : 'Сохранить'}
+                      </button>
+                      <button
+                        type="button"
+                        className="rounded bg-slate-700 px-2 py-1 text-[11px] text-slate-200 disabled:opacity-50"
+                        disabled={renameSaving}
+                        onClick={clearRename}
+                      >
+                        Отмена
+                      </button>
+                    </div>
                   </div>
                 ) : (
                   <div className="flex min-w-0 items-center gap-1">
