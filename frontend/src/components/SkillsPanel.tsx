@@ -54,6 +54,43 @@ function isSelectionValid(arity: InputArity, slots: (string | null)[]): boolean 
   return slots.filter((id): id is string => id != null).length >= 1
 }
 
+function nonempty(value: string | null | undefined): string | null {
+  if (value == null) return null
+  const trimmed = value.trim()
+  return trimmed.length > 0 ? trimmed : null
+}
+
+function SkillModelMeta({ skill }: { skill: SkillOut }) {
+  const provider = nonempty(skill.provider)
+  const model = nonempty(skill.model)
+  const reasoning = nonempty(skill.reasoning)
+  if (provider == null && model == null && reasoning == null) return null
+  return (
+    <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[11px]">
+      {provider != null && (
+        <span className="inline-flex min-w-0 items-center gap-1">
+          <span className="text-slate-500">Провайдер</span>
+          <span className="text-slate-300">{provider}</span>
+        </span>
+      )}
+      {model != null && (
+        <span className="inline-flex min-w-0 items-center gap-1">
+          <span className="text-slate-500">Модель</span>
+          <span className="max-w-[12rem] truncate text-slate-300" title={model}>
+            {model}
+          </span>
+        </span>
+      )}
+      {reasoning != null && (
+        <span className="inline-flex min-w-0 items-center gap-1">
+          <span className="text-slate-500">Рассуждения</span>
+          <span className="text-slate-300">{reasoning}</span>
+        </span>
+      )}
+    </div>
+  )
+}
+
 function applyDocIds(arity: InputArity, slots: (string | null)[]): string[] {
   if (arity === 1) return slots[0] != null ? [slots[0]] : []
   if (arity === 2) {
@@ -261,6 +298,7 @@ export function SkillsPanel({
               {s.description && (
                 <p className="mt-1 text-[11px] text-slate-400">{s.description}</p>
               )}
+              <SkillModelMeta skill={s} />
               <div className="mt-2 flex flex-wrap items-center gap-1.5">
                 <button
                   type="button"

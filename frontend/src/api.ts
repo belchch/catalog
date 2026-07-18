@@ -19,6 +19,9 @@ export interface SkillOut {
   // "ai" (LLM-driven). Computed by the backend from the skill config.
   tags: string[]
   input_arity: number | null
+  provider: string | null
+  model: string | null
+  reasoning: string | null
 }
 
 export interface RunOut {
