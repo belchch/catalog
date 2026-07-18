@@ -6,7 +6,6 @@ interface SessionsPanelProps {
   sessions: UseSessionsResult
   currentSessionId: string | null
   onSelect: (id: string) => void
-  onNewChat: () => void
   onDelete: (id: string) => void
 }
 
@@ -14,7 +13,6 @@ export function SessionsPanel({
   sessions,
   currentSessionId,
   onSelect,
-  onNewChat,
   onDelete,
 }: SessionsPanelProps) {
   const [confirmId, setConfirmId] = useState<string | null>(null)
@@ -23,27 +21,6 @@ export function SessionsPanel({
 
   return (
     <div className="flex flex-col gap-2">
-      <div className="flex items-center justify-between gap-2">
-        <h2 className="text-sm font-semibold text-slate-200">Сессии</h2>
-        <div className="flex items-center gap-1">
-          <button
-            type="button"
-            className="rounded bg-slate-800 px-2 py-1 text-xs text-slate-300 hover:bg-slate-700 disabled:opacity-50"
-            onClick={onNewChat}
-            disabled={sessions.loading}
-          >
-            + Новый чат
-          </button>
-          <button
-            type="button"
-            className="rounded bg-slate-800 px-2 py-1 text-xs text-slate-300 hover:bg-slate-700 disabled:opacity-50"
-            onClick={() => void sessions.refresh()}
-            disabled={sessions.loading}
-          >
-            {sessions.loading ? '…' : 'Обновить'}
-          </button>
-        </div>
-      </div>
       {sessions.error && <p className="text-xs text-red-400">{sessions.error}</p>}
       {sessions.sessions.length === 0 && sessions.loading && (
         <p className="text-xs text-slate-500">Загрузка…</p>

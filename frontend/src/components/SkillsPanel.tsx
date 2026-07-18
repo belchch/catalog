@@ -179,16 +179,6 @@ export function SkillsPanel({
 
   return (
     <div className="flex flex-col gap-2">
-      <div className="flex items-center justify-between">
-        <h2 className="text-sm font-semibold text-slate-200">Скиллы</h2>
-        <button
-          className="rounded bg-slate-800 px-2 py-1 text-xs text-slate-300 disabled:opacity-50"
-          onClick={() => void skills.refresh()}
-          disabled={skills.loading}
-        >
-          {skills.loading ? '…' : 'Обновить'}
-        </button>
-      </div>
       {skills.error && <p className="text-xs text-red-400">{skills.error}</p>}
       <ul className="flex flex-col gap-2">
         {skills.skills.map((s) => {

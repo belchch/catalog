@@ -9,6 +9,7 @@ import {
   type SkillPreview,
 } from './api.ts'
 import { Chat } from './components/Chat.tsx'
+import { CollapsibleSection } from './components/CollapsibleSection.tsx'
 import { DocumentList } from './components/DocumentList.tsx'
 import { ModelSelector } from './components/ModelSelector.tsx'
 import { RunView } from './components/RunView.tsx'
@@ -54,6 +55,9 @@ export default function App() {
   const [editingSkill, setEditingSkill] = useState<{ skillId: string; name: string } | null>(null)
   const [savedResultDoc, setSavedResultDoc] = useState<DocumentOut | null>(null)
   const [savingResult, setSavingResult] = useState(false)
+  const [openSessions, setOpenSessions] = useState(false)
+  const [openDocs, setOpenDocs] = useState(false)
+  const [openSkills, setOpenSkills] = useState(false)
 
   const handleSessionInvalid = useCallback(() => {
     writeStoredSessionId(null)
@@ -231,23 +235,80 @@ export default function App() {
       )}
       <div className="grid flex-1 grid-cols-1 overflow-hidden md:grid-cols-[320px_1fr]">
         <aside className="flex flex-col gap-4 overflow-y-auto border-r border-slate-800 p-3">
-          <SessionsPanel
-            sessions={sessions}
-            currentSessionId={sessionId}
-            onSelect={handleSelectSession}
-            onNewChat={handleNewChat}
-            onDelete={(id) => void handleDeleteSession(id)}
-          />
-          <DocumentList docs={docs} currentDocId={currentDocId} onSelect={setCurrentDocId} />
-          <SkillsPanel
-            skills={skillsHook}
-            documents={docs.documents}
-            defaultDocId={currentDocId}
-            onApply={handleApply}
-            onEdit={handleEditSkill}
-            onDelete={(id) => void handleDeleteSkill(id)}
-            onRename={(id, name) => skillsHook.rename(id, name)}
-          />
+          <CollapsibleSection
+            title="Сессии"
+            open={openSessions}
+            onToggle={setOpenSessions}
+            actions={
+              <>
+                <button
+                  type="button"
+                  className="rounded bg-slate-800 px-2 py-1 text-xs text-slate-300 hover:bg-slate-700 disabled:opacity-50"
+                  onClick={handleNewChat}
+                  disabled={sessions.loading}
+                >
+                  + Новый чат
+                </button>
+                <button
+                  type="button"
+                  className="rounded bg-slate-800 px-2 py-1 text-xs text-slate-300 hover:bg-slate-700 disabled:opacity-50"
+                  onClick={() => void sessions.refresh()}
+                  disabled={sessions.loading}
+                >
+                  {sessions.loading ? '…' : 'Обновить'}
+                </button>
+              </>
+            }
+          >
+            <SessionsPanel
+              sessions={sessions}
+              currentSessionId={sessionId}
+              onSelect={handleSelectSession}
+              onDelete={(id) => void handleDeleteSession(id)}
+            />
+          </CollapsibleSection>
+          <CollapsibleSection
+            title="Документы"
+            open={openDocs}
+            onToggle={setOpenDocs}
+            actions={
+              <button
+                type="button"
+                className="rounded bg-slate-800 px-2 py-1 text-xs text-slate-300 hover:bg-slate-700 disabled:opacity-50"
+                onClick={() => void docs.refresh()}
+                disabled={docs.loading}
+              >
+                {docs.loading ? '…' : 'Обновить'}
+              </button>
+            }
+          >
+            <DocumentList docs={docs} currentDocId={currentDocId} onSelect={setCurrentDocId} />
+          </CollapsibleSection>
+          <CollapsibleSection
+            title="Скиллы"
+            open={openSkills}
+            onToggle={setOpenSkills}
+            actions={
+              <button
+                type="button"
+                className="rounded bg-slate-800 px-2 py-1 text-xs text-slate-300 hover:bg-slate-700 disabled:opacity-50"
+                onClick={() => void skillsHook.refresh()}
+                disabled={skillsHook.loading}
+              >
+                {skillsHook.loading ? '…' : 'Обновить'}
+              </button>
+            }
+          >
+            <SkillsPanel
+              skills={skillsHook}
+              documents={docs.documents}
+              defaultDocId={currentDocId}
+              onApply={handleApply}
+              onEdit={handleEditSkill}
+              onDelete={(id) => void handleDeleteSkill(id)}
+              onRename={(id, name) => skillsHook.rename(id, name)}
+            />
+          </CollapsibleSection>
         </aside>
         <main className="overflow-hidden">
           {activeRunId ? (
