@@ -178,20 +178,6 @@ export function Chat({
             </ul>
           </section>
         )}
-        {visibleSuggestions.length > 0 && (
-          <div className="mb-2 flex flex-wrap gap-2">
-            {visibleSuggestions.map((s) => (
-              <button
-                key={s}
-                className="rounded-full border border-slate-700 bg-slate-800/60 px-3 py-1 text-xs text-slate-200 transition-colors hover:border-indigo-500 hover:bg-slate-800 disabled:opacity-50"
-                onClick={() => onSend(s)}
-                disabled={streaming}
-              >
-                {s}
-              </button>
-            ))}
-          </div>
-        )}
         <div className="mb-2 flex flex-wrap items-center gap-1.5">
           {selectedDocs.map((d) => (
             <span
@@ -227,6 +213,24 @@ export function Chat({
             />
           </div>
         </div>
+        {visibleSuggestions.length > 0 && (
+          <div
+            className="mb-2 flex flex-wrap gap-2"
+            role="group"
+            aria-label="Быстрые ответы"
+          >
+            {visibleSuggestions.map((s) => (
+              <button
+                key={s}
+                className="rounded-full border border-slate-700 bg-slate-800/60 px-3 py-1 text-xs text-slate-200 transition-colors hover:border-indigo-500 hover:bg-slate-800 disabled:opacity-50"
+                onClick={() => onSend(s)}
+                disabled={streaming}
+              >
+                {s}
+              </button>
+            ))}
+          </div>
+        )}
         <div className="flex items-end gap-2">
           <textarea
             ref={textareaRef}
