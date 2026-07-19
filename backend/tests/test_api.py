@@ -1502,6 +1502,19 @@ def test_apply_attaches_input_docs_to_session_before_run(client, provider, db) -
     assert finish["status"] == "ok"
 
 
+def test_apply_missing_session_returns_404(client, db) -> None:
+    doc_id = _upload(client, "input.md", b"source text")
+    skill_id = _seed_committed_skill(
+        db, verify_checks=[VerifyCheck("non_empty")], max_retries=0
+    )
+    resp = client.post(
+        f"/skills/{skill_id}/apply",
+        json={"doc_ids": [doc_id], "session_id": "missing-session"},
+    )
+    assert resp.status_code == 404
+    assert resp.json()["detail"] == "session not found"
+
+
 def test_save_run_result_missing_run_returns_404(client, db) -> None:
     resp = client.post("/runs/does-not-exist/save")
     assert resp.status_code == 404

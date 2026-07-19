@@ -167,8 +167,9 @@ export async function removeSessionDocument(
     `${API_URL}/sessions/${sessionId}/documents/${docId}`,
     { method: 'DELETE' },
   )
-  if (res.status === 204 || res.status === 404) return
+  if (res.status === 204) return
   const body = await res.text().catch(() => '')
+  if (res.status === 404 && body.includes('document not attached')) return
   throw new Error(`${res.status} ${res.statusText}${body ? `: ${body}` : ''}`)
 }
 

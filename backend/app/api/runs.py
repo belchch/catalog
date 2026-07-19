@@ -41,6 +41,7 @@ from app.skills.repo_run import create_run, get_run, set_output_doc_id
 from app.skills.repo_skill import get_skill
 from app.storage.db import Database
 from app.storage.repo_document import create_document
+from app.storage.repo_session import get_session
 from app.storage.repo_session_document import attach_documents
 
 router = APIRouter()
@@ -77,6 +78,8 @@ async def apply_endpoint(
     # document_not_available_in_session even though the caller explicitly
     # selected it as input.
     if req.session_id is not None:
+        if get_session(db, req.session_id) is None:
+            raise HTTPException(status_code=404, detail="session not found")
         attach_documents(db, req.session_id, doc_ids)
     run_id = create_run(
         db,

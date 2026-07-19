@@ -300,9 +300,14 @@ export function usePlannerSession(
       try {
         await removeSessionDocument(sessionId, docId)
       } catch (e: unknown) {
+        const msg = e instanceof Error ? e.message : String(e)
+        if (msg.includes('session not found')) {
+          onSessionInvalidRef.current?.()
+          return
+        }
         const docs = await getSessionDocuments(sessionId).catch(() => null)
         if (docs) setSessionDocuments(docs)
-        setError(e instanceof Error ? e.message : String(e))
+        setError(msg)
       }
     },
     [sessionId],
