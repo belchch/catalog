@@ -164,6 +164,7 @@ export function DocumentCombobox(props: DocumentComboboxProps) {
                   role="option"
                   aria-selected={selected}
                   className="flex cursor-pointer items-center gap-1.5 px-2 py-1 text-[11px] text-slate-300 hover:bg-slate-800"
+                  onMouseDown={(e) => e.preventDefault()}
                 >
                   <input
                     type="checkbox"
@@ -186,6 +187,7 @@ export function DocumentCombobox(props: DocumentComboboxProps) {
                     ? 'bg-indigo-600/20 text-white'
                     : 'text-slate-300 hover:bg-slate-800')
                 }
+                onMouseDown={(e) => e.preventDefault()}
                 onClick={() => {
                   if (props.multiple !== true) props.onChange(d.id)
                   close()

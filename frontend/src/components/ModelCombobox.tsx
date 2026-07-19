@@ -60,15 +60,7 @@ export function ModelCombobox({
   }
 
   return (
-    <div
-      ref={rootRef}
-      className="relative"
-      onBlur={(e) => {
-        if (!rootRef.current?.contains(e.relatedTarget as Node)) {
-          close()
-        }
-      }}
-    >
+    <div ref={rootRef} className="relative">
       <button
         type="button"
         role="combobox"
@@ -140,6 +132,7 @@ export function ModelCombobox({
                     ? 'bg-indigo-600/20 text-white'
                     : 'text-slate-300 hover:bg-slate-800')
                 }
+                onMouseDown={(e) => e.preventDefault()}
                 onClick={() => {
                   onChange(m.id)
                   close()
