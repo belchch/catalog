@@ -55,3 +55,33 @@ def rewrite_wiki_links(text: str, mapping: dict[str, str]) -> str:
         return f"[[{stem}{heading}{suffix}]]"
 
     return _WIKI_LINK_RE.sub(_replace, text)
+
+
+def ensure_parent_wikilinks(text: str, parent_stems: list[str]) -> str:
+    body = text or ""
+    if not parent_stems:
+        return body
+
+    seen: set[str] = set()
+    missing: list[str] = []
+    for stem in parent_stems:
+        if not stem or stem in seen:
+            continue
+        seen.add(stem)
+        if f"[[{stem}" not in body:
+            missing.append(stem)
+
+    if not missing:
+        return body
+
+    if len(missing) == 1:
+        block = f"Источник: [[{missing[0]}]]"
+    else:
+        lines = ["Источники:"]
+        lines.extend(f"- [[{stem}]]" for stem in missing)
+        block = "\n".join(lines)
+
+    base = body.rstrip()
+    if base:
+        return f"{base}\n\n{block}\n"
+    return f"{block}\n"

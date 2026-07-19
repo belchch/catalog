@@ -7,7 +7,11 @@ from typing import Any
 import pytest
 
 from app.documents.ingest import ingest_file
-from app.documents.obsidian import build_title_to_stem_map, rewrite_wiki_links
+from app.documents.obsidian import (
+    build_title_to_stem_map,
+    ensure_parent_wikilinks,
+    rewrite_wiki_links,
+)
 from app.documents.tools import build_document_tools
 from app.llm.base import CompletionResult, Message, ModelInfo, StreamDelta, ToolSpec
 from app.skills.apply import apply_skill_collect
@@ -60,6 +64,53 @@ def workspace(tmp_path: Path) -> Path:
 
 def _result(content: str) -> CompletionResult:
     return CompletionResult(content=content, tool_calls=[], finish_reason="stop")
+
+
+def test_ensure_parent_wikilinks_single() -> None:
+    out = ensure_parent_wikilinks("body", ["cover-letter-ea411722"])
+    assert "[[cover-letter-ea411722]]" in out
+    assert "Источник: [[cover-letter-ea411722]]" in out
+    assert out.startswith("body")
+
+
+def test_ensure_parent_wikilinks_multiple() -> None:
+    out = ensure_parent_wikilinks(
+        "body",
+        ["parent-aaa11111", "parent-bbb22222"],
+    )
+    assert "[[parent-aaa11111]]" in out
+    assert "[[parent-bbb22222]]" in out
+    assert "Источники:" in out
+    assert out.index("[[parent-aaa11111]]") < out.index("[[parent-bbb22222]]")
+
+
+def test_ensure_parent_wikilinks_idempotent_when_present() -> None:
+    text = "see [[cover-letter-ea411722]] already"
+    assert ensure_parent_wikilinks(text, ["cover-letter-ea411722"]) == text
+
+
+def test_ensure_parent_wikilinks_heading_counts_as_present() -> None:
+    text = "see [[cover-letter-ea411722#Intro]]"
+    assert ensure_parent_wikilinks(text, ["cover-letter-ea411722"]) == text
+
+
+def test_ensure_parent_wikilinks_only_missing() -> None:
+    text = "see [[parent-aaa11111]]"
+    out = ensure_parent_wikilinks(
+        text, ["parent-aaa11111", "parent-bbb22222"]
+    )
+    assert out.count("[[parent-aaa11111]]") == 1
+    assert "Источник: [[parent-bbb22222]]" in out
+
+
+def test_ensure_parent_wikilinks_empty_text() -> None:
+    out = ensure_parent_wikilinks("", ["parent-aaa11111"])
+    assert out == "Источник: [[parent-aaa11111]]\n"
+
+
+def test_ensure_parent_wikilinks_dedupes_stems() -> None:
+    out = ensure_parent_wikilinks("body", ["same-stem", "same-stem"])
+    assert out.count("[[same-stem]]") == 1
 
 
 def test_rewrite_wiki_links_title_to_stem() -> None:
@@ -217,6 +268,101 @@ def test_apply_persist_rewrites_obsidian_links(
     file_text = (workspace / out_doc.path).read_text(encoding="utf-8")
     assert "[[ekonomiya-tokov-abc12345]]" in file_text
     assert "[[Экономия токенов]]" not in file_text
+    input_stem = Path(input_doc.path).stem
+    assert f"[[{input_stem}]]" in file_text
+
+
+def test_apply_persist_ensures_parent_wikilinks(
+    db: Database, workspace: Path
+) -> None:
+    input_doc = ingest_file(
+        db, workspace, filename="cover-letter.md", content=b"source text"
+    )
+    input_stem = Path(input_doc.path).stem
+    skill = SkillConfig(
+        name="no-links",
+        description="test",
+        system_prompt="Write summary.",
+        allowed_tools=["read_document"],
+        model="test/model",
+        temperature=0.0,
+        max_iterations=4,
+        max_retries=0,
+        verify_checks=[VerifyCheck("non_empty")],
+    )
+    skill_id = create_skill(
+        db, name=skill.name, description=skill.description, config=skill
+    )
+    provider = ScriptProvider([_result("Summary without any wiki links.")])
+
+    result = asyncio.run(
+        apply_skill_collect(
+            provider=provider,
+            db=db,
+            workspace_dir=str(workspace),
+            skill=skill,
+            skill_id=skill_id,
+            input_doc_ids=[input_doc.id],
+            base_tools=build_document_tools(db, workspace),
+        )
+    )
+
+    assert result.status == "ok"
+    assert result.output_doc_id is not None
+    assert f"[[{input_stem}]]" in (result.result_text or "")
+
+    out_doc = get_document(db, result.output_doc_id)
+    assert out_doc is not None
+    file_text = (workspace / out_doc.path).read_text(encoding="utf-8")
+    assert f"Источник: [[{input_stem}]]" in file_text
+
+
+def test_apply_persist_ensures_all_parent_wikilinks(
+    db: Database, workspace: Path
+) -> None:
+    doc_a = ingest_file(
+        db, workspace, filename="alpha.md", content=b"alpha"
+    )
+    doc_b = ingest_file(
+        db, workspace, filename="beta.md", content=b"beta"
+    )
+    stems = [Path(doc_a.path).stem, Path(doc_b.path).stem]
+    skill = SkillConfig(
+        name="multi",
+        description="test",
+        system_prompt="Write summary.",
+        allowed_tools=["read_document"],
+        model="test/model",
+        temperature=0.0,
+        max_iterations=4,
+        max_retries=0,
+        verify_checks=[VerifyCheck("non_empty")],
+        input_arity=2,
+    )
+    skill_id = create_skill(
+        db, name=skill.name, description=skill.description, config=skill
+    )
+    provider = ScriptProvider([_result("Combined summary.")])
+
+    result = asyncio.run(
+        apply_skill_collect(
+            provider=provider,
+            db=db,
+            workspace_dir=str(workspace),
+            skill=skill,
+            skill_id=skill_id,
+            input_doc_ids=[doc_a.id, doc_b.id],
+            base_tools=build_document_tools(db, workspace),
+        )
+    )
+
+    assert result.status == "ok"
+    assert result.output_doc_id is not None
+    out_doc = get_document(db, result.output_doc_id)
+    assert out_doc is not None
+    file_text = (workspace / out_doc.path).read_text(encoding="utf-8")
+    for stem in stems:
+        assert f"[[{stem}]]" in file_text
 
 
 def test_apply_prompt_mentions_file_stem(

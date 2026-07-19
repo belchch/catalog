@@ -1440,6 +1440,38 @@ def test_save_run_result_rewrites_obsidian_links(client, provider, db) -> None:
     )
     assert f"[[{stem}]]" in file_text
     assert "[[Экономия токенов]]" not in file_text
+    input_doc = get_document(db, doc_id)
+    assert input_doc is not None
+    assert f"[[{Path(input_doc.path).stem}]]" in file_text
+
+
+def test_save_run_result_ensures_parent_wikilinks(client, provider, db) -> None:
+    doc_id = _upload(client, "cover-letter.md", b"source text")
+    input_doc = get_document(db, doc_id)
+    assert input_doc is not None
+    input_stem = Path(input_doc.path).stem
+    skill_id = _seed_committed_skill(
+        db, verify_checks=[VerifyCheck("non_empty")], max_retries=2
+    )
+    provider.script = [_completion("Summary without wiki links.")]
+
+    run_id = client.post(
+        f"/skills/{skill_id}/apply", json={"doc_id": doc_id, "persist": False}
+    ).json()["run_id"]
+    _drain_run_ws(client, run_id)
+
+    resp = client.post(f"/runs/{run_id}/save")
+    assert resp.status_code == 200, resp.text
+    saved = resp.json()
+
+    out_doc = get_document(db, saved["id"])
+    assert out_doc is not None
+    file_text = (Path(client.app.state.workspace) / out_doc.path).read_text(
+        encoding="utf-8"
+    )
+    assert f"Источник: [[{input_stem}]]" in file_text
+    run_after = client.get(f"/runs/{run_id}").json()
+    assert run_after["result_text"] == "Summary without wiki links."
 
 
 def test_save_run_result_attaches_to_session(client, provider, db) -> None:

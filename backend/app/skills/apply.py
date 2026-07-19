@@ -35,7 +35,11 @@ from app.agent.runner import _run_agent_core
 from app.agent.trace import Trace, TraceEntry
 from app.documents.extract import extract_text
 from app.documents.ingest import build_doc_path
-from app.documents.obsidian import build_title_to_stem_map, rewrite_wiki_links
+from app.documents.obsidian import (
+    build_title_to_stem_map,
+    ensure_parent_wikilinks,
+    rewrite_wiki_links,
+)
 from app.llm.base import LLMProvider, Message
 from app.skills.config import SkillConfig
 from app.skills.repo_run import create_run, finish_run, get_run
@@ -328,6 +332,10 @@ async def _apply_core(
             results_dir.mkdir(parents=True, exist_ok=True)
             last_text = rewrite_wiki_links(
                 last_text or "", build_title_to_stem_map(db)
+            )
+            last_text = ensure_parent_wikilinks(
+                last_text,
+                [Path(d.path).stem for d in docs],
             )
             (Path(workspace_dir) / rel_path).write_text(
                 last_text, encoding="utf-8"

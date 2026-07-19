@@ -31,7 +31,11 @@ from app.api.deps import agent_event_to_frame, get_db, get_workspace
 from app.api.schemas import ApplyRequest, DocumentOut, RunCreated, RunOut
 from app.api.sessions import _is_cancel_frame
 from app.documents.ingest import build_doc_path
-from app.documents.obsidian import build_title_to_stem_map, rewrite_wiki_links
+from app.documents.obsidian import (
+    build_title_to_stem_map,
+    ensure_parent_wikilinks,
+    rewrite_wiki_links,
+)
 from app.documents.tools import build_document_tools
 from app.llm.base import LLMProvider
 from app.llm.factory import provider_for_skill, provider_name_for_skill
@@ -40,7 +44,7 @@ from app.skills.apply import apply_skill
 from app.skills.repo_run import create_run, get_run, set_output_doc_id
 from app.skills.repo_skill import get_skill
 from app.storage.db import Database
-from app.storage.repo_document import create_document
+from app.storage.repo_document import create_document, get_document
 from app.storage.repo_session import get_session
 from app.storage.repo_session_document import attach_documents
 
@@ -146,6 +150,12 @@ async def save_run_result_endpoint(
     file_text = rewrite_wiki_links(
         run["result_text"], build_title_to_stem_map(db)
     )
+    parent_stems: list[str] = []
+    for doc_id in run["input_doc_ids"] or []:
+        parent = get_document(db, doc_id)
+        if parent is not None and parent.path:
+            parent_stems.append(Path(parent.path).stem)
+    file_text = ensure_parent_wikilinks(file_text, parent_stems)
     (Path(workspace) / rel_path).write_text(file_text, encoding="utf-8")
     set_output_doc_id(db, run_id, out_id)
     if run["session_id"] is not None:

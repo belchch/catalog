@@ -149,7 +149,11 @@ def test_apply_success_first_try(db: Database, workspace: Path) -> None:
 
     assert result.status == "ok"
     assert result.output_doc_id is not None
-    assert result.result_text == "# Summary\n\nGreat document."
+    input_row = get_document(db, input_doc_id)
+    assert input_row is not None
+    input_stem = Path(input_row.path).stem
+    assert "# Summary\n\nGreat document." in (result.result_text or "")
+    assert f"[[{input_stem}]]" in (result.result_text or "")
 
     out_doc = get_document(db, result.output_doc_id)
     assert out_doc is not None
@@ -160,7 +164,9 @@ def test_apply_success_first_try(db: Database, workspace: Path) -> None:
     assert out_doc.path != f"results/{result.output_doc_id}.md"
     out_path = workspace / out_doc.path
     assert out_path.exists()
-    assert out_path.read_text(encoding="utf-8") == "# Summary\n\nGreat document."
+    file_text = out_path.read_text(encoding="utf-8")
+    assert "# Summary\n\nGreat document." in file_text
+    assert f"Источник: [[{input_stem}]]" in file_text
 
     # skill_run row reflects success.
     # Find the run via the DB (only one run exists).
@@ -444,8 +450,11 @@ def test_apply_script_skill(db: Database, workspace: Path) -> None:
 
     assert result.status == "ok"
     assert result.output_doc_id is not None
-    # Deterministic output: "source text" uppercased.
-    assert result.result_text == "SOURCE TEXT"
+    input_row = get_document(db, input_doc_id)
+    assert input_row is not None
+    input_stem = Path(input_row.path).stem
+    assert "SOURCE TEXT" in (result.result_text or "")
+    assert f"[[{input_stem}]]" in (result.result_text or "")
 
     out_doc = get_document(db, result.output_doc_id)
     assert out_doc is not None
@@ -454,7 +463,9 @@ def test_apply_script_skill(db: Database, workspace: Path) -> None:
     )
     out_path = workspace / out_doc.path
     assert out_path.exists()
-    assert out_path.read_text(encoding="utf-8") == "SOURCE TEXT"
+    file_text = out_path.read_text(encoding="utf-8")
+    assert "SOURCE TEXT" in file_text
+    assert f"Источник: [[{input_stem}]]" in file_text
 
     # skill_run row reflects success.
     with db.connect() as conn:
@@ -799,7 +810,11 @@ def test_apply_skill_streams_inner_events(db: Database, workspace: Path) -> None
     # One inner (agent loop) finish + one apply-level finish.
     assert len(finish_events) == 2
     final = finish_events[-1]
-    assert final.text == "# Summary\n\nGreat document."
+    input_row = get_document(db, input_doc_id)
+    assert input_row is not None
+    input_stem = Path(input_row.path).stem
+    assert "# Summary\n\nGreat document." in (final.text or "")
+    assert f"[[{input_stem}]]" in (final.text or "")
     assert final.finish_reason == "stop"
 
     # Result document persisted + skill_run marked ok.
