@@ -2,8 +2,12 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   buildSkill,
   createSession,
+  extractApiDetail,
+  getSession,
+  isBuildTimeoutError,
   saveRunResult,
   startEditSession,
+  updateSessionTimeout,
   type ApplyMode,
   type ArtifactType,
   type DocumentOut,
@@ -16,6 +20,7 @@ import { DocumentList } from './components/DocumentList.tsx'
 import { ModelSelector } from './components/ModelSelector.tsx'
 import { RunView } from './components/RunView.tsx'
 import { SessionsPanel } from './components/SessionsPanel.tsx'
+import { SessionTimeoutModal } from './components/SessionTimeoutModal.tsx'
 import { SkillSettingsModal } from './components/SkillSettingsModal.tsx'
 import { SkillsPanel } from './components/SkillsPanel.tsx'
 import { useDocuments } from './hooks/useDocuments.ts'
@@ -44,17 +49,7 @@ function writeStoredSessionId(id: string | null): void {
   } catch {}
 }
 
-function extractApiDetail(e: unknown): string {
-  const msg = e instanceof Error ? e.message : String(e)
-  const jsonStart = msg.indexOf('{')
-  if (jsonStart >= 0) {
-    try {
-      const parsed = JSON.parse(msg.slice(jsonStart)) as { detail?: unknown }
-      if (typeof parsed.detail === 'string') return parsed.detail
-    } catch {}
-  }
-  return msg
-}
+const DEFAULT_SESSION_TIMEOUT = 60
 
 function highlightFromDetail(detail: string): ArtifactType | null {
   const d = detail.toLowerCase()
@@ -89,6 +84,10 @@ export default function App() {
   const [sessionId, setSessionId] = useState<string | null>(() => readStoredSessionId())
   const [currentDocId, setCurrentDocId] = useState<string | null>(null)
   const [buildingSkill, setBuildingSkill] = useState(false)
+  const [buildError, setBuildError] = useState<string | null>(null)
+  const [buildErrorIsTimeout, setBuildErrorIsTimeout] = useState(false)
+  const [timeoutModalOpen, setTimeoutModalOpen] = useState(false)
+  const [sessionTimeoutSeconds, setSessionTimeoutSeconds] = useState(DEFAULT_SESSION_TIMEOUT)
   const [notice, setNotice] = useState<string | null>(null)
   const [activeRunId, setActiveRunId] = useState<string | null>(null)
   const [settingsSkill, setSettingsSkill] = useState<{ skillId: string; preview: SkillPreview } | null>(null)
@@ -121,7 +120,33 @@ export default function App() {
   useEffect(() => {
     setArtifactHighlight(null)
     setMainPane('chat')
+    setBuildError(null)
+    setBuildErrorIsTimeout(false)
+    setTimeoutModalOpen(false)
   }, [sessionId])
+
+  useEffect(() => {
+    if (!sessionId) {
+      setSessionTimeoutSeconds(DEFAULT_SESSION_TIMEOUT)
+      return
+    }
+    const fromList = sessions.sessions.find((s) => s.id === sessionId)
+    if (fromList?.llm_timeout_seconds != null) {
+      setSessionTimeoutSeconds(fromList.llm_timeout_seconds)
+      return
+    }
+    let cancelled = false
+    void getSession(sessionId)
+      .then((s) => {
+        if (!cancelled) setSessionTimeoutSeconds(s.llm_timeout_seconds)
+      })
+      .catch(() => {
+        if (!cancelled) setSessionTimeoutSeconds(DEFAULT_SESSION_TIMEOUT)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [sessionId, sessions.sessions])
 
   const handledRunFinishRef = useRef<string | null>(null)
   useEffect(() => {
@@ -225,13 +250,18 @@ export default function App() {
     if (!sessionId) return
     setBuildingSkill(true)
     setNotice(null)
+    setBuildError(null)
+    setBuildErrorIsTimeout(false)
     setArtifactHighlight(null)
     try {
       const built = await buildSkill(sessionId)
       setSettingsSkill({ skillId: built.skill_id, preview: built.config })
     } catch (e) {
       const detail = extractApiDetail(e)
-      setNotice(detail)
+      const timedOut = isBuildTimeoutError(e, detail)
+      setBuildError(detail)
+      setBuildErrorIsTimeout(timedOut)
+      if (timedOut) setTimeoutModalOpen(true)
       const highlight = highlightFromDetail(detail)
       if (highlight) setArtifactHighlight(highlight)
       if (!window.matchMedia('(min-width: 1024px)').matches) {
@@ -241,6 +271,16 @@ export default function App() {
       setBuildingSkill(false)
     }
   }, [sessionId])
+
+  const handleSaveSessionTimeout = useCallback(
+    async (seconds: number) => {
+      if (!sessionId) return
+      const updated = await updateSessionTimeout(sessionId, seconds)
+      setSessionTimeoutSeconds(updated.llm_timeout_seconds)
+      sessions.patchLocal(updated)
+    },
+    [sessionId, sessions],
+  )
 
   const handleSkillConfigured = useCallback(async () => {
     await skillsHook.refresh()
@@ -454,6 +494,14 @@ export default function App() {
                       onCreateSkill={handleCreateSkill}
                       buildingSkill={buildingSkill}
                       editingSkillName={editingSkill?.name ?? null}
+                      buildError={buildError}
+                      buildErrorIsTimeout={buildErrorIsTimeout}
+                      sessionTimeoutSeconds={sessionTimeoutSeconds}
+                      onOpenTimeoutModal={() => setTimeoutModalOpen(true)}
+                      onDismissBuildError={() => {
+                        setBuildError(null)
+                        setBuildErrorIsTimeout(false)
+                      }}
                     />
                   </div>
                 </div>
@@ -498,6 +546,13 @@ export default function App() {
             setSettingsSkill(null)
             setEditingSkill(null)
           }}
+        />
+      )}
+      {timeoutModalOpen && sessionId && (
+        <SessionTimeoutModal
+          currentSeconds={sessionTimeoutSeconds}
+          onSave={handleSaveSessionTimeout}
+          onClose={() => setTimeoutModalOpen(false)}
         />
       )}
     </div>

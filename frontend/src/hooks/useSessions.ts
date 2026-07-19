@@ -8,6 +8,7 @@ export interface UseSessionsResult {
   error: string | null
   refresh: () => Promise<void>
   remove: (id: string) => Promise<void>
+  patchLocal: (session: SessionOut) => void
 }
 
 export function useSessions(): UseSessionsResult {
@@ -32,9 +33,19 @@ export function useSessions(): UseSessionsResult {
     setSessions((prev) => prev.filter((s) => s.id !== id))
   }, [])
 
+  const patchLocal = useCallback((session: SessionOut) => {
+    setSessions((prev) => {
+      const idx = prev.findIndex((s) => s.id === session.id)
+      if (idx < 0) return [session, ...prev]
+      const next = [...prev]
+      next[idx] = session
+      return next
+    })
+  }, [])
+
   useEffect(() => {
     void refresh()
   }, [refresh])
 
-  return { sessions, loading, error, refresh, remove }
+  return { sessions, loading, error, refresh, remove, patchLocal }
 }

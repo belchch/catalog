@@ -50,6 +50,76 @@ export interface SessionOut {
   updated_at: string
   title: string | null
   skill_id: string | null
+  llm_timeout_seconds: number
+}
+
+export class ApiError extends Error {
+  status: number
+  detail: string
+
+  constructor(status: number, statusText: string, body: string) {
+    const detail = parseApiDetailBody(body) || `${status} ${statusText}`
+    super(`${status} ${statusText}${body ? `: ${body}` : ''}`)
+    this.name = 'ApiError'
+    this.status = status
+    this.detail = detail
+  }
+}
+
+function parseApiDetailBody(body: string): string | null {
+  const trimmed = body.trim()
+  if (!trimmed) return null
+  try {
+    const parsed = JSON.parse(trimmed) as { detail?: unknown }
+    return formatApiDetail(parsed.detail)
+  } catch {
+    return null
+  }
+}
+
+export function formatApiDetail(detail: unknown): string | null {
+  if (typeof detail === 'string' && detail.trim()) return detail
+  if (Array.isArray(detail)) {
+    const parts = detail
+      .map((item) => {
+        if (typeof item === 'string') return item
+        if (item && typeof item === 'object' && 'msg' in item) {
+          const msg = (item as { msg?: unknown }).msg
+          return typeof msg === 'string' ? msg : null
+        }
+        return null
+      })
+      .filter((x): x is string => !!x && x.trim().length > 0)
+    return parts.length > 0 ? parts.join('; ') : null
+  }
+  if (detail && typeof detail === 'object') {
+    const obj = detail as { message?: unknown; msg?: unknown }
+    if (typeof obj.message === 'string' && obj.message.trim()) return obj.message
+    if (typeof obj.msg === 'string' && obj.msg.trim()) return obj.msg
+  }
+  return null
+}
+
+export function extractApiDetail(e: unknown): string {
+  if (e instanceof ApiError) return e.detail
+  const msg = e instanceof Error ? e.message : String(e)
+  const jsonStart = msg.indexOf('{')
+  if (jsonStart >= 0) {
+    try {
+      const parsed = JSON.parse(msg.slice(jsonStart)) as { detail?: unknown }
+      const formatted = formatApiDetail(parsed.detail)
+      if (formatted) return formatted
+    } catch {}
+  }
+  return msg
+}
+
+export function isBuildTimeoutError(e: unknown, detail?: string): boolean {
+  if (e instanceof ApiError && e.status === 504) return true
+  const msg = (e instanceof Error ? e.message : String(e)).toLowerCase()
+  if (/^504\b/.test(msg) || msg.includes(' 504 ')) return true
+  const text = (detail ?? extractApiDetail(e)).toLowerCase()
+  return text.includes('timed out') || text.includes('timeout')
 }
 
 export interface MessageOut {
@@ -119,7 +189,7 @@ async function jsonFetch<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`${API_URL}${path}`, init)
   if (!res.ok) {
     const body = await res.text().catch(() => '')
-    throw new Error(`${res.status} ${res.statusText}${body ? `: ${body}` : ''}`)
+    throw new ApiError(res.status, res.statusText, body)
   }
   return (await res.json()) as T
 }
@@ -149,6 +219,21 @@ export function listSessions(params?: {
   if (params?.status) qs.set('status', params.status)
   const q = qs.toString()
   return jsonFetch<SessionOut[]>(`/sessions${q ? `?${q}` : ''}`)
+}
+
+export function getSession(sessionId: string): Promise<SessionOut> {
+  return jsonFetch<SessionOut>(`/sessions/${sessionId}`)
+}
+
+export function updateSessionTimeout(
+  sessionId: string,
+  llmTimeoutSeconds: number,
+): Promise<SessionOut> {
+  return jsonFetch<SessionOut>(`/sessions/${sessionId}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ llm_timeout_seconds: llmTimeoutSeconds }),
+  })
 }
 
 export function listSessionMessages(sessionId: string): Promise<MessageOut[]> {
