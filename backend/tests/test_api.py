@@ -8,11 +8,14 @@ provider is a :class:`FakeProvider` whose ``script`` is populated per test.
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
+from app.documents.ingest import build_doc_path
 from app.llm.base import CompletionResult, ToolCall
 
 from app.skills.config import SkillConfig, VerifyCheck, compute_tags
 from app.skills.repo_skill import create_skill, get_skill, update_status
+from app.storage.repo_document import get_document
 from app.storage.repo_message import add_message, list_messages
 from app.storage.repo_session import get_session
 
@@ -1292,6 +1295,13 @@ def test_save_run_result_materializes_preview_into_document(
 
     run = client.get(f"/runs/{run_id}").json()
     assert run["output_doc_id"] == saved["id"]
+
+    out_doc = get_document(db, saved["id"])
+    assert out_doc is not None
+    expected_path = build_doc_path(saved["title"], saved["id"], ".md", "results")
+    assert out_doc.path == expected_path
+    assert out_doc.path != f"results/{saved['id']}.md"
+    assert (Path(client.app.state.workspace) / out_doc.path).is_file()
 
     # Saving a second time is rejected (no duplicate document).
     resp2 = client.post(f"/runs/{run_id}/save")

@@ -34,6 +34,7 @@ from app.agent.registry import ToolRegistry
 from app.agent.runner import _run_agent_core
 from app.agent.trace import Trace, TraceEntry
 from app.documents.extract import extract_text
+from app.documents.ingest import build_doc_path
 from app.llm.base import LLMProvider, Message
 from app.skills.config import SkillConfig
 from app.skills.repo_run import create_run, finish_run
@@ -294,21 +295,22 @@ async def _apply_core(
         # "preview" mode leaves the result on screen, materialized later via
         # POST /runs/{id}/save if the user chooses to).
         if passed and persist:
-            out_id = uuid.uuid4().hex
             if len(docs) == 1:
                 result_title = f"{skill.name} — {docs[0].title}"
             else:
                 result_title = f"{skill.name} — {docs[0].title} (+{len(docs) - 1})"
+            out_id = uuid.uuid4().hex
+            rel_path = build_doc_path(result_title, out_id, ".md", "results")
             create_document(
                 db,
                 title=result_title,
-                path=f"results/{out_id}.md",
+                path=rel_path,
                 kind="result_md",
                 doc_id=out_id,
             )
             results_dir = Path(workspace_dir) / "results"
             results_dir.mkdir(parents=True, exist_ok=True)
-            (results_dir / f"{out_id}.md").write_text(
+            (Path(workspace_dir) / rel_path).write_text(
                 last_text or "", encoding="utf-8"
             )
             output_doc_id = out_id

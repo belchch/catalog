@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 
 from app.documents.extract import extract_text
-from app.documents.ingest import ingest_file, slugify
+from app.documents.ingest import build_doc_path, ingest_file, slugify
 from app.documents.tools import build_document_tools
 from app.storage.db import Database
 from app.agent.trace import Trace
@@ -158,6 +158,37 @@ def test_slugify_caps_length() -> None:
     long_name = "a" * 100
     slug = slugify(long_name)
     assert len(slug) <= 60
+
+
+def test_build_doc_path_cyrillic_title() -> None:
+    doc_id = "abcdef0123456789abcdef0123456789"
+    assert (
+        build_doc_path("Перевод — Cover Letter", doc_id, ".md", "results")
+        == f"results/perevod-cover-letter-{doc_id[:8]}.md"
+    )
+
+
+def test_build_doc_path_empty_slug_falls_back_to_doc_id() -> None:
+    doc_id = "abcdef0123456789abcdef0123456789"
+    assert build_doc_path("@@@!!!", doc_id, ".md", "results") == f"results/{doc_id}.md"
+    assert build_doc_path("   ", doc_id, ".md", "documents") == f"documents/{doc_id}.md"
+
+
+def test_build_doc_path_long_title_is_capped() -> None:
+    doc_id = "abcdef0123456789abcdef0123456789"
+    path = build_doc_path("a" * 100, doc_id, ".md", "results")
+    stem = path.removeprefix("results/").removesuffix(".md")
+    slug, suffix = stem.rsplit("-", 1)
+    assert len(slug) <= 60
+    assert suffix == doc_id[:8]
+
+
+def test_build_doc_path_with_documents_subdir() -> None:
+    doc_id = "abcdef0123456789abcdef0123456789"
+    assert (
+        build_doc_path("note", doc_id, ".md", "documents")
+        == f"documents/note-{doc_id[:8]}.md"
+    )
 
 
 def test_ingest_cyrillic_filename_uses_readable_slug(db: Database, tmp_path: Path) -> None:

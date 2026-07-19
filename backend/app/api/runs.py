@@ -30,6 +30,7 @@ from app.agent.registry import ToolRegistry
 from app.api.deps import agent_event_to_frame, get_db, get_workspace
 from app.api.schemas import ApplyRequest, DocumentOut, RunCreated, RunOut
 from app.api.sessions import _is_cancel_frame
+from app.documents.ingest import build_doc_path
 from app.llm.base import LLMProvider
 from app.llm.factory import provider_for_skill, provider_name_for_skill
 from app.llm.log_context import prompt_log_context
@@ -118,12 +119,13 @@ async def save_run_result_endpoint(
     skill = get_skill(db, run["skill_id"])
     title = f"{skill.name} — результат" if skill is not None else "Результат прогона"
     out_id = uuid.uuid4().hex
+    rel_path = build_doc_path(title, out_id, ".md", "results")
     doc = create_document(
-        db, title=title, path=f"results/{out_id}.md", kind="result_md", doc_id=out_id
+        db, title=title, path=rel_path, kind="result_md", doc_id=out_id
     )
     results_dir = Path(workspace) / "results"
     results_dir.mkdir(parents=True, exist_ok=True)
-    (results_dir / f"{out_id}.md").write_text(run["result_text"], encoding="utf-8")
+    (Path(workspace) / rel_path).write_text(run["result_text"], encoding="utf-8")
     set_output_doc_id(db, run_id, out_id)
 
     return DocumentOut(id=doc.id, title=doc.title, kind=doc.kind, created_at=doc.created_at)

@@ -15,8 +15,9 @@ from app.agent.events import (
     VerifyEvent,
 )
 from app.agent.registry import ToolRegistry
-from app.documents.ingest import ingest_file
+from app.documents.ingest import build_doc_path, ingest_file
 from app.documents.tools import build_document_tools
+from app.storage.repo_document import get_document
 from app.llm.base import (
     CompletionResult,
     LLMProvider,
@@ -148,8 +149,14 @@ def test_apply_success_first_try(db: Database, workspace: Path) -> None:
     assert result.output_doc_id is not None
     assert result.result_text == "# Summary\n\nGreat document."
 
-    # Result document written to disk.
-    out_path = workspace / "results" / f"{result.output_doc_id}.md"
+    out_doc = get_document(db, result.output_doc_id)
+    assert out_doc is not None
+    expected_path = build_doc_path(
+        f"{skill.name} — input", result.output_doc_id, ".md", "results"
+    )
+    assert out_doc.path == expected_path
+    assert out_doc.path != f"results/{result.output_doc_id}.md"
+    out_path = workspace / out_doc.path
     assert out_path.exists()
     assert out_path.read_text(encoding="utf-8") == "# Summary\n\nGreat document."
 
@@ -407,8 +414,12 @@ def test_apply_script_skill(db: Database, workspace: Path) -> None:
     # Deterministic output: "source text" uppercased.
     assert result.result_text == "SOURCE TEXT"
 
-    # Result document written to disk.
-    out_path = workspace / "results" / f"{result.output_doc_id}.md"
+    out_doc = get_document(db, result.output_doc_id)
+    assert out_doc is not None
+    assert out_doc.path == build_doc_path(
+        f"{skill.name} — input", result.output_doc_id, ".md", "results"
+    )
+    out_path = workspace / out_doc.path
     assert out_path.exists()
     assert out_path.read_text(encoding="utf-8") == "SOURCE TEXT"
 
@@ -767,8 +778,12 @@ def test_apply_skill_streams_inner_events(db: Database, workspace: Path) -> None
     assert row is not None
     assert row["status"] == "ok"
     assert row["output_doc_id"] is not None
-    out_path = workspace / "results" / f"{row['output_doc_id']}.md"
+    out_doc = get_document(db, row["output_doc_id"])
+    assert out_doc is not None
+    out_path = workspace / out_doc.path
     assert out_path.exists()
+    assert out_doc.path.startswith("results/")
+    assert out_doc.path.endswith(f"-{row['output_doc_id'][:8]}.md")
 
 
 async def _noop_tool(**kwargs: Any) -> dict:

@@ -33,6 +33,12 @@ def slugify(name: str) -> str:
     return slug[:_SLUG_MAX_LEN].strip("-")
 
 
+def build_doc_path(title: str, doc_id: str, ext: str, subdir: str) -> str:
+    slug = slugify(title)
+    stem = f"{slug}-{doc_id[:8]}" if slug else doc_id
+    return f"{subdir}/{stem}{ext}"
+
+
 def kind_for_filename(filename: str) -> str:
     """Map a filename extension to a document kind, or raise ``ValueError``."""
     ext = os.path.splitext(filename)[1].lower()
@@ -60,9 +66,7 @@ def ingest_file(
     ext = os.path.splitext(filename)[1].lower()
     doc_id = uuid.uuid4().hex
     title = os.path.splitext(filename)[0]
-    slug = slugify(title)
-    stem = f"{slug}-{doc_id[:8]}" if slug else doc_id
-    rel_path = f"documents/{stem}{ext}"
+    rel_path = build_doc_path(title, doc_id, ext, "documents")
 
     workspace = Path(workspace_dir)
     docs_dir = workspace / "documents"
