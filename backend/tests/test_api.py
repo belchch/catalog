@@ -1391,6 +1391,32 @@ def test_save_run_result_attaches_to_session(client, provider, db) -> None:
     assert [d.id for d in session_docs] == [saved["id"]]
 
 
+def test_apply_persist_attaches_output_to_session_via_api(
+    client, provider, db
+) -> None:
+    session_id = client.post("/sessions").json()["id"]
+    doc_id = _upload(client, "input.md", b"source text")
+    skill_id = _seed_committed_skill(
+        db, verify_checks=[VerifyCheck("non_empty")], max_retries=2
+    )
+    provider.script = [_completion("# Result\n\nAttached via session_id.")]
+
+    run_id = client.post(
+        f"/skills/{skill_id}/apply",
+        json={"doc_id": doc_id, "persist": True, "session_id": session_id},
+    ).json()["run_id"]
+    finish = _drain_run_ws(client, run_id)[-1]
+    assert finish["type"] == "finish"
+    assert finish["status"] == "ok"
+    assert finish["output_doc_id"] is not None
+
+    from app.skills.repo_run import get_run
+
+    assert get_run(db, run_id)["session_id"] == session_id
+    session_docs = list_session_documents(db, session_id)
+    assert [d.id for d in session_docs] == [finish["output_doc_id"]]
+
+
 def test_save_run_result_missing_run_returns_404(client, db) -> None:
     resp = client.post("/runs/does-not-exist/save")
     assert resp.status_code == 404

@@ -11,10 +11,19 @@ _WIKI_LINK_RE = re.compile(r"\[\[([^\]]+)\]\]")
 
 def build_title_to_stem_map(db: Database) -> dict[str, str]:
     mapping: dict[str, str] = {}
+    ambiguous: set[str] = set()
     for doc in list_documents(db):
         if not doc.title or not doc.path:
             continue
-        mapping[doc.title] = Path(doc.path).stem
+        if doc.title in ambiguous:
+            continue
+        stem = Path(doc.path).stem
+        existing = mapping.get(doc.title)
+        if existing is None:
+            mapping[doc.title] = stem
+        elif existing != stem:
+            del mapping[doc.title]
+            ambiguous.add(doc.title)
     return mapping
 
 

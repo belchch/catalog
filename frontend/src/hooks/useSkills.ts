@@ -8,7 +8,12 @@ export interface UseSkillsResult {
   error: string | null
   refresh: () => Promise<void>
   commit: (skillId: string) => Promise<void>
-  apply: (skillId: string, docIds: string[], mode?: ApplyMode) => Promise<string>
+  apply: (
+    skillId: string,
+    docIds: string[],
+    mode?: ApplyMode,
+    sessionId?: string | null,
+  ) => Promise<string>
   remove: (skillId: string) => Promise<void>
   rename: (skillId: string, name: string) => Promise<void>
 }
@@ -38,8 +43,13 @@ export function useSkills(): UseSkillsResult {
   }, [])
 
   const apply = useCallback(
-    async (skillId: string, docIds: string[], mode: ApplyMode = 'persist') => {
-      const { run_id } = await applySkill(skillId, docIds, mode)
+    async (
+      skillId: string,
+      docIds: string[],
+      mode: ApplyMode = 'persist',
+      sessionId?: string | null,
+    ) => {
+      const { run_id } = await applySkill(skillId, docIds, mode, sessionId)
       return run_id
     },
     [],

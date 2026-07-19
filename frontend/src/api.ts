@@ -210,11 +210,18 @@ export function applySkill(
   skillId: string,
   docIds: string[],
   mode: ApplyMode = 'persist',
+  sessionId?: string | null,
 ): Promise<RunCreated> {
+  const body: {
+    doc_ids: string[]
+    persist: boolean
+    session_id?: string
+  } = { doc_ids: docIds, persist: mode === 'persist' }
+  if (sessionId) body.session_id = sessionId
   return jsonFetch<RunCreated>(`/skills/${skillId}/apply`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ doc_ids: docIds, persist: mode === 'persist' }),
+    body: JSON.stringify(body),
   })
 }
 

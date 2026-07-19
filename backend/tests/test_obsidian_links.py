@@ -133,6 +133,34 @@ def test_build_title_to_stem_map(db: Database) -> None:
     assert mapping["Cover letter"] == "cover-letter-spiiran-ntbvt-java-ea411722"
 
 
+def test_build_title_to_stem_map_skips_ambiguous_duplicates(db: Database) -> None:
+    create_document(
+        db,
+        title="Cover letter",
+        path="documents/cover-letter-aaa11111.md",
+        kind="md",
+    )
+    create_document(
+        db,
+        title="Cover letter",
+        path="documents/cover-letter-bbb22222.md",
+        kind="md",
+    )
+    create_document(
+        db,
+        title="Unique",
+        path="documents/unique-ccc33333.md",
+        kind="md",
+    )
+    mapping = build_title_to_stem_map(db)
+    assert "Cover letter" not in mapping
+    assert mapping["Unique"] == "unique-ccc33333"
+    assert (
+        rewrite_wiki_links("[[Cover letter]] and [[Unique]]", mapping)
+        == "[[Cover letter]] and [[unique-ccc33333]]"
+    )
+
+
 def test_apply_persist_rewrites_obsidian_links(
     db: Database, workspace: Path
 ) -> None:
