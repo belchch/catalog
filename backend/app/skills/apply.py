@@ -86,6 +86,7 @@ async def _apply_core(
     run_id: str | None = None,
     provider_name: str = "",
     persist: bool = True,
+    user_prompt: str | None = None,
 ) -> AsyncIterator[AgentEvent]:
     """Shared apply loop: streams events, fills ``trace`` and ``outcome``.
 
@@ -107,6 +108,9 @@ async def _apply_core(
     all loaded here (any missing → ``ValueError``); a skill declaring
     ``input_arity`` rejects a count mismatch (→ ``ValueError``); the agent start
     message lists every input.
+
+    CATALOG-56: ``user_prompt`` is an optional runtime clarification appended
+    to the agent start user message; script skills ignore it.
     """
     # 1. Load ALL input documents (fail early if any is missing).
     if not input_doc_ids:
@@ -125,6 +129,8 @@ async def _apply_core(
             f"got {len(input_doc_ids)}"
         )
 
+    runtime_prompt = (user_prompt or "").strip() or None
+
     # 2. Filter tools (fail-closed on unknown names).
     tools = base_tools.filter(skill.allowed_tools)
 
@@ -136,11 +142,17 @@ async def _apply_core(
             session_id=session_id,
             input_doc_ids=input_doc_ids,
             persist=persist,
+            user_prompt=runtime_prompt,
         )
-    elif session_id is None:
+    else:
         existing_run = get_run(db, run_id)
         if existing_run is not None:
-            session_id = existing_run["session_id"]
+            if session_id is None:
+                session_id = existing_run["session_id"]
+            if runtime_prompt is None:
+                runtime_prompt = (
+                    (existing_run.get("user_prompt") or "").strip() or None
+                )
 
     logger.info(
         "apply_skill start skill=%s skill_id=%s input_docs=%d run_id=%s",
@@ -249,6 +261,10 @@ async def _apply_core(
                 )
                 start_content = (
                     f"Обработай документы: {listing}.\n{link_hint}\n{stem_lines}"
+                )
+            if runtime_prompt is not None:
+                start_content = (
+                    f"{start_content}\n\nУточнение к заданию:\n{runtime_prompt}"
                 )
             user_msg = Message(role="user", content=start_content)
             messages: list[Message] = [user_msg]
@@ -447,6 +463,7 @@ async def apply_skill(
     run_id: str | None = None,
     provider_name: str = "",
     persist: bool = True,
+    user_prompt: str | None = None,
 ) -> AsyncIterator[AgentEvent]:
     """Run a skill over one or more documents, streaming :data:`AgentEvent` items.
 
@@ -466,6 +483,9 @@ async def apply_skill(
     ``persist`` (CATALOG-18) selects the output mode: ``True`` (default)
     auto-creates a ``result_md`` document on success; ``False`` leaves the
     result on screen only (``result_text`` is still recorded on the run row).
+
+    ``user_prompt`` (CATALOG-56) is an optional runtime clarification for
+    agent skills; ignored for ``kind == "script"``.
     """
     trace = Trace()
     outcome = _ApplyOutcome()
@@ -483,6 +503,7 @@ async def apply_skill(
         run_id=run_id,
         provider_name=provider_name,
         persist=persist,
+        user_prompt=user_prompt,
     ):
         yield event
 
@@ -500,6 +521,7 @@ async def apply_skill_collect(
     run_id: str | None = None,
     provider_name: str = "",
     persist: bool = True,
+    user_prompt: str | None = None,
 ) -> ApplyResult:
     """Drain :func:`apply_skill` and return the final :class:`ApplyResult`."""
     trace = Trace()
@@ -518,6 +540,7 @@ async def apply_skill_collect(
         run_id=run_id,
         provider_name=provider_name,
         persist=persist,
+        user_prompt=user_prompt,
     ):
         pass
     return ApplyResult(

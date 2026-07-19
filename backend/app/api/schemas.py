@@ -40,12 +40,17 @@ class ApplyRequest(BaseModel):
     matching pre-CATALOG-18 behaviour) auto-creates a ``result_md`` document
     on success ("в док"); ``False`` leaves the result on screen only
     ("на экран") — it can still be saved later via ``POST /runs/{id}/save``.
+
+    ``prompt`` (CATALOG-56) is an optional runtime clarification for agent
+    skills; whitespace-only values are normalized to ``None``. Script skills
+    accept the field but ignore it at apply time.
     """
 
     doc_ids: list[str] = Field(default_factory=list)
     doc_id: str | None = None
     persist: bool = True
     session_id: str | None = None
+    prompt: str | None = None
 
     @model_validator(mode="after")
     def _normalize_doc_ids(self) -> ApplyRequest:
@@ -53,6 +58,9 @@ class ApplyRequest(BaseModel):
             self.doc_ids = [self.doc_id]
         if not self.doc_ids:
             raise ValueError("at least one document id is required (doc_ids or doc_id)")
+        if self.prompt is not None:
+            stripped = self.prompt.strip()
+            self.prompt = stripped or None
         return self
 
 

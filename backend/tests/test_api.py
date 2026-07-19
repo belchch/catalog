@@ -1303,6 +1303,36 @@ def test_apply_skill_run(client, provider, db) -> None:
     assert run["trace"] is not None
 
 
+def test_apply_agent_prompt_reaches_llm(client, provider, db) -> None:
+    doc_id = _upload(client, "input.md", b"source text")
+    skill_id = _seed_committed_skill(
+        db, verify_checks=[VerifyCheck("non_empty")], max_retries=2
+    )
+    provider.script = [_completion("# Result\n\nClarified.")]
+    clarification = "Сфокусируйся на рисках."
+
+    run_id = client.post(
+        f"/skills/{skill_id}/apply",
+        json={"doc_id": doc_id, "prompt": clarification},
+    ).json()["run_id"]
+
+    frames = _drain_run_ws(client, run_id)
+    assert frames[-1]["status"] == "ok"
+    assert provider.requests
+    user_contents = [
+        m.content
+        for m in provider.requests[0]["messages"]
+        if m.role == "user"
+    ]
+    assert any(clarification in (c or "") for c in user_contents)
+    system_contents = [
+        m.content
+        for m in provider.requests[0]["messages"]
+        if m.role == "system"
+    ]
+    assert system_contents == ["You summarize the document."]
+
+
 def test_apply_skill_failed(client, provider, db) -> None:
     doc_id = _upload(client, "input.md", b"source text")
     skill_id = _seed_committed_skill(

@@ -91,6 +91,7 @@ async def apply_endpoint(
         session_id=req.session_id,
         input_doc_ids=doc_ids,
         persist=req.persist,
+        user_prompt=req.prompt,
     )
     return RunCreated(run_id=run_id)
 
@@ -241,6 +242,7 @@ async def run_stream_ws(websocket: WebSocket, run_id: str) -> None:
                     session_id=session_id,
                     provider_name=resolved_provider_name,
                     persist=run["persist"],
+                    user_prompt=run.get("user_prompt"),
                 )
             )
             receive_task = asyncio.create_task(websocket.receive_text())
@@ -314,6 +316,7 @@ async def _stream_apply(
     session_id: str | None = None,
     provider_name: str,
     persist: bool = True,
+    user_prompt: str | None = None,
 ) -> None:
     """Drive ``apply_skill`` and forward every event frame to the socket."""
     async for event in apply_skill(
@@ -328,6 +331,7 @@ async def _stream_apply(
         session_id=session_id,
         provider_name=provider_name,
         persist=persist,
+        user_prompt=user_prompt,
     ):
         frame = agent_event_to_frame(event)
         if frame is not None:

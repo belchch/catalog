@@ -46,6 +46,7 @@ class ScriptProvider:
     def __init__(self, script: list[CompletionResult]) -> None:
         self.script: list[CompletionResult] = list(script)
         self.seen_tools: list[list[ToolSpec] | None] = []
+        self.seen_messages: list[list[Message]] = []
 
     async def list_models(self) -> list[ModelInfo]:
         return []
@@ -60,6 +61,7 @@ class ScriptProvider:
         reasoning: str = "",
     ) -> CompletionResult:
         self.seen_tools.append(list(tools) if tools else None)
+        self.seen_messages.append(list(messages))
         return self.script.pop(0)
 
     async def stream_complete(
@@ -484,6 +486,77 @@ def test_apply_script_skill(db: Database, workspace: Path) -> None:
     script_entries = [e for e in result.trace.entries if e.kind == "script"]
     assert len(script_entries) == 1
     assert script_entries[0].data["ok"] is True
+
+
+def test_apply_agent_user_prompt_in_start_message(
+    db: Database, workspace: Path
+) -> None:
+    skill = _make_skill(verify_checks=[VerifyCheck("non_empty")])
+    skill_id = create_skill(
+        db, name=skill.name, description=skill.description, config=skill
+    )
+    input_doc_id = _ingest_input(db, workspace)
+    provider = ScriptProvider([_result("# Summary\n\nWith clarification.")])
+    clarification = "Сфокусируйся на рисках."
+
+    result = asyncio.run(
+        apply_skill_collect(
+            provider=provider,
+            db=db,
+            workspace_dir=str(workspace),
+            skill=skill,
+            skill_id=skill_id,
+            input_doc_ids=[input_doc_id],
+            base_tools=build_document_tools(db, workspace),
+            user_prompt=clarification,
+        )
+    )
+
+    assert result.status == "ok"
+    assert provider.seen_messages
+    first = provider.seen_messages[0]
+    assert first[0].role == "system"
+    assert first[0].content == skill.system_prompt
+    user_msgs = [m for m in first if m.role == "user"]
+    assert user_msgs
+    assert clarification in (user_msgs[0].content or "")
+    assert "Уточнение к заданию" in (user_msgs[0].content or "")
+
+
+def test_apply_script_ignores_user_prompt(db: Database, workspace: Path) -> None:
+    skill = SkillConfig(
+        name="uppercaser",
+        description="uppercase the document",
+        system_prompt="",
+        allowed_tools=[],
+        model="test/model",
+        verify_checks=[VerifyCheck("non_empty")],
+        kind="script",
+        code="result = document.upper()\n",
+    )
+    skill_id = create_skill(
+        db, name=skill.name, description=skill.description, config=skill
+    )
+    input_doc_id = _ingest_input(db, workspace)
+    provider = ScriptProvider([])
+
+    result = asyncio.run(
+        apply_skill_collect(
+            provider=provider,
+            db=db,
+            workspace_dir=str(workspace),
+            skill=skill,
+            skill_id=skill_id,
+            input_doc_ids=[input_doc_id],
+            base_tools=build_document_tools(db, workspace),
+            user_prompt="this must be ignored for script skills",
+        )
+    )
+
+    assert result.status == "ok"
+    assert "SOURCE TEXT" in (result.result_text or "")
+    assert provider.seen_tools == []
+    assert provider.seen_messages == []
 
 
 def test_apply_persist_false_skips_document_but_keeps_text(

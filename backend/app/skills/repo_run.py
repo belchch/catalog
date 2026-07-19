@@ -16,6 +16,10 @@ pre-CATALOG-18 behaviour; ``False`` = leave the result on screen only).
 ``result_text`` carries the raw agent/script output regardless of ``persist``
 so a preview run can still be materialized into a document later via
 ``POST /runs/{id}/save``.
+
+CATALOG-56: ``user_prompt`` is an optional runtime clarification for agent
+skills; it is stored on the run at ``POST /apply`` and read back by the
+WebSocket stream. Script skills ignore it.
 """
 
 from __future__ import annotations
@@ -39,13 +43,15 @@ def create_run(
     session_id: str | None,
     input_doc_ids: list[str],
     persist: bool = True,
+    user_prompt: str | None = None,
 ) -> str:
     """Insert a skill_run row with ``status='running'`` and return its id.
 
     ``input_doc_ids`` is serialized to a JSON array in ``input_doc_ids``; the
     first id is also written to the legacy ``input_doc_id`` column for
     backward compatibility with older readers. ``persist`` (CATALOG-18)
-    records the requested output mode for this run.
+    records the requested output mode for this run. ``user_prompt``
+    (CATALOG-56) is the optional runtime clarification for agent apply.
     """
     if not input_doc_ids:
         raise ValueError("create_run requires at least one input document id")
@@ -57,9 +63,18 @@ def create_run(
         conn.execute(
             "INSERT INTO skill_run(id, skill_id, session_id, input_doc_id, "
             "input_doc_ids, output_doc_id, status, trace_json, started_at, ended_at, "
-            "persist, result_text) "
-            "VALUES (?, ?, ?, ?, ?, NULL, 'running', NULL, ?, NULL, ?, NULL)",
-            (run_id, skill_id, session_id, first_doc_id, ids_json, now, int(persist)),
+            "persist, result_text, user_prompt) "
+            "VALUES (?, ?, ?, ?, ?, NULL, 'running', NULL, ?, NULL, ?, NULL, ?)",
+            (
+                run_id,
+                skill_id,
+                session_id,
+                first_doc_id,
+                ids_json,
+                now,
+                int(persist),
+                user_prompt,
+            ),
         )
     return run_id
 
@@ -116,7 +131,7 @@ def get_run(db: Database, run_id: str) -> dict | None:
         row = conn.execute(
             "SELECT id, skill_id, session_id, input_doc_id, input_doc_ids, "
             "output_doc_id, status, trace_json, started_at, ended_at, "
-            "persist, result_text "
+            "persist, result_text, user_prompt "
             "FROM skill_run WHERE id = ?",  # noqa: S608
             (run_id,),
         ).fetchone()
@@ -148,4 +163,5 @@ def get_run(db: Database, run_id: str) -> dict | None:
         # other than the additive migration's DEFAULT 1 backfill.
         "persist": bool(row["persist"]) if row["persist"] is not None else True,
         "result_text": row["result_text"],
+        "user_prompt": row["user_prompt"],
     }

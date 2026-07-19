@@ -47,7 +47,8 @@ CREATE TABLE IF NOT EXISTS skill_run(
   status TEXT NOT NULL,                                         -- running|ok|failed
   trace_json TEXT, started_at TEXT NOT NULL, ended_at TEXT,
   persist INTEGER NOT NULL DEFAULT 1,                            -- 1 = auto-persist result_md (CATALOG-18)
-  result_text TEXT                                               -- raw agent/script output, kept even when persist=0
+  result_text TEXT,                                              -- raw agent/script output, kept even when persist=0
+  user_prompt TEXT
 );
 CREATE TABLE IF NOT EXISTS session_artifact(
   session_id TEXT NOT NULL,
@@ -76,6 +77,7 @@ ADDITIVE_MIGRATIONS: list[tuple[str, str, str]] = [
         "ALTER TABLE skill_run ADD COLUMN persist INTEGER NOT NULL DEFAULT 1",
     ),
     ("skill_run", "result_text", "ALTER TABLE skill_run ADD COLUMN result_text TEXT"),
+    ("skill_run", "user_prompt", "ALTER TABLE skill_run ADD COLUMN user_prompt TEXT"),
     ("session", "title", "ALTER TABLE session ADD COLUMN title TEXT"),
     ("session", "updated_at", "ALTER TABLE session ADD COLUMN updated_at TEXT"),
 ]
