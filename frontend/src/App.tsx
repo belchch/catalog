@@ -74,8 +74,10 @@ export default function App() {
   }, [sessionId])
 
   useEffect(() => {
-    if (run.finished && run.status === 'ok' && run.outputDocId) {
-      void docs.refresh()
+    if (run.finished && run.status === 'ok') {
+      if (run.outputDocId) {
+        void docs.refresh()
+      }
       void refreshSessionDocuments()
     }
   }, [run.finished, run.status, run.outputDocId, docs, refreshSessionDocuments])
