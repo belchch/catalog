@@ -1388,7 +1388,9 @@ def test_save_run_result_attaches_to_session(client, provider, db) -> None:
 
     saved = client.post(f"/runs/{run_id}/save").json()
     session_docs = list_session_documents(db, session_id)
-    assert [d.id for d in session_docs] == [saved["id"]]
+    # The input doc is attached up front (session-scoped tools need it
+    # visible), the saved result is attached after the fact.
+    assert {d.id for d in session_docs} == {doc_id, saved["id"]}
 
 
 def test_apply_persist_attaches_output_to_session_via_api(
@@ -1414,7 +1416,9 @@ def test_apply_persist_attaches_output_to_session_via_api(
 
     assert get_run(db, run_id)["session_id"] == session_id
     session_docs = list_session_documents(db, session_id)
-    assert [d.id for d in session_docs] == [finish["output_doc_id"]]
+    # The input doc is attached up front (session-scoped tools need it
+    # visible), the persisted output is attached after the fact.
+    assert {d.id for d in session_docs} == {doc_id, finish["output_doc_id"]}
 
 
 def test_apply_stream_tools_scoped_to_session(client, provider, db) -> None:
@@ -1458,6 +1462,44 @@ def test_apply_stream_tools_scoped_to_session(client, provider, db) -> None:
     listed_ids = {item["id"] for item in listed}
     assert listed_ids == {attached_id}
     assert secret_id not in listed_ids
+
+
+def test_apply_attaches_input_docs_to_session_before_run(client, provider, db) -> None:
+    """A skills-panel input doc is not pre-attached to the planner session —
+    apply must attach it itself so the session-scoped read_document tool
+    (built from run["session_id"]) can actually see it."""
+    session_id = client.post("/sessions").json()["id"]
+    doc_id = _upload(client, "input.md", b"source text")
+    skill_id = _seed_committed_skill(
+        db,
+        allowed_tools=["read_document"],
+        verify_checks=[VerifyCheck("non_empty")],
+        max_retries=0,
+    )
+    provider.script = [
+        _completion(
+            tool_calls=[
+                ToolCall(id="read-1", name="read_document", arguments={"doc_id": doc_id})
+            ]
+        ),
+        _completion("# Result\n\nRead the input document just fine."),
+    ]
+
+    run_id = client.post(
+        f"/skills/{skill_id}/apply",
+        json={"doc_ids": [doc_id], "persist": True, "session_id": session_id},
+    ).json()["run_id"]
+    frames = _drain_run_ws(client, run_id)
+
+    read_results = [
+        f for f in frames if f.get("type") == "tool_result" and f.get("name") == "read_document"
+    ]
+    assert read_results
+    assert "document_not_available_in_session" not in read_results[0]["result"]
+
+    finish = frames[-1]
+    assert finish["type"] == "finish"
+    assert finish["status"] == "ok"
 
 
 def test_save_run_result_missing_run_returns_404(client, db) -> None:

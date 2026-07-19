@@ -70,6 +70,14 @@ async def apply_endpoint(
                 f"got {len(doc_ids)}"
             ),
         )
+    # The run's document tools are session-scoped (mirrors the planner
+    # session_ws), so an input chosen in the skills panel from the global
+    # library must be attached to the run's session up front — otherwise
+    # read_document/list_documents would reject it as
+    # document_not_available_in_session even though the caller explicitly
+    # selected it as input.
+    if req.session_id is not None:
+        attach_documents(db, req.session_id, doc_ids)
     run_id = create_run(
         db,
         skill_id=skill_id,
