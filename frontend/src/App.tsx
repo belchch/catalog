@@ -5,9 +5,11 @@ import {
   saveRunResult,
   startEditSession,
   type ApplyMode,
+  type ArtifactType,
   type DocumentOut,
   type SkillPreview,
 } from './api.ts'
+import { ArtifactsPanel } from './components/ArtifactsPanel.tsx'
 import { Chat } from './components/Chat.tsx'
 import { CollapsibleSection } from './components/CollapsibleSection.tsx'
 import { DocumentList } from './components/DocumentList.tsx'
@@ -25,6 +27,8 @@ import { useSkills } from './hooks/useSkills.ts'
 
 const SESSION_STORAGE_KEY = 'catalog.sessionId'
 
+type MainPane = 'chat' | 'draft'
+
 function readStoredSessionId(): string | null {
   try {
     return localStorage.getItem(SESSION_STORAGE_KEY)
@@ -40,11 +44,47 @@ function writeStoredSessionId(id: string | null): void {
   } catch {}
 }
 
+function extractApiDetail(e: unknown): string {
+  const msg = e instanceof Error ? e.message : String(e)
+  const jsonStart = msg.indexOf('{')
+  if (jsonStart >= 0) {
+    try {
+      const parsed = JSON.parse(msg.slice(jsonStart)) as { detail?: unknown }
+      if (typeof parsed.detail === 'string') return parsed.detail
+    } catch {}
+  }
+  return msg
+}
+
+function highlightFromDetail(detail: string): ArtifactType | null {
+  const d = detail.toLowerCase()
+  if (d.includes('meta')) return 'meta'
+  if (d.includes('prompt')) return 'prompt'
+  if (d.includes('script')) return 'script'
+  return null
+}
+
+function useIsLg(): boolean {
+  const [isLg, setIsLg] = useState(() =>
+    typeof window !== 'undefined'
+      ? window.matchMedia('(min-width: 1024px)').matches
+      : true,
+  )
+  useEffect(() => {
+    const mq = window.matchMedia('(min-width: 1024px)')
+    const onChange = () => setIsLg(mq.matches)
+    mq.addEventListener('change', onChange)
+    return () => mq.removeEventListener('change', onChange)
+  }, [])
+  return isLg
+}
+
 export default function App() {
   const docs = useDocuments()
   const skillsHook = useSkills()
   const settingsHook = useSettings()
   const sessions = useSessions()
+  const isLg = useIsLg()
 
   const [sessionId, setSessionId] = useState<string | null>(() => readStoredSessionId())
   const [currentDocId, setCurrentDocId] = useState<string | null>(null)
@@ -58,11 +98,14 @@ export default function App() {
   const [openSessions, setOpenSessions] = useState(false)
   const [openDocs, setOpenDocs] = useState(false)
   const [openSkills, setOpenSkills] = useState(false)
+  const [mainPane, setMainPane] = useState<MainPane>('chat')
+  const [artifactHighlight, setArtifactHighlight] = useState<ArtifactType | null>(null)
 
   const handleSessionInvalid = useCallback(() => {
     writeStoredSessionId(null)
     setSessionId(null)
     setEditingSkill(null)
+    setArtifactHighlight(null)
   }, [])
 
   const planner = usePlannerSession(sessionId, { onSessionInvalid: handleSessionInvalid })
@@ -73,6 +116,11 @@ export default function App() {
 
   useEffect(() => {
     writeStoredSessionId(sessionId)
+  }, [sessionId])
+
+  useEffect(() => {
+    setArtifactHighlight(null)
+    setMainPane('chat')
   }, [sessionId])
 
   const handledRunFinishRef = useRef<string | null>(null)
@@ -177,11 +225,18 @@ export default function App() {
     if (!sessionId) return
     setBuildingSkill(true)
     setNotice(null)
+    setArtifactHighlight(null)
     try {
       const built = await buildSkill(sessionId)
       setSettingsSkill({ skillId: built.skill_id, preview: built.config })
     } catch (e) {
-      setNotice(e instanceof Error ? e.message : String(e))
+      const detail = extractApiDetail(e)
+      setNotice(detail)
+      const highlight = highlightFromDetail(detail)
+      if (highlight) setArtifactHighlight(highlight)
+      if (!window.matchMedia('(min-width: 1024px)').matches) {
+        setMainPane('draft')
+      }
     } finally {
       setBuildingSkill(false)
     }
@@ -225,6 +280,9 @@ export default function App() {
     },
     [docs, refreshSessionDocuments],
   )
+
+  const showChat = isLg || mainPane === 'chat'
+  const showDraft = isLg || mainPane === 'draft'
 
   return (
     <div className="flex h-screen flex-col bg-slate-950 text-slate-100">
@@ -332,25 +390,99 @@ export default function App() {
               savedDoc={savedResultDoc}
             />
           ) : (
-            <Chat
-              messages={planner.messages}
-              streaming={planner.streaming}
-              cancelling={planner.cancelling}
-              closed={planner.closed}
-              reconnecting={planner.reconnecting}
-              error={planner.error}
-              suggestions={planner.suggestions}
-              documents={docs.documents}
-              sessionDocuments={planner.sessionDocuments}
-              sessionId={sessionId}
-              onSend={handleSend}
-              onCancel={planner.cancel}
-              onReconnect={planner.reconnect}
-              onRemoveDocument={planner.removeDocument}
-              onCreateSkill={handleCreateSkill}
-              buildingSkill={buildingSkill}
-              editingSkillName={editingSkill?.name ?? null}
-            />
+            <div className="flex h-full flex-col overflow-hidden">
+              <div
+                role="tablist"
+                aria-label="Область main"
+                className="flex shrink-0 gap-1 border-b border-slate-800 px-2 py-1 lg:hidden"
+              >
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={mainPane === 'chat'}
+                  className={
+                    'rounded px-2 py-1 text-[11px] ' +
+                    (mainPane === 'chat'
+                      ? 'bg-indigo-600 text-white'
+                      : 'bg-slate-800 text-slate-300')
+                  }
+                  onClick={() => setMainPane('chat')}
+                >
+                  Чат
+                </button>
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={mainPane === 'draft'}
+                  className={
+                    'rounded px-2 py-1 text-[11px] ' +
+                    (mainPane === 'draft'
+                      ? 'bg-indigo-600 text-white'
+                      : 'bg-slate-800 text-slate-300')
+                  }
+                  onClick={() => setMainPane('draft')}
+                >
+                  Черновик
+                </button>
+              </div>
+              <div className="flex min-h-0 flex-1 overflow-hidden">
+                <div
+                  role={isLg ? undefined : 'tabpanel'}
+                  aria-label={isLg ? undefined : 'Чат'}
+                  className={
+                    'min-w-0 flex-1 overflow-hidden ' +
+                    (showChat ? 'flex' : 'hidden') +
+                    ' lg:flex'
+                  }
+                >
+                  <div className="flex h-full w-full flex-col overflow-hidden">
+                    <Chat
+                      messages={planner.messages}
+                      streaming={planner.streaming}
+                      cancelling={planner.cancelling}
+                      closed={planner.closed}
+                      reconnecting={planner.reconnecting}
+                      error={planner.error}
+                      suggestions={planner.suggestions}
+                      documents={docs.documents}
+                      sessionDocuments={planner.sessionDocuments}
+                      sessionId={sessionId}
+                      onSend={handleSend}
+                      onCancel={planner.cancel}
+                      onReconnect={planner.reconnect}
+                      onRemoveDocument={planner.removeDocument}
+                      onCreateSkill={handleCreateSkill}
+                      buildingSkill={buildingSkill}
+                      editingSkillName={editingSkill?.name ?? null}
+                    />
+                  </div>
+                </div>
+                <div
+                  role={isLg ? undefined : 'tabpanel'}
+                  aria-label={isLg ? undefined : 'Черновик'}
+                  className={
+                    'w-full overflow-hidden lg:w-[420px] lg:shrink-0 ' +
+                    (showDraft ? 'flex' : 'hidden') +
+                    ' lg:flex'
+                  }
+                >
+                  <div className="h-full w-full">
+                    <ArtifactsPanel
+                      sessionId={sessionId}
+                      artifacts={planner.artifacts}
+                      loading={planner.artifactsLoading}
+                      error={planner.artifactsError}
+                      streaming={planner.streaming}
+                      highlightType={artifactHighlight}
+                      onClearHighlight={() => setArtifactHighlight(null)}
+                      onSavePrompt={planner.savePrompt}
+                      onSaveScript={planner.saveScript}
+                      onSaveMeta={planner.saveMeta}
+                    />
+                  </div>
+                </div>
+              </div>
+            </div>
           )}
         </main>
       </div>

@@ -4,7 +4,7 @@
 // is out of scope for this slice: on a close without `finish` the caller shows
 // a "connection closed" notice.
 
-import { wsBaseUrl, type DocumentOut } from './api.ts'
+import { wsBaseUrl, type DocumentOut, type SessionArtifact } from './api.ts'
 
 export type ServerEvent =
   | { type: 'step'; iteration: number }
@@ -36,6 +36,7 @@ export type ServerEvent =
   | { type: 'reasoning'; text: string }
   | { type: 'suggestions'; items: string[] }
   | { type: 'session_docs'; documents: DocumentOut[] }
+  | { type: 'session_artifacts'; artifacts: SessionArtifact[] }
   | {
       type: 'finish'
       capped?: boolean

@@ -1,10 +1,15 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import {
+  getSessionArtifacts,
   getSessionDocuments,
   listSessionMessages,
+  patchArtifact,
+  patchSkillMeta,
   removeSessionDocument,
   type DocumentOut,
   type MessageOut,
+  type SessionArtifact,
+  type SkillMetaPatch,
 } from '../api.ts'
 import {
   connectPlanner,
@@ -28,6 +33,12 @@ export interface UsePlannerSessionResult {
   error: string | null
   suggestions: string[]
   sessionDocuments: DocumentOut[]
+  artifacts: SessionArtifact[]
+  artifactsLoading: boolean
+  artifactsError: string | null
+  savePrompt: (content: string) => Promise<SessionArtifact>
+  saveScript: (content: string) => Promise<SessionArtifact>
+  saveMeta: (meta: SkillMetaPatch) => Promise<SessionArtifact>
   send: (text: string, docIds?: string[]) => void
   cancel: () => void
   reconnect: () => void
@@ -71,6 +82,17 @@ function mapStoredMessages(raw: MessageOut[]): PlannerMessage[] {
   return out
 }
 
+function upsertArtifact(
+  list: SessionArtifact[],
+  next: SessionArtifact,
+): SessionArtifact[] {
+  const idx = list.findIndex((a) => a.type === next.type)
+  if (idx === -1) return [...list, next]
+  const copy = list.slice()
+  copy[idx] = next
+  return copy
+}
+
 export function usePlannerSession(
   sessionId: string | null,
   options?: UsePlannerSessionOptions,
@@ -83,6 +105,9 @@ export function usePlannerSession(
   const [error, setError] = useState<string | null>(null)
   const [suggestions, setSuggestions] = useState<string[]>([])
   const [sessionDocuments, setSessionDocuments] = useState<DocumentOut[]>([])
+  const [artifacts, setArtifacts] = useState<SessionArtifact[]>([])
+  const [artifactsLoading, setArtifactsLoading] = useState(false)
+  const [artifactsError, setArtifactsError] = useState<string | null>(null)
   const [reconnectNonce, setReconnectNonce] = useState(0)
 
   const connRef = useRef<PlannerConnection | null>(null)
@@ -105,6 +130,9 @@ export function usePlannerSession(
     setError(null)
     setSuggestions([])
     setSessionDocuments([])
+    setArtifacts([])
+    setArtifactsLoading(false)
+    setArtifactsError(null)
     assistantBufferRef.current = ''
     pendingRef.current = []
     streamingRef.current = false
@@ -160,6 +188,10 @@ export function usePlannerSession(
         break
       case 'session_docs':
         setSessionDocuments(e.documents)
+        break
+      case 'session_artifacts':
+        setArtifacts(e.artifacts)
+        setArtifactsError(null)
         break
       case 'error':
         hadErrorRef.current = true
@@ -230,6 +262,22 @@ export function usePlannerSession(
         setSessionDocuments(docs)
       },
       () => {},
+    )
+
+    setArtifactsLoading(true)
+    setArtifactsError(null)
+    void getSessionArtifacts(sessionId).then(
+      (arts) => {
+        if (cancelled) return
+        setArtifacts(arts)
+        setArtifactsLoading(false)
+      },
+      (e: unknown) => {
+        if (cancelled) return
+        setArtifacts([])
+        setArtifactsLoading(false)
+        setArtifactsError(e instanceof Error ? e.message : String(e))
+      },
     )
 
     const conn = connectPlanner(sessionId, handleEvent, {
@@ -323,6 +371,36 @@ export function usePlannerSession(
     }
   }, [sessionId])
 
+  const savePrompt = useCallback(
+    async (content: string) => {
+      if (!sessionId) throw new Error('no session')
+      const art = await patchArtifact(sessionId, 'prompt', content)
+      setArtifacts((prev) => upsertArtifact(prev, art))
+      return art
+    },
+    [sessionId],
+  )
+
+  const saveScript = useCallback(
+    async (content: string) => {
+      if (!sessionId) throw new Error('no session')
+      const art = await patchArtifact(sessionId, 'script', content)
+      setArtifacts((prev) => upsertArtifact(prev, art))
+      return art
+    },
+    [sessionId],
+  )
+
+  const saveMeta = useCallback(
+    async (meta: SkillMetaPatch) => {
+      if (!sessionId) throw new Error('no session')
+      const art = await patchSkillMeta(sessionId, meta)
+      setArtifacts((prev) => upsertArtifact(prev, art))
+      return art
+    },
+    [sessionId],
+  )
+
   return {
     messages,
     streaming,
@@ -332,6 +410,12 @@ export function usePlannerSession(
     error,
     suggestions,
     sessionDocuments,
+    artifacts,
+    artifactsLoading,
+    artifactsError,
+    savePrompt,
+    saveScript,
+    saveMeta,
     send,
     cancel,
     reconnect,

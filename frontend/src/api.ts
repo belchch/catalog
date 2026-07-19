@@ -288,3 +288,50 @@ export function updateSettings(settings: SettingsOut): Promise<SettingsOut> {
     body: JSON.stringify(settings),
   })
 }
+
+export type ArtifactType = 'prompt' | 'script' | 'meta'
+
+export interface SessionArtifact {
+  type: ArtifactType
+  content: string
+  is_valid: boolean
+  error: string | null
+  source: string
+  updated_at: string
+}
+
+export interface SkillMetaPatch {
+  name: string
+  description: string
+  kind: string
+  input_arity: number | null
+  allowed_tools: string[]
+  verify_checks: { check: string }[]
+}
+
+export function getSessionArtifacts(sessionId: string): Promise<SessionArtifact[]> {
+  return jsonFetch<SessionArtifact[]>(`/sessions/${sessionId}/artifacts`)
+}
+
+export function patchArtifact(
+  sessionId: string,
+  type: 'prompt' | 'script' | 'meta',
+  content: string,
+): Promise<SessionArtifact> {
+  return jsonFetch<SessionArtifact>(`/sessions/${sessionId}/artifacts/${type}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ content }),
+  })
+}
+
+export function patchSkillMeta(
+  sessionId: string,
+  meta: SkillMetaPatch,
+): Promise<SessionArtifact> {
+  return jsonFetch<SessionArtifact>(`/sessions/${sessionId}/skill-meta`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(meta),
+  })
+}
