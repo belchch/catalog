@@ -13,6 +13,7 @@ export interface UseSkillsResult {
     docIds: string[],
     mode?: ApplyMode,
     sessionId?: string | null,
+    prompt?: string,
   ) => Promise<string>
   remove: (skillId: string) => Promise<void>
   rename: (skillId: string, name: string) => Promise<void>
@@ -48,8 +49,9 @@ export function useSkills(): UseSkillsResult {
       docIds: string[],
       mode: ApplyMode = 'persist',
       sessionId?: string | null,
+      prompt?: string,
     ) => {
-      const { run_id } = await applySkill(skillId, docIds, mode, sessionId)
+      const { run_id } = await applySkill(skillId, docIds, mode, sessionId, prompt)
       return run_id
     },
     [],

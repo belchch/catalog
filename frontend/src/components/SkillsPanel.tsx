@@ -7,7 +7,7 @@ interface SkillsPanelProps {
   skills: UseSkillsResult
   documents: DocumentOut[]
   defaultDocId: string | null
-  onApply: (skillId: string, docIds: string[], mode: ApplyMode) => void
+  onApply: (skillId: string, docIds: string[], mode: ApplyMode, prompt?: string) => void
   onEdit: (skillId: string, name: string) => void
   onDelete: (skillId: string) => void
   onRename: (skillId: string, name: string) => Promise<void>
@@ -107,6 +107,19 @@ function mode2Hint(slots: (string | null)[]): string | null {
   return null
 }
 
+function showsApplyPrompt(skill: SkillOut): boolean {
+  if (skill.kind === 'script') return false
+  if (skill.kind === 'agent') return true
+  if (skill.tags.includes('ai')) return true
+  if (skill.tags.includes('python')) return false
+  return false
+}
+
+function applyPromptArg(draft: string | undefined): string | undefined {
+  const trimmed = draft?.trim()
+  return trimmed ? trimmed : undefined
+}
+
 export function SkillsPanel({
   skills,
   documents,
@@ -117,6 +130,7 @@ export function SkillsPanel({
   onRename,
 }: SkillsPanelProps) {
   const [target, setTarget] = useState<Record<string, SkillTarget>>({})
+  const [prompts, setPrompts] = useState<Record<string, string>>({})
   const [confirmId, setConfirmId] = useState<string | null>(null)
   const [renameId, setRenameId] = useState<string | null>(null)
   const [renameValue, setRenameValue] = useState('')
@@ -420,12 +434,36 @@ export function SkillsPanel({
                         />
                       </div>
                     )}
+                    {showsApplyPrompt(s) && (
+                      <div>
+                        <label
+                          htmlFor={`skill-prompt-${s.id}`}
+                          className="mb-0.5 block text-[11px] text-slate-400"
+                        >
+                          Промпт
+                        </label>
+                        <textarea
+                          id={`skill-prompt-${s.id}`}
+                          rows={2}
+                          aria-label="Промпт"
+                          placeholder="Уточнение для этого запуска (необязательно)"
+                          value={prompts[s.id] ?? ''}
+                          onChange={(e) =>
+                            setPrompts((prev) => ({ ...prev, [s.id]: e.target.value }))
+                          }
+                          className="max-h-28 w-full resize-y rounded bg-slate-800 px-2 py-1 text-[11px] text-slate-100 placeholder:text-slate-500 outline-none focus:ring-1 focus:ring-slate-600"
+                        />
+                      </div>
+                    )}
                     <div className="flex flex-wrap gap-1.5">
                       <button
                         className="rounded bg-indigo-600 px-2 py-1 text-[11px] text-white disabled:opacity-50"
                         disabled={!valid || documents.length === 0}
                         title="Результат сразу сохраняется в новый документ"
-                        onClick={() => valid && onApply(s.id, docIds, 'persist')}
+                        onClick={() =>
+                          valid &&
+                          onApply(s.id, docIds, 'persist', applyPromptArg(prompts[s.id]))
+                        }
                       >
                         В док{docIds.length > 1 ? ` (${docIds.length})` : ''}
                       </button>
@@ -433,7 +471,10 @@ export function SkillsPanel({
                         className="rounded bg-slate-700 px-2 py-1 text-[11px] text-slate-200 disabled:opacity-50"
                         disabled={!valid || documents.length === 0}
                         title="Результат выводится на экран; документ можно сохранить отдельно"
-                        onClick={() => valid && onApply(s.id, docIds, 'preview')}
+                        onClick={() =>
+                          valid &&
+                          onApply(s.id, docIds, 'preview', applyPromptArg(prompts[s.id]))
+                        }
                       >
                         На экран{docIds.length > 1 ? ` (${docIds.length})` : ''}
                       </button>
