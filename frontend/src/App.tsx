@@ -68,26 +68,31 @@ export default function App() {
   const planner = usePlannerSession(sessionId, { onSessionInvalid: handleSessionInvalid })
   const { refreshSessionDocuments } = planner
   const run = useRunStream(activeRunId)
+  const docsRefresh = docs.refresh
+  const sessionsRefresh = sessions.refresh
 
   useEffect(() => {
     writeStoredSessionId(sessionId)
   }, [sessionId])
 
+  const handledRunFinishRef = useRef<string | null>(null)
   useEffect(() => {
-    if (!run.finished) return
+    if (!run.finished || !activeRunId) return
+    if (handledRunFinishRef.current === activeRunId) return
+    handledRunFinishRef.current = activeRunId
     if (run.status === 'ok' && run.outputDocId) {
-      void docs.refresh()
+      void docsRefresh()
     }
     void refreshSessionDocuments()
-  }, [run.finished, run.status, run.outputDocId, docs, refreshSessionDocuments])
+  }, [run.finished, run.status, run.outputDocId, activeRunId, docsRefresh, refreshSessionDocuments])
 
   const wasStreamingRef = useRef(false)
   useEffect(() => {
     if (wasStreamingRef.current && !planner.streaming) {
-      void sessions.refresh()
+      void sessionsRefresh()
     }
     wasStreamingRef.current = planner.streaming
-  }, [planner.streaming, sessions])
+  }, [planner.streaming, sessionsRefresh])
 
   const ensureSession = useCallback(async (): Promise<string> => {
     if (sessionId) return sessionId

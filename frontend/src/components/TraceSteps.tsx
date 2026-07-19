@@ -49,7 +49,7 @@ export function TraceSteps({ steps }: { steps: RunStep[] }) {
           // Reasoning is rendered muted — it is context, not the main output.
           return (
             <li key={s.id} className="font-mono text-[11px] italic text-slate-500">
-              <details>
+              <details open>
                 <summary className="cursor-pointer not-italic text-slate-600">
                   💭 рассуждения модели
                 </summary>

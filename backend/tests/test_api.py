@@ -7,10 +7,12 @@ provider is a :class:`FakeProvider` whose ``script`` is populated per test.
 
 from __future__ import annotations
 
+import asyncio
 import json
 from pathlib import Path
 
 from app.documents.ingest import build_doc_path
+from app.documents.tools import build_document_tools
 from app.llm.base import CompletionResult, ToolCall
 
 from app.skills.config import SkillConfig, VerifyCheck, compute_tags
@@ -310,6 +312,74 @@ def test_detach_session_document(client, db) -> None:
 
     resp3 = client.delete(f"/sessions/missing/documents/{doc_b}")
     assert resp3.status_code == 404
+
+
+def test_ws_attach_makes_document_available_to_tools(client, provider, db) -> None:
+    session_id = client.post("/sessions").json()["id"]
+    doc_id = _upload(client, "control.md", b"from chat control")
+    other_id = _upload(client, "other.md", b"not attached")
+    provider.script = [_completion("ok")]
+
+    with client.websocket_connect(f"/sessions/{session_id}") as ws:
+        ws.send_text(
+            json.dumps(
+                {
+                    "type": "user",
+                    "content": "вот документ",
+                    "doc_ids": [doc_id],
+                }
+            )
+        )
+        while True:
+            frame = ws.receive_json()
+            if frame.get("type") == "finish":
+                break
+
+    workspace = Path(client.app.state.workspace)
+    tools = build_document_tools(db, workspace, session_id)
+
+    async def _list():
+        _, fn = tools.get("list_documents")
+        return await fn()
+
+    async def _read(doc_id_: str):
+        _, fn = tools.get("read_document")
+        return await fn(doc_id=doc_id_)
+
+    listed = asyncio.run(_list())
+    assert [item["id"] for item in listed] == [doc_id]
+    assert asyncio.run(_read(doc_id))["text"] == "from chat control"
+    assert asyncio.run(_read(other_id)) == {
+        "error": "document_not_available_in_session"
+    }
+
+    global_ids = {d["id"] for d in client.get("/documents").json()}
+    assert {doc_id, other_id}.issubset(global_ids)
+
+
+def test_session_reopen_get_documents_restores_composition(client, db) -> None:
+    session_id = client.post("/sessions").json()["id"]
+    doc_a = _upload(client, "keep-a.md", b"a")
+    doc_b = _upload(client, "keep-b.md", b"b")
+    attach_documents(db, session_id, [doc_a, doc_b])
+
+    first = client.get(f"/sessions/{session_id}/documents")
+    assert first.status_code == 200
+    assert {d["id"] for d in first.json()} == {doc_a, doc_b}
+
+    second = client.get(f"/sessions/{session_id}/documents")
+    assert second.status_code == 200
+    assert {d["id"] for d in second.json()} == {doc_a, doc_b}
+
+    workspace = Path(client.app.state.workspace)
+    tools = build_document_tools(db, workspace, session_id)
+
+    async def _list():
+        _, fn = tools.get("list_documents")
+        return await fn()
+
+    listed = asyncio.run(_list())
+    assert {item["id"] for item in listed} == {doc_a, doc_b}
 
 
 def test_parse_suggestions_extracts_and_strips() -> None:
@@ -1392,6 +1462,23 @@ def test_save_run_result_attaches_to_session(client, provider, db) -> None:
     # visible), the saved result is attached after the fact.
     assert {d.id for d in session_docs} == {doc_id, saved["id"]}
 
+    workspace = Path(client.app.state.workspace)
+    tools = build_document_tools(db, workspace, session_id)
+
+    async def _list():
+        _, fn = tools.get("list_documents")
+        return await fn()
+
+    async def _read(doc_id_: str):
+        _, fn = tools.get("read_document")
+        return await fn(doc_id=doc_id_)
+
+    listed_ids = {item["id"] for item in asyncio.run(_list())}
+    assert listed_ids == {doc_id, saved["id"]}
+    read = asyncio.run(_read(saved["id"]))
+    assert "error" not in read
+    assert "Saved into session" in read["text"]
+
 
 def test_apply_persist_attaches_output_to_session_via_api(
     client, provider, db
@@ -1419,6 +1506,23 @@ def test_apply_persist_attaches_output_to_session_via_api(
     # The input doc is attached up front (session-scoped tools need it
     # visible), the persisted output is attached after the fact.
     assert {d.id for d in session_docs} == {doc_id, finish["output_doc_id"]}
+
+    workspace = Path(client.app.state.workspace)
+    tools = build_document_tools(db, workspace, session_id)
+
+    async def _list():
+        _, fn = tools.get("list_documents")
+        return await fn()
+
+    async def _read(doc_id_: str):
+        _, fn = tools.get("read_document")
+        return await fn(doc_id=doc_id_)
+
+    listed_ids = {item["id"] for item in asyncio.run(_list())}
+    assert listed_ids == {doc_id, finish["output_doc_id"]}
+    read = asyncio.run(_read(finish["output_doc_id"]))
+    assert "error" not in read
+    assert "Attached via session_id" in read["text"]
 
 
 def test_apply_stream_tools_scoped_to_session(client, provider, db) -> None:
