@@ -162,6 +162,93 @@ def test_patch_artifacts_meta_rejects_missing_name(client) -> None:
     assert build.status_code == 422
 
 
+def test_patch_artifacts_meta_normalizes_string_input_arity(client) -> None:
+    session_id = client.post("/sessions").json()["id"]
+    resp = client.patch(
+        f"/sessions/{session_id}/artifacts/meta",
+        json={
+            "content": json.dumps(
+                {
+                    "name": "Arity",
+                    "description": "x",
+                    "kind": "agent",
+                    "input_arity": "1",
+                    "allowed_tools": ["read_document"],
+                },
+                ensure_ascii=False,
+            )
+        },
+    )
+    assert resp.status_code == 200
+    assert resp.json()["is_valid"] is True
+    meta = json.loads(resp.json()["content"])
+    assert meta["input_arity"] == 1
+    assert isinstance(meta["input_arity"], int)
+
+
+def test_patch_artifacts_meta_rejects_bad_input_arity(client) -> None:
+    session_id = client.post("/sessions").json()["id"]
+    resp = client.patch(
+        f"/sessions/{session_id}/artifacts/meta",
+        json={
+            "content": json.dumps(
+                {
+                    "name": "Arity",
+                    "description": "x",
+                    "kind": "agent",
+                    "input_arity": 3,
+                    "allowed_tools": ["read_document"],
+                },
+                ensure_ascii=False,
+            )
+        },
+    )
+    assert resp.status_code == 200
+    assert resp.json()["is_valid"] is False
+    assert "input_arity" in (resp.json()["error"] or "")
+
+
+def test_patch_artifacts_meta_rejects_non_list_allowed_tools(client) -> None:
+    session_id = client.post("/sessions").json()["id"]
+    resp = client.patch(
+        f"/sessions/{session_id}/artifacts/meta",
+        json={
+            "content": json.dumps(
+                {
+                    "name": "BadTools",
+                    "description": "x",
+                    "kind": "agent",
+                    "allowed_tools": 1,
+                },
+                ensure_ascii=False,
+            )
+        },
+    )
+    assert resp.status_code == 422
+    assert "allowed_tools" in resp.json()["detail"]
+
+
+def test_patch_artifacts_meta_rejects_non_list_verify_checks(client) -> None:
+    session_id = client.post("/sessions").json()["id"]
+    resp = client.patch(
+        f"/sessions/{session_id}/artifacts/meta",
+        json={
+            "content": json.dumps(
+                {
+                    "name": "BadChecks",
+                    "description": "x",
+                    "kind": "agent",
+                    "allowed_tools": ["read_document"],
+                    "verify_checks": {"check": "non_empty"},
+                },
+                ensure_ascii=False,
+            )
+        },
+    )
+    assert resp.status_code == 422
+    assert "verify_checks" in resp.json()["detail"]
+
+
 def test_build_from_artifacts_without_llm(client, provider, db) -> None:
     session_id = client.post("/sessions").json()["id"]
     client.patch(

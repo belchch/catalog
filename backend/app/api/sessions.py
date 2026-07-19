@@ -316,6 +316,24 @@ async def delete_session_endpoint(
     return Response(status_code=204)
 
 
+def _normalize_meta_input_arity(
+    value: object,
+) -> tuple[int | None, str | None]:
+    if value is None:
+        return None, None
+    if isinstance(value, bool):
+        return None, "input_arity must be 1, 2, or null"
+    if isinstance(value, int):
+        if value in (1, 2):
+            return value, None
+        return None, "input_arity must be 1, 2, or null"
+    if isinstance(value, str):
+        stripped = value.strip()
+        if stripped in ("1", "2"):
+            return int(stripped), None
+    return None, "input_arity must be 1, 2, or null"
+
+
 def _artifact_out(row) -> SessionArtifactOut:
     return SessionArtifactOut(
         type=row.type,
@@ -365,14 +383,34 @@ async def patch_session_artifact_endpoint(
         if not isinstance(payload, dict):
             raise HTTPException(status_code=422, detail="meta content must be a JSON object")
         kind = payload.get("kind", "agent")
-        allowed = list(payload.get("allowed_tools") or [])
-        checks = list(payload.get("verify_checks") or [])
+        raw_allowed = payload.get("allowed_tools", [])
+        raw_checks = payload.get("verify_checks", [])
+        if raw_allowed is None:
+            raw_allowed = []
+        if raw_checks is None:
+            raw_checks = []
+        if not isinstance(raw_allowed, list):
+            raise HTTPException(
+                status_code=422, detail="allowed_tools must be a list"
+            )
+        if not isinstance(raw_checks, list):
+            raise HTTPException(
+                status_code=422, detail="verify_checks must be a list"
+            )
+        allowed = list(raw_allowed)
+        checks = list(raw_checks)
         errors: list[str] = []
         name = payload.get("name")
         if not isinstance(name, str) or not name.strip():
             errors.append("name must be non-empty")
         else:
             payload["name"] = name.strip()
+        if "input_arity" in payload:
+            arity, arity_error = _normalize_meta_input_arity(payload.get("input_arity"))
+            if arity_error is not None:
+                errors.append(arity_error)
+            else:
+                payload["input_arity"] = arity
         if kind not in ("agent", "script"):
             errors.append(f"unknown skill kind: {kind!r}")
         else:
@@ -386,6 +424,8 @@ async def patch_session_artifact_endpoint(
                 check_id = vc.get("check") if isinstance(vc, dict) else None
                 if not check_id or check_id not in available_checks:
                     errors.append(f"unknown verify check: {check_id!r}")
+        payload["allowed_tools"] = allowed if kind == "agent" else []
+        payload["verify_checks"] = checks
         row = upsert_artifact(
             db,
             session_id=session_id,
