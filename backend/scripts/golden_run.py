@@ -147,6 +147,7 @@ async def run_golden(
         db, workspace_dir, filename="golden2.docx", content=golden2.read_bytes()
     )
     assert doc2.kind == "docx", f"expected kind=docx, got {doc2.kind}"
+    attach_documents(db, session_id, [doc2.id])
 
     # 6. Apply the committed skill to the second document.
     result = await apply_skill_collect(
@@ -157,6 +158,7 @@ async def run_golden(
         skill_id=skill_id,
         input_doc_ids=[doc2.id],
         base_tools=tools,
+        session_id=session_id,
     )
     assert result.status == "ok", f"apply status={result.status}"
     assert result.output_doc_id is not None, "apply produced no output_doc_id"
