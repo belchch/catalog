@@ -252,3 +252,10 @@ class SkillMetaPatchRequest(BaseModel):
         if not stripped:
             raise ValueError("name must be non-empty")
         return stripped
+
+    @field_validator("input_arity")
+    @classmethod
+    def _allowed_input_arity(cls, value: int | None) -> int | None:
+        if value is not None and value not in (1, 2):
+            raise ValueError("input_arity must be 1, 2, or null (document list)")
+        return value

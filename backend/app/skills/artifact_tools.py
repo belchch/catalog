@@ -133,6 +133,14 @@ def build_artifact_tools(
         name_text = name.strip() if isinstance(name, str) else ""
         if not name_text:
             errors.append("name must be non-empty")
+        if not isinstance(description, str):
+            errors.append("description must be a string")
+            description = ""
+        if input_arity is not None and (
+            isinstance(input_arity, bool) or input_arity not in (1, 2)
+        ):
+            errors.append("input_arity must be 1, 2, or null")
+            input_arity = None
         payload = {
             "name": name_text,
             "description": description,

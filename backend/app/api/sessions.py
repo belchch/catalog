@@ -405,6 +405,11 @@ async def patch_session_artifact_endpoint(
             errors.append("name must be non-empty")
         else:
             payload["name"] = name.strip()
+        description = payload.get("description")
+        if not isinstance(description, str):
+            errors.append("description must be a string")
+        else:
+            payload["description"] = description
         if "input_arity" in payload:
             arity, arity_error = _normalize_meta_input_arity(payload.get("input_arity"))
             if arity_error is not None:

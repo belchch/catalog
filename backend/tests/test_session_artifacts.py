@@ -119,6 +119,30 @@ def test_set_skill_meta_rejects_empty_name(mem_db: Database) -> None:
     assert row.is_valid is False
 
 
+def test_set_skill_meta_rejects_bad_input_arity(mem_db: Database) -> None:
+    session_id = create_session(mem_db)
+    tools = build_artifact_tools(
+        mem_db, session_id, available_tools=["read_document"]
+    )
+    _, set_meta = tools.get("set_skill_meta")
+
+    async def _run():
+        return await set_meta(
+            name="BadArity",
+            description="x",
+            kind="agent",
+            input_arity=3,
+            allowed_tools=["read_document"],
+        )
+
+    result = asyncio.run(_run())
+    assert result["ok"] is False
+    assert "input_arity" in (result.get("error") or "")
+    row = get_artifact(mem_db, session_id, "meta")
+    assert row is not None
+    assert row.is_valid is False
+
+
 def test_patch_artifacts_meta_rejects_empty_name(client) -> None:
     session_id = client.post("/sessions").json()["id"]
     resp = client.patch(
@@ -160,6 +184,43 @@ def test_patch_artifacts_meta_rejects_missing_name(client) -> None:
     assert "name" in (resp.json()["error"] or "").lower()
     build = client.post(f"/sessions/{session_id}/skills")
     assert build.status_code == 422
+
+
+def test_patch_artifacts_meta_rejects_missing_description(client) -> None:
+    session_id = client.post("/sessions").json()["id"]
+    resp = client.patch(
+        f"/sessions/{session_id}/artifacts/meta",
+        json={
+            "content": json.dumps(
+                {
+                    "name": "NoDesc",
+                    "kind": "agent",
+                    "allowed_tools": ["read_document"],
+                },
+                ensure_ascii=False,
+            )
+        },
+    )
+    assert resp.status_code == 200
+    assert resp.json()["is_valid"] is False
+    assert "description" in (resp.json()["error"] or "").lower()
+    build = client.post(f"/sessions/{session_id}/skills")
+    assert build.status_code == 422
+
+
+def test_patch_skill_meta_rejects_bad_input_arity(client) -> None:
+    session_id = client.post("/sessions").json()["id"]
+    resp = client.patch(
+        f"/sessions/{session_id}/skill-meta",
+        json={
+            "name": "BadArity",
+            "description": "x",
+            "kind": "agent",
+            "input_arity": 3,
+            "allowed_tools": ["read_document"],
+        },
+    )
+    assert resp.status_code == 422
 
 
 def test_patch_artifacts_meta_normalizes_string_input_arity(client) -> None:
