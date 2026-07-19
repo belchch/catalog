@@ -238,7 +238,7 @@ export default function App() {
       {notice && (
         <div className="bg-slate-800/60 px-4 py-1 text-xs text-slate-300">{notice}</div>
       )}
-      <div className="grid flex-1 grid-cols-1 overflow-hidden md:grid-cols-[320px_1fr]">
+      <div className="grid flex-1 grid-cols-1 overflow-hidden md:grid-cols-[352px_1fr]">
         <aside className="flex flex-col gap-4 overflow-y-auto border-r border-slate-800 p-3">
           <CollapsibleSection
             title="Сессии"
