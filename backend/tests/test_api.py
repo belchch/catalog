@@ -1417,6 +1417,49 @@ def test_apply_persist_attaches_output_to_session_via_api(
     assert [d.id for d in session_docs] == [finish["output_doc_id"]]
 
 
+def test_apply_stream_tools_scoped_to_session(client, provider, db) -> None:
+    session_id = client.post("/sessions").json()["id"]
+    attached_id = _upload(client, "attached.md", b"visible in session")
+    secret_id = _upload(client, "secret.md", b"not attached")
+    attach_documents(db, session_id, [attached_id])
+
+    skill_id = _seed_committed_skill(
+        db,
+        allowed_tools=["list_documents", "read_document"],
+        verify_checks=[VerifyCheck("non_empty")],
+        max_retries=2,
+    )
+    provider.script = [
+        _completion(
+            tool_calls=[
+                ToolCall(id="list-1", name="list_documents", arguments={})
+            ]
+        ),
+        _completion("# Result\n\nScoped listing ok."),
+    ]
+
+    run_id = client.post(
+        f"/skills/{skill_id}/apply",
+        json={
+            "doc_ids": [attached_id],
+            "persist": True,
+            "session_id": session_id,
+        },
+    ).json()["run_id"]
+    frames = _drain_run_ws(client, run_id)
+    assert frames[-1]["type"] == "finish"
+    assert frames[-1]["status"] == "ok"
+
+    list_results = [
+        f for f in frames if f.get("type") == "tool_result" and f.get("name") == "list_documents"
+    ]
+    assert list_results
+    listed = json.loads(list_results[0]["result"])
+    listed_ids = {item["id"] for item in listed}
+    assert listed_ids == {attached_id}
+    assert secret_id not in listed_ids
+
+
 def test_save_run_result_missing_run_returns_404(client, db) -> None:
     resp = client.post("/runs/does-not-exist/save")
     assert resp.status_code == 404

@@ -32,6 +32,7 @@ from app.api.schemas import ApplyRequest, DocumentOut, RunCreated, RunOut
 from app.api.sessions import _is_cancel_frame
 from app.documents.ingest import build_doc_path
 from app.documents.obsidian import build_title_to_stem_map, rewrite_wiki_links
+from app.documents.tools import build_document_tools
 from app.llm.base import LLMProvider
 from app.llm.factory import provider_for_skill, provider_name_for_skill
 from app.llm.log_context import prompt_log_context
@@ -148,7 +149,6 @@ async def run_stream_ws(websocket: WebSocket, run_id: str) -> None:
 
     db: Database = websocket.app.state.db
     provider: LLMProvider = websocket.app.state.provider
-    tools: ToolRegistry = websocket.app.state.tools
     workspace: str = websocket.app.state.workspace
 
     run = get_run(db, run_id)
@@ -177,6 +177,12 @@ async def run_stream_ws(websocket: WebSocket, run_id: str) -> None:
         await websocket.close()
         return
 
+    session_id = run["session_id"]
+    if session_id is not None:
+        tools: ToolRegistry = build_document_tools(db, workspace, session_id)
+    else:
+        tools = websocket.app.state.tools
+
     # CATALOG-6: honour a provider pinned on the skill (set in the settings
     # modal); fall back to the app's active provider otherwise.
     providers = getattr(websocket.app.state, "providers", None)
@@ -197,7 +203,9 @@ async def run_stream_ws(websocket: WebSocket, run_id: str) -> None:
         # Bind run_id/purpose so every log line and prompt-log entry for this
         # apply stream carries the correlation context (iteration is set per
         # turn inside _run_agent_core).
-        with prompt_log_context(run_id=run_id, session_id=None, purpose="apply_skill"):
+        with prompt_log_context(
+            run_id=run_id, session_id=session_id, purpose="apply_skill"
+        ):
             apply_task = asyncio.create_task(
                 _stream_apply(
                     websocket,
@@ -209,6 +217,7 @@ async def run_stream_ws(websocket: WebSocket, run_id: str) -> None:
                     input_doc_ids=input_doc_ids,
                     base_tools=tools,
                     run_id=run_id,
+                    session_id=session_id,
                     provider_name=resolved_provider_name,
                     persist=run["persist"],
                 )
@@ -281,6 +290,7 @@ async def _stream_apply(
     input_doc_ids: list[str],
     base_tools: ToolRegistry,
     run_id: str,
+    session_id: str | None = None,
     provider_name: str,
     persist: bool = True,
 ) -> None:
@@ -294,6 +304,7 @@ async def _stream_apply(
         input_doc_ids=input_doc_ids,
         base_tools=base_tools,
         run_id=run_id,
+        session_id=session_id,
         provider_name=provider_name,
         persist=persist,
     ):
