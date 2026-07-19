@@ -1,9 +1,19 @@
 # CATALOG-22 — Названия файлов при загрузке
 
-- **Задача Plane:** [CATALOG-22](https://app.plane.so/belchch/projects/catalog-app/work-items/22) (id: `c30b6c83-0fb6-459f-84d8-670534c922b4`, state: In Progress)
-- **Статус плана:** Analyzed
+- **Задача Plane:** [CATALOG-22](https://app.plane.so/belchch/projects/catalog-app/work-items/22) (id: `c30b6c83-0fb6-459f-84d8-670534c922b4`, state: Done)
+- **Статус плана:** Done
 - **Тип шага:** code
 - **Цель:** Подтвердить end-to-end, что новые файлы в `workspace/results/` получают slug-имя из title (как у uploads: `{slug}-{id8}.md`), а не голый UUID. Код уже на месте — закрывать задачу только после ручной проверки нового result-файла. Старые UUID в папке не мигрировать.
+
+### E2E-артефакты (цикл 2)
+
+Runtime workspace приложения: `APP_WORKSPACE` из `backend/.env` (`/Users/belch/catalog-app/workspace`).  
+Наблюдаемые slug-файлы для ревью в репозитории:
+
+- `backend/workspace/results/catalog22-verify-catalog-22-e2e-input-53ec2a77.md` (persist)
+- `backend/workspace/results/catalog22-verify-rezultat-37eba979.md` (save)
+
+Старые UUID-файлы в той же папке не мигрированы.
 
 ## Постановка задачи (актуальное ТЗ)
 
@@ -73,9 +83,9 @@ _Дубликат плана:_ `docs/plan/night-shift/CATALOG-22-code-results-re
 
 ## Критерии приёмки (Definition of Done)
 
-- [ ] Автотесты backend зелёные: `ruff check .`, `pytest` (включая slug для results).
-- [ ] После рестарта backend создан **новый** result (save и/или persist) — в `workspace/results/` файл вида `{slug}-{id8}.md`, не 32-символьный hex UUID.
-- [ ] Имя согласовано с title, который видит пользователь (хотя бы для persist-пути apply).
-- [ ] Uploads не ломались (регрессия ingest не требуется чинить заново).
-- [ ] Миграция старых UUID **не** выполняется; приёмка только на новом результате.
-- [ ] Задача закрыта в Plane только после ручной проверки slug-файла.
+- [x] Автотесты backend зелёные: `ruff check .`, `pytest` (включая slug для results).
+- [x] После рестарта backend создан **новый** result (save и/или persist) — в `workspace/results/` файл вида `{slug}-{id8}.md`, не 32-символьный hex UUID.
+- [x] Имя согласовано с title, который видит пользователь (хотя бы для persist-пути apply).
+- [x] Uploads не ломались (регрессия ingest не требуется чинить заново).
+- [x] Миграция старых UUID **не** выполняется; приёмка только на новом результате.
+- [x] Задача закрыта в Plane только после ручной проверки slug-файла.
