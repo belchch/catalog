@@ -1,11 +1,9 @@
 """``POST /sessions/{id}/skills`` (build), ``POST /skills/{id}/commit``,
 ``POST /skills/{id}/edit``, ``GET /skills``.
 
-``build_skill_from_session`` makes a single function-calling LLM turn with a
-``build_skill`` tool whose schema mirrors :class:`SkillConfig`. The returned
-arguments are validated (``allowed_tools`` must exist in the registry;
-``verify_checks`` ids must be registered) and retried up to twice with feedback
-before the skill is persisted as ``draft`` (ADR-0004: build at approval).
+CATALOG-53: ``build_skill_from_session`` packs ``session_artifact`` rows into
+a :class:`SkillConfig` without an LLM call when artifacts exist. Sessions with
+no artifacts keep the legacy LLM ``build_skill`` path as a fallback.
 
 CATALOG-17: when the build's session was started via ``POST
 /skills/{id}/edit`` (``session.skill_id`` set), the same skill is updated in
@@ -14,6 +12,8 @@ skill drops back to ``draft``.
 """
 
 from __future__ import annotations
+
+import json
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 
@@ -47,6 +47,11 @@ from app.skills.verify import registered_checks
 from app.storage.db import Database
 from app.storage.repo_message import add_message, list_messages
 from app.storage.repo_session import create_session, get_session, update_session_status
+from app.storage.repo_session_artifact import (
+    get_artifact,
+    list_artifacts,
+    upsert_artifact,
+)
 
 router = APIRouter()
 
@@ -204,24 +209,123 @@ def _validate_config(
     return errors
 
 
-async def build_skill_from_session(
+def _persist_built_skill(
+    db: Database, session_id: str, config: SkillConfig
+) -> str:
+    session_row = get_session(db, session_id)
+    edit_target = session_row.skill_id if session_row is not None else None
+    if edit_target is not None:
+        existing = get_skill(db, edit_target)
+        if existing is None:
+            raise HTTPException(status_code=404, detail="edited skill not found")
+        status_override = "draft" if existing.status == "committed" else None
+        update_skill(
+            db,
+            edit_target,
+            name=config.name,
+            description=config.description,
+            config=config,
+            status=status_override,
+        )
+        skill_id = edit_target
+    else:
+        skill_id = create_skill(
+            db,
+            name=config.name,
+            description=config.description,
+            config=config,
+            status="draft",
+        )
+    update_session_status(db, session_id, "done")
+    return skill_id
+
+
+def _build_skill_from_artifacts(
+    *,
+    db: Database,
+    base_tools: ToolRegistry,
+    session_id: str,
+    model_default: str,
+) -> str | None:
+    artifacts = list_artifacts(db, session_id)
+    if not artifacts:
+        return None
+
+    meta_row = get_artifact(db, session_id, "meta")
+    if meta_row is None:
+        raise HTTPException(
+            status_code=422,
+            detail="skill meta is missing; set name/description/kind via set_skill_meta",
+        )
+    if not meta_row.is_valid:
+        raise HTTPException(
+            status_code=422,
+            detail=f"skill meta is invalid: {meta_row.error or 'unknown error'}",
+        )
+    try:
+        meta = json.loads(meta_row.content)
+    except (TypeError, ValueError, json.JSONDecodeError) as exc:
+        raise HTTPException(
+            status_code=422, detail=f"skill meta is not valid JSON: {exc}"
+        ) from exc
+    if not isinstance(meta, dict):
+        raise HTTPException(status_code=422, detail="skill meta must be a JSON object")
+
+    kind = meta.get("kind", "agent")
+    args = dict(meta)
+    if kind == "script":
+        script = get_artifact(db, session_id, "script")
+        if script is None or not script.content.strip():
+            raise HTTPException(
+                status_code=422,
+                detail="script artifact is empty; save a script before building",
+            )
+        if not script.is_valid:
+            raise HTTPException(
+                status_code=422,
+                detail=f"script is invalid: {script.error or 'validation failed'}",
+            )
+        args["code"] = script.content
+        args["system_prompt"] = ""
+    else:
+        prompt = get_artifact(db, session_id, "prompt")
+        if prompt is None or not prompt.content.strip():
+            raise HTTPException(
+                status_code=422,
+                detail="prompt artifact is empty; save a prompt before building",
+            )
+        if not prompt.is_valid:
+            raise HTTPException(
+                status_code=422,
+                detail=f"prompt is invalid: {prompt.error or 'validation failed'}",
+            )
+        args["system_prompt"] = prompt.content
+        args["code"] = ""
+
+    try:
+        config = _args_to_config(args, model_default)
+    except (KeyError, TypeError, ValueError) as exc:
+        raise HTTPException(
+            status_code=422, detail=f"failed to assemble skill config: {exc}"
+        ) from exc
+
+    errors = _validate_config(config, base_tools.names(), registered_checks())
+    if errors:
+        raise HTTPException(
+            status_code=422,
+            detail="skill artifacts are invalid: " + "; ".join(errors),
+        )
+    return _persist_built_skill(db, session_id, config)
+
+
+async def _build_skill_from_session_llm(
     *,
     provider: LLMProvider,
     db: Database,
     base_tools: ToolRegistry,
-    settings: Settings,
     session_id: str,
-    default_model: str | None = None,
+    model_default: str,
 ) -> str:
-    """Build a draft skill from a session; return the new skill id.
-
-    Raises :class:`HTTPException` (422) if no valid config can be produced
-    within the retry budget.
-
-    ``default_model`` (CATALOG-14) overrides the frozen ``settings.default_model``
-    so a skill is seeded from the runtime-selected model when set.
-    """
-    model_default = default_model or settings.default_model
     messages_raw = list_messages(db, session_id)
     history: list[Message] = [Message(role="system", content=BUILD_SKILL_SYSTEM_PROMPT)]
     for m in messages_raw:
@@ -231,8 +335,6 @@ async def build_skill_from_session(
     available_tools = base_tools.names()
     available_checks = registered_checks()
 
-    # Tag every LLM call in the build loop with the session + purpose so the
-    # prompt log can correlate build attempts back to a session.
     with prompt_log_context(session_id=session_id, run_id=None, purpose="build_skill"):
         for _attempt in range(MAX_BUILD_ATTEMPTS):
             resp = await provider.complete(
@@ -278,43 +380,92 @@ async def build_skill_from_session(
                 )
                 continue
 
-            # CATALOG-17: an edit session (``session.skill_id`` set) updates
-            # the existing skill in place instead of creating a new one. A
-            # committed skill drops back to draft (it needs a fresh commit);
-            # a draft edited skill stays draft.
-            session_row = get_session(db, session_id)
-            edit_target = session_row.skill_id if session_row is not None else None
-            if edit_target is not None:
-                existing = get_skill(db, edit_target)
-                if existing is None:
-                    raise HTTPException(
-                        status_code=404, detail="edited skill not found"
-                    )
-                status_override = "draft" if existing.status == "committed" else None
-                update_skill(
-                    db,
-                    edit_target,
-                    name=config.name,
-                    description=config.description,
-                    config=config,
-                    status=status_override,
-                )
-                skill_id = edit_target
-            else:
-                skill_id = create_skill(
-                    db,
-                    name=config.name,
-                    description=config.description,
-                    config=config,
-                    status="draft",
-                )
-            update_session_status(db, session_id, "done")
-            return skill_id
+            return _persist_built_skill(db, session_id, config)
 
     raise HTTPException(
         status_code=422,
         detail="failed to build a valid skill after retries",
     )
+
+
+async def build_skill_from_session(
+    *,
+    provider: LLMProvider,
+    db: Database,
+    base_tools: ToolRegistry,
+    settings: Settings,
+    session_id: str,
+    default_model: str | None = None,
+) -> str:
+    model_default = default_model or settings.default_model
+    packed = _build_skill_from_artifacts(
+        db=db,
+        base_tools=base_tools,
+        session_id=session_id,
+        model_default=model_default,
+    )
+    if packed is not None:
+        return packed
+    return await _build_skill_from_session_llm(
+        provider=provider,
+        db=db,
+        base_tools=base_tools,
+        session_id=session_id,
+        model_default=model_default,
+    )
+
+
+def seed_session_artifacts_from_skill(
+    db: Database, session_id: str, record: SkillRecord
+) -> None:
+    config = record.config
+    meta = {
+        "name": config.name,
+        "description": config.description,
+        "kind": config.kind,
+        "input_arity": config.input_arity,
+        "allowed_tools": list(config.allowed_tools),
+        "verify_checks": [
+            {"check": vc.check, "params": dict(vc.params)}
+            for vc in config.verify_checks
+        ],
+    }
+    upsert_artifact(
+        db,
+        session_id=session_id,
+        type="meta",
+        content=json.dumps(meta, ensure_ascii=False),
+        source="user",
+        is_valid=True,
+        error=None,
+    )
+    if config.system_prompt:
+        upsert_artifact(
+            db,
+            session_id=session_id,
+            type="prompt",
+            content=config.system_prompt,
+            source="user",
+            is_valid=True,
+            error=None,
+        )
+    if config.code:
+        is_valid = True
+        error: str | None = None
+        try:
+            validate_script(config.code)
+        except ScriptValidationError as exc:
+            is_valid = False
+            error = str(exc)
+        upsert_artifact(
+            db,
+            session_id=session_id,
+            type="script",
+            content=config.code,
+            source="user",
+            is_valid=is_valid,
+            error=error,
+        )
 
 
 def _preview(config: SkillConfig) -> SkillPreview:
@@ -332,39 +483,32 @@ def _preview(config: SkillConfig) -> SkillPreview:
 
 
 def _format_skill_for_edit(record: SkillRecord) -> str:
-    """Human-readable dump of a skill's current config for the edit prefill.
-
-    Seeds the planning session so the planner (and, later, ``build_skill``)
-    has the full existing config in context instead of starting from a blank
-    session (CATALOG-17).
-    """
     config = record.config
     lines = [
         f"Редактируем этот скилл: «{record.name}» (id={record.id}, статус={record.status}).",
-        "Текущая конфигурация:",
+        "Кратко по мета:",
         f"- name: {config.name}",
         f"- description: {config.description}",
         f"- kind: {config.kind}",
     ]
-    if config.kind == "script":
-        lines.append(f"- code:\n{config.code}")
-    else:
-        lines.append(f"- system_prompt: {config.system_prompt}")
+    if config.kind == "agent":
         lines.append(f"- allowed_tools: {', '.join(config.allowed_tools) or '(нет)'}")
-        lines.append(f"- model: {config.model}")
-        if config.provider:
-            lines.append(f"- provider: {config.provider}")
-        if config.reasoning:
-            lines.append(f"- reasoning: {config.reasoning}")
         if config.non_determinism_reason:
             lines.append(f"- non_determinism_reason: {config.non_determinism_reason}")
-    lines.append(f"- input_arity: {config.input_arity if config.input_arity is not None else 'любое'}")
+    lines.append(
+        f"- input_arity: {config.input_arity if config.input_arity is not None else 'любое'}"
+    )
     if config.verify_checks:
         checks = ", ".join(vc.check for vc in config.verify_checks)
         lines.append(f"- verify_checks: {checks}")
     lines.append(
-        "Обсуди с пользователем, что нужно изменить, и вызови build_skill "
-        "заново с обновлённой конфигурацией, когда всё согласовано."
+        "Черновик prompt/script уже засеян в панели артефактов "
+        "(смотри через read_skill_draft). Не дублируй полный текст в чат."
+    )
+    lines.append(
+        "Обсуди с пользователем изменения и обновляй черновик инструментами "
+        "set_skill_meta и save_skill_prompt (для agent) или save_skill_script "
+        "(для script)."
     )
     return "\n".join(lines)
 
@@ -384,6 +528,7 @@ async def edit_skill_endpoint(
     if record is None:
         raise HTTPException(status_code=404, detail="skill not found")
     session_id = create_session(db, skill_id=skill_id)
+    seed_session_artifacts_from_skill(db, session_id, record)
     add_message(
         db,
         session_id=session_id,

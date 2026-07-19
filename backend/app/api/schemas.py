@@ -202,3 +202,40 @@ class SettingsUpdate(BaseModel):
 
     provider: str | None = None
     model: str | None = None
+
+
+class SessionArtifactOut(BaseModel):
+    type: str
+    content: str
+    is_valid: bool
+    error: str | None = None
+    source: str
+    updated_at: str
+
+
+class ArtifactPatchRequest(BaseModel):
+    content: str
+
+
+class SkillMetaPatchRequest(BaseModel):
+    name: str
+    description: str
+    kind: str
+    input_arity: int | None = None
+    allowed_tools: list[str] = Field(default_factory=list)
+    verify_checks: list[dict] = Field(default_factory=list)
+
+    @field_validator("kind")
+    @classmethod
+    def _allowed_kind(cls, value: str) -> str:
+        if value not in ("agent", "script"):
+            raise ValueError("kind must be 'agent' or 'script'")
+        return value
+
+    @field_validator("name")
+    @classmethod
+    def _non_empty_meta_name(cls, value: str) -> str:
+        stripped = value.strip()
+        if not stripped:
+            raise ValueError("name must be non-empty")
+        return stripped

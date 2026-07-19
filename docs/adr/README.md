@@ -20,6 +20,7 @@
 | [0012](0012-data-root-and-git-repos.md) | Data-root вне репо исходников + два app-owned git-репозитория | Accepted |
 | [0013](0013-multi-provider-and-zai.md) | Multi-provider LLM-фабрика + z.ai провайдер + StreamDelta contract | Accepted |
 | [0014](0014-script-skills.md) | Детерминированные script-скилы (kind=script) + sandbox | Accepted |
+| [0015](0015-session-artifacts.md) | Артефакты сессии (prompt/script/meta); build = упаковка без LLM | Accepted |
 
 ## Связанные материалы
 - Исходные транскрипции: `../pre-design/` (`opus-chat.json` — фундаментальные решения; `fable-review.json` — критика и уточнения).

@@ -28,12 +28,23 @@ from fastapi import APIRouter, Depends, HTTPException, Response, WebSocket, WebS
 from app.agent import run_agent
 from app.agent.events import FinishEvent, ToolResultEvent
 from app.agent.registry import ToolRegistry
-from app.api.deps import agent_event_to_frame, get_db
-from app.api.schemas import DocumentOut, MessageOut, SessionCreated, SessionOut
+from app.api.deps import agent_event_to_frame, get_db, get_tools
+from app.api.schemas import (
+    ArtifactPatchRequest,
+    DocumentOut,
+    MessageOut,
+    SessionArtifactOut,
+    SessionCreated,
+    SessionOut,
+    SkillMetaPatchRequest,
+)
 from app.config import Settings
 from app.documents.tools import build_document_tools
 from app.llm.base import Message
 from app.llm.log_context import prompt_log_context
+from app.skills.artifact_tools import artifacts_frame, build_artifact_tools
+from app.skills.script_runner import ScriptValidationError, validate_script
+from app.skills.verify import registered_checks
 from app.storage.db import Database
 from app.storage.repo_message import add_message, list_messages
 from app.storage.repo_session import (
@@ -41,6 +52,11 @@ from app.storage.repo_session import (
     delete_session,
     get_session,
     list_sessions,
+)
+from app.storage.repo_session_artifact import (
+    ARTIFACT_TYPES,
+    list_artifacts,
+    upsert_artifact,
 )
 from app.storage.repo_session_document import (
     attach_documents,
@@ -59,6 +75,13 @@ PLANNER_SYSTEM_PROMPT = (
     "пользователем в эту сессию. Если нужного документа нет в list_documents, "
     "попроси пользователя добавить его — глобальное хранилище тебе недоступно. "
     "Задавай уточняющие вопросы и формулируй чёткое задание для скилла.\n\n"
+    "Когда задача прояснилась — определи kind (agent или script) и "
+    "материализуй черновик инструментами: set_skill_meta, затем "
+    "save_skill_prompt (для agent) или save_skill_script (для script). "
+    "Поддерживай черновик актуальным через эти инструменты. "
+    "Не дублируй полный prompt или script простынёй в чат — они живут в "
+    "панели артефактов; в ответе кратко сообщи, что сохранил или обновил "
+    "черновик. Читать текущий черновик можно через read_skill_draft.\n\n"
     "В конце КАЖДОГО своего ответа предлагай 1–3 коротких варианта следующего "
     "шага пользователя отдельной строкой строго в формате:\n"
     "<suggestions>вариант 1 | вариант 2 | вариант 3</suggestions>\n"
@@ -265,6 +288,151 @@ async def delete_session_endpoint(
     return Response(status_code=204)
 
 
+def _artifact_out(row) -> SessionArtifactOut:
+    return SessionArtifactOut(
+        type=row.type,
+        content=row.content,
+        is_valid=row.is_valid,
+        error=row.error,
+        source=row.source,
+        updated_at=row.updated_at,
+    )
+
+
+@router.get(
+    "/sessions/{session_id}/artifacts",
+    response_model=list[SessionArtifactOut],
+)
+async def list_session_artifacts_endpoint(
+    session_id: str,
+    db: Database = Depends(get_db),
+) -> list[SessionArtifactOut]:
+    if get_session(db, session_id) is None:
+        raise HTTPException(status_code=404, detail="session not found")
+    return [_artifact_out(r) for r in list_artifacts(db, session_id)]
+
+
+@router.patch(
+    "/sessions/{session_id}/artifacts/{artifact_type}",
+    response_model=SessionArtifactOut,
+)
+async def patch_session_artifact_endpoint(
+    session_id: str,
+    artifact_type: str,
+    req: ArtifactPatchRequest,
+    db: Database = Depends(get_db),
+    tools: ToolRegistry = Depends(get_tools),
+) -> SessionArtifactOut:
+    if get_session(db, session_id) is None:
+        raise HTTPException(status_code=404, detail="session not found")
+    if artifact_type not in ARTIFACT_TYPES:
+        raise HTTPException(status_code=404, detail="unknown artifact type")
+    if artifact_type == "meta":
+        try:
+            payload = json.loads(req.content)
+        except (TypeError, ValueError, json.JSONDecodeError) as exc:
+            raise HTTPException(
+                status_code=422, detail=f"meta content must be JSON: {exc}"
+            ) from exc
+        if not isinstance(payload, dict):
+            raise HTTPException(status_code=422, detail="meta content must be a JSON object")
+        kind = payload.get("kind", "agent")
+        allowed = list(payload.get("allowed_tools") or [])
+        checks = list(payload.get("verify_checks") or [])
+        errors: list[str] = []
+        if kind not in ("agent", "script"):
+            errors.append(f"unknown skill kind: {kind!r}")
+        else:
+            if kind == "agent":
+                available = set(tools.names())
+                for name in allowed:
+                    if name not in available:
+                        errors.append(f"unknown tool: {name!r}")
+            available_checks = set(registered_checks())
+            for vc in checks:
+                check_id = vc.get("check") if isinstance(vc, dict) else None
+                if not check_id or check_id not in available_checks:
+                    errors.append(f"unknown verify check: {check_id!r}")
+        row = upsert_artifact(
+            db,
+            session_id=session_id,
+            type="meta",
+            content=json.dumps(payload, ensure_ascii=False),
+            source="user",
+            is_valid=not errors,
+            error="; ".join(errors) if errors else None,
+        )
+        return _artifact_out(row)
+
+    is_valid = True
+    error: str | None = None
+    if artifact_type == "script":
+        try:
+            validate_script(req.content)
+        except ScriptValidationError as exc:
+            is_valid = False
+            error = str(exc)
+    elif artifact_type == "prompt":
+        if not req.content.strip():
+            is_valid = False
+            error = "prompt is empty"
+    row = upsert_artifact(
+        db,
+        session_id=session_id,
+        type=artifact_type,
+        content=req.content,
+        source="user",
+        is_valid=is_valid,
+        error=error,
+    )
+    return _artifact_out(row)
+
+
+@router.patch(
+    "/sessions/{session_id}/skill-meta",
+    response_model=SessionArtifactOut,
+)
+async def patch_skill_meta_endpoint(
+    session_id: str,
+    req: SkillMetaPatchRequest,
+    db: Database = Depends(get_db),
+    tools: ToolRegistry = Depends(get_tools),
+) -> SessionArtifactOut:
+    if get_session(db, session_id) is None:
+        raise HTTPException(status_code=404, detail="session not found")
+    allowed = list(req.allowed_tools)
+    checks = list(req.verify_checks)
+    errors: list[str] = []
+    if req.kind == "agent":
+        available = set(tools.names())
+        for name in allowed:
+            if name not in available:
+                errors.append(f"unknown tool: {name!r}")
+    available_checks = set(registered_checks())
+    for vc in checks:
+        check_id = vc.get("check") if isinstance(vc, dict) else None
+        if not check_id or check_id not in available_checks:
+            errors.append(f"unknown verify check: {check_id!r}")
+    payload = {
+        "name": req.name,
+        "description": req.description,
+        "kind": req.kind,
+        "input_arity": req.input_arity,
+        "allowed_tools": allowed if req.kind == "agent" else [],
+        "verify_checks": checks,
+    }
+    row = upsert_artifact(
+        db,
+        session_id=session_id,
+        type="meta",
+        content=json.dumps(payload, ensure_ascii=False),
+        source="user",
+        is_valid=not errors,
+        error="; ".join(errors) if errors else None,
+    )
+    return _artifact_out(row)
+
+
 async def _run_planner_turn(
     websocket: WebSocket,
     *,
@@ -374,7 +542,22 @@ async def session_ws(
         await websocket.close()
         return
 
+    base_tools: ToolRegistry = websocket.app.state.tools
     tools: ToolRegistry = build_document_tools(db, workspace, session_id)
+
+    async def _notify_artifacts() -> None:
+        await websocket.send_json(artifacts_frame(db, session_id))
+
+    artifact_tools = build_artifact_tools(
+        db,
+        session_id,
+        available_tools=base_tools.names(),
+        on_artifacts_changed=_notify_artifacts,
+    )
+    for name in artifact_tools.names():
+        entry = artifact_tools.get(name)
+        if entry is not None:
+            tools.register(entry[0], entry[1])
 
     # CATALOG-13: starter suggestions for an empty session so the chat shows
     # quick-reply buttons before the first message.

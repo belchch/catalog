@@ -49,6 +49,17 @@ CREATE TABLE IF NOT EXISTS skill_run(
   persist INTEGER NOT NULL DEFAULT 1,                            -- 1 = auto-persist result_md (CATALOG-18)
   result_text TEXT                                               -- raw agent/script output, kept even when persist=0
 );
+CREATE TABLE IF NOT EXISTS session_artifact(
+  session_id TEXT NOT NULL,
+  type TEXT NOT NULL,           -- 'prompt' | 'script' | 'meta'
+  content TEXT NOT NULL,        -- text for prompt/script; JSON for meta
+  is_valid INTEGER NOT NULL DEFAULT 1,
+  error TEXT,                   -- validation message (script/meta)
+  source TEXT NOT NULL,         -- 'llm' | 'user'
+  updated_at TEXT NOT NULL,
+  PRIMARY KEY (session_id, type),
+  FOREIGN KEY (session_id) REFERENCES session(id)
+);
 """
 
 # Safe additive migrations for existing databases (CATALOG-4 / CATALOG-17

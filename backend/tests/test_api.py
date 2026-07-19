@@ -586,12 +586,20 @@ def test_edit_skill_starts_session_with_skill_id(client, provider, db) -> None:
     assert session is not None
     assert session.skill_id == skill_id
 
-    # The session is seeded with a human-readable dump of the current config
-    # so the planner (and later build_skill) has full context.
     msgs = list_messages(db, session_id)
     assert len(msgs) == 1
-    assert "Original" in msgs[0]["content"]
-    assert skill_id in msgs[0]["content"]
+    seed = msgs[0]["content"]
+    assert "Original" in seed
+    assert skill_id in seed
+    assert "set_skill_meta" in seed
+    assert "save_skill_prompt" in seed
+    assert "build_skill" not in seed
+    assert "You summarize the document." not in seed
+
+    arts = client.get(f"/sessions/{session_id}/artifacts").json()
+    types = {a["type"] for a in arts}
+    assert "meta" in types
+    assert "prompt" in types
 
 
 def test_edit_skill_missing_returns_404(client, db) -> None:
@@ -605,13 +613,25 @@ def test_build_from_edit_session_updates_same_skill_and_drops_to_draft(
     """Building from an edit session updates the same skill (CATALOG-17).
 
     A committed skill drops back to draft after the edit is saved.
+    Edit sessions seed artifacts; build packs them without LLM (CATALOG-53).
     """
     skill_id = _seed_committed_skill(db, name="Original")
 
     session_id = client.post(f"/skills/{skill_id}/edit").json()["session_id"]
-    add_message(db, session_id=session_id, role="user", content="переименуй в Renamed")
-
-    provider.script = [_completion(tool_calls=[_build_skill_call(name="Renamed")])]
+    client.patch(
+        f"/sessions/{session_id}/skill-meta",
+        json={
+            "name": "Renamed",
+            "description": "updated",
+            "kind": "agent",
+            "allowed_tools": ["read_document"],
+            "verify_checks": [{"check": "non_empty"}],
+        },
+    )
+    client.patch(
+        f"/sessions/{session_id}/artifacts/prompt",
+        json={"content": "You process the document as instructed."},
+    )
     resp = client.post(f"/sessions/{session_id}/skills")
     assert resp.status_code == 200, resp.text
     assert resp.json()["skill_id"] == skill_id  # same id, not a new skill
@@ -633,8 +653,20 @@ def test_build_from_edit_session_draft_stays_draft(client, provider, db) -> None
     assert get_skill(db, skill_id).status == "draft"
 
     session_id = client.post(f"/skills/{skill_id}/edit").json()["session_id"]
-    add_message(db, session_id=session_id, role="user", content="tweak it")
-    provider.script = [_completion(tool_calls=[_build_skill_call(name="S2")])]
+    client.patch(
+        f"/sessions/{session_id}/skill-meta",
+        json={
+            "name": "S2",
+            "description": "Skill built from a planning session.",
+            "kind": "agent",
+            "allowed_tools": ["read_document"],
+            "verify_checks": [{"check": "non_empty"}],
+        },
+    )
+    client.patch(
+        f"/sessions/{session_id}/artifacts/prompt",
+        json={"content": "You process the document as instructed."},
+    )
     resp = client.post(f"/sessions/{session_id}/skills")
     assert resp.status_code == 200, resp.text
 
