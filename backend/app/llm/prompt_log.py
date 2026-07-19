@@ -31,7 +31,7 @@ from app.llm.log_context import collect_context
 
 logger = logging.getLogger("app.llm.prompt_log")
 
-_SCHEMA_VERSION = 1
+_SCHEMA_VERSION = 2
 
 
 def is_enabled() -> bool:
@@ -60,6 +60,9 @@ async def write_prompt_log(
     response: dict[str, Any] | None,
     error: str | None,
     latency_ms: int,
+    base_url: str,
+    url: str,
+    http_status: int | None = None,
 ) -> None:
     """Persist one prompt-log JSON file. Best-effort: never raises.
 
@@ -87,6 +90,10 @@ async def write_prompt_log(
                 "temperature": temperature,
                 "tool_choice": tool_choice,
                 "stream": stream,
+                "base_url": base_url,
+                "url": url,
+                "messages_count": len(messages),
+                "tools_count": len(tools) if tools else 0,
                 "tools": tool_specs_to_dicts(tools) if tools else [],
                 "messages": [message_to_dict(m) for m in messages],
             },
@@ -95,6 +102,7 @@ async def write_prompt_log(
                 "latency_ms": latency_ms,
                 "ok": error is None,
                 "error": error,
+                "http_status": http_status,
             },
         }
 

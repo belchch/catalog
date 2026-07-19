@@ -155,7 +155,10 @@ class OpenAICompatibleProvider:
             except (httpx.TimeoutException, httpx.NetworkError) as exc:
                 if attempt < self._max_retries:
                     logger.warning(
-                        "complete network error (attempt %d/%d): %s",
+                        "complete network error provider=%s url=%s "
+                        "(attempt %d/%d): %s",
+                        self._provider_name,
+                        url,
                         attempt + 1,
                         self._max_retries,
                         exc,
@@ -176,8 +179,11 @@ class OpenAICompatibleProvider:
                 and attempt < self._max_retries
             ):
                 logger.warning(
-                    "complete HTTP %d (attempt %d/%d), retrying",
+                    "complete HTTP %d provider=%s url=%s "
+                    "(attempt %d/%d), retrying",
                     resp.status_code,
+                    self._provider_name,
+                    url,
                     attempt + 1,
                     self._max_retries,
                 )
@@ -188,7 +194,11 @@ class OpenAICompatibleProvider:
         assert resp is not None  # loop runs at least once
         if resp.status_code >= 400:
             logger.warning(
-                "complete HTTP %d body: %s", resp.status_code, resp.text[:1000]
+                "complete HTTP %d provider=%s url=%s body: %s",
+                resp.status_code,
+                self._provider_name,
+                url,
+                resp.text[:1000],
             )
             if resp.status_code in _RETRY_STATUS:
                 raise RuntimeError(
@@ -205,15 +215,22 @@ class OpenAICompatibleProvider:
 
         Subclasses may override to return a hardcoded catalog (e.g. z.ai).
         """
+        url = f"{self._base_url}/models"
         resp = await self._client.get(
-            f"{self._base_url}/models",
+            url,
             headers=self._auth_headers(),
         )
         resp.raise_for_status()
         data = resp.json()
         raw_models = data.get("data", [])
         models = [self._parse_model(m) for m in raw_models]
-        logger.info("list_models: fetched %d models", len(models))
+        logger.info(
+            "list_models: provider=%s base_url=%s url=%s fetched %d models",
+            self._provider_name,
+            self._base_url,
+            url,
+            len(models),
+        )
         return models
 
     # --- completion (non-streaming) ----------------------------------------
@@ -238,8 +255,13 @@ class OpenAICompatibleProvider:
             body["tool_choice"] = tool_choice
         self._apply_reasoning(body, reasoning)
 
+        url = f"{self._base_url}/chat/completions"
         logger.info(
-            "complete request: model=%s messages=%d tools=%s temperature=%.1f",
+            "complete request: provider=%s base_url=%s url=%s "
+            "model=%s messages=%d tools=%s temperature=%.1f",
+            self._provider_name,
+            self._base_url,
+            url,
             model,
             len(messages),
             [t.name for t in tools] if tools else None,
@@ -248,9 +270,7 @@ class OpenAICompatibleProvider:
 
         t0 = time.monotonic()
         try:
-            resp = await self._post_with_retry(
-                f"{self._base_url}/chat/completions", body
-            )
+            resp = await self._post_with_retry(url, body)
         except Exception as exc:
             latency_ms = round((time.monotonic() - t0) * 1000)
             await write_prompt_log(
@@ -264,6 +284,8 @@ class OpenAICompatibleProvider:
                 response=None,
                 error=str(exc),
                 latency_ms=latency_ms,
+                base_url=self._base_url,
+                url=url,
             )
             raise
 
@@ -286,6 +308,9 @@ class OpenAICompatibleProvider:
                 response=None,
                 error=str(err),
                 latency_ms=latency_ms,
+                base_url=self._base_url,
+                url=url,
+                http_status=resp.status_code,
             )
             raise err
         choice = choices[0]
@@ -300,7 +325,11 @@ class OpenAICompatibleProvider:
         log_content = (content or "")[:200]
         log_tools = [tc.name for tc in tool_calls] if tool_calls else None
         logger.info(
-            "complete response: model=%s finish_reason=%s content=%s tool_calls=%s usage=%s",
+            "complete response: provider=%s url=%s http_status=%d "
+            "model=%s finish_reason=%s content=%s tool_calls=%s usage=%s",
+            self._provider_name,
+            url,
+            resp.status_code,
             model,
             finish_reason,
             repr(log_content),
@@ -335,6 +364,9 @@ class OpenAICompatibleProvider:
             },
             error=None,
             latency_ms=round((time.monotonic() - t0) * 1000),
+            base_url=self._base_url,
+            url=url,
+            http_status=resp.status_code,
         )
 
         return CompletionResult(
@@ -366,8 +398,13 @@ class OpenAICompatibleProvider:
             body["tools"] = tool_specs_to_dicts(tools)
         self._apply_reasoning(body, reasoning)
 
+        url = f"{self._base_url}/chat/completions"
         logger.info(
-            "stream_complete request: model=%s messages=%d tools=%s temperature=%.1f",
+            "stream_complete request: provider=%s base_url=%s url=%s "
+            "model=%s messages=%d tools=%s temperature=%.1f",
+            self._provider_name,
+            self._base_url,
+            url,
             model,
             len(messages),
             [t.name for t in tools] if tools else None,
@@ -377,13 +414,15 @@ class OpenAICompatibleProvider:
         t0 = time.monotonic()
         assembled_text = ""
         assembled_reasoning = ""
+        http_status: int | None = None
         try:
             async with self._client.stream(
                 "POST",
-                f"{self._base_url}/chat/completions",
+                url,
                 headers=self._auth_headers(),
                 json=body,
             ) as resp:
+                http_status = resp.status_code
                 if resp.status_code == 401:
                     raise ValueError(self._auth_error_message)
                 if resp.status_code == 429:
@@ -391,8 +430,10 @@ class OpenAICompatibleProvider:
                 if resp.status_code >= 400:
                     await resp.aread()
                     logger.warning(
-                        "stream_complete HTTP %d body: %s",
+                        "stream_complete HTTP %d provider=%s url=%s body: %s",
                         resp.status_code,
+                        self._provider_name,
+                        url,
                         resp.text[:1000],
                     )
                     raise RuntimeError(self._error_detail(resp))
@@ -438,6 +479,9 @@ class OpenAICompatibleProvider:
                 },
                 error=str(exc),
                 latency_ms=round((time.monotonic() - t0) * 1000),
+                base_url=self._base_url,
+                url=url,
+                http_status=http_status,
             )
             raise
 
@@ -457,4 +501,7 @@ class OpenAICompatibleProvider:
             },
             error=None,
             latency_ms=round((time.monotonic() - t0) * 1000),
+            base_url=self._base_url,
+            url=url,
+            http_status=http_status,
         )

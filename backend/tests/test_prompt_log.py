@@ -60,6 +60,8 @@ def test_disabled_no_file(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> No
             response={"content": "hi", "tool_calls": [], "finish_reason": "stop", "usage": {}},
             error=None,
             latency_ms=5,
+            base_url="https://openrouter.ai/api/v1",
+            url="https://openrouter.ai/api/v1/chat/completions",
         )
 
     asyncio.run(_run())
@@ -88,6 +90,9 @@ def test_enabled_writes_json(log_dir: Path) -> None:
             },
             error=None,
             latency_ms=42,
+            base_url="https://openrouter.ai/api/v1",
+            url="https://openrouter.ai/api/v1/chat/completions",
+            http_status=200,
         )
 
     asyncio.run(_run())
@@ -95,12 +100,16 @@ def test_enabled_writes_json(log_dir: Path) -> None:
     path = _find_log(log_dir)
     payload = json.loads(path.read_text(encoding="utf-8"))
 
-    assert payload["schema_version"] == 1
+    assert payload["schema_version"] == 2
     assert payload["provider"] == "openrouter"
     assert payload["request"]["model"] == "openai/gpt-4"
     assert payload["request"]["temperature"] == 0.0
     assert payload["request"]["tool_choice"] == "auto"
     assert payload["request"]["stream"] is False
+    assert payload["request"]["base_url"] == "https://openrouter.ai/api/v1"
+    assert payload["request"]["url"] == "https://openrouter.ai/api/v1/chat/completions"
+    assert payload["request"]["messages_count"] == 2
+    assert payload["request"]["tools_count"] == 1
     # Full messages serialized.
     assert len(payload["request"]["messages"]) == 2
     assert payload["request"]["messages"][0] == {"role": "system", "content": "You are helpful."}
@@ -113,6 +122,7 @@ def test_enabled_writes_json(log_dir: Path) -> None:
     assert payload["meta"]["latency_ms"] == 42
     assert payload["meta"]["ok"] is True
     assert payload["meta"]["error"] is None
+    assert payload["meta"]["http_status"] == 200
     # request_id / timestamp present; file name embeds the request_id.
     assert payload["request_id"]
     assert payload["timestamp"]
@@ -137,6 +147,8 @@ def test_contextvars_in_meta(log_dir: Path) -> None:
                 response={"content": "x", "tool_calls": [], "finish_reason": "stop", "usage": {}},
                 error=None,
                 latency_ms=1,
+                base_url="https://openrouter.ai/api/v1",
+                url="https://openrouter.ai/api/v1/chat/completions",
             )
 
     asyncio.run(_run())
@@ -179,9 +191,12 @@ def test_stream_logs_assembled_text(log_dir: Path) -> None:
 
     payload = json.loads(_find_log(log_dir).read_text(encoding="utf-8"))
     assert payload["request"]["stream"] is True
+    assert payload["request"]["base_url"] == "https://x/api/v1"
+    assert payload["request"]["url"] == "https://x/api/v1/chat/completions"
     assert payload["response"]["assembled_text"] == "Hello world"
     assert payload["response"]["finish_reason"] == "stop"
     assert payload["meta"]["ok"] is True
+    assert payload["meta"]["http_status"] == 200
 
 
 def test_write_failure_swallowed(
@@ -207,6 +222,8 @@ def test_write_failure_swallowed(
             response={"content": "x", "tool_calls": [], "finish_reason": "stop", "usage": {}},
             error=None,
             latency_ms=1,
+            base_url="https://openrouter.ai/api/v1",
+            url="https://openrouter.ai/api/v1/chat/completions",
         )
 
     asyncio.run(_run())
@@ -238,3 +255,5 @@ def test_error_path_logged(log_dir: Path) -> None:
     assert payload["meta"]["ok"] is False
     assert "Invalid OpenRouter API key" in payload["meta"]["error"]
     assert payload["response"] is None
+    assert payload["request"]["base_url"] == "https://x/api/v1"
+    assert payload["request"]["url"] == "https://x/api/v1/chat/completions"

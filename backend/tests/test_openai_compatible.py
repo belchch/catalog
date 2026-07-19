@@ -319,3 +319,67 @@ def test_stream_401_raises_provider_error() -> None:
                 pass
 
     asyncio.run(_run())
+
+
+def test_complete_logs_provider_base_url_and_url(caplog: pytest.LogCaptureFixture) -> None:
+    async def _run() -> None:
+        provider = _make_provider(_handler_complete_with_reasoning)
+        with caplog.at_level("INFO", logger="app.llm"):
+            await provider.complete(
+                model="m",
+                messages=[Message(role="user", content="What is the answer?")],
+            )
+
+    asyncio.run(_run())
+
+    request_logs = [r.message for r in caplog.records if "complete request:" in r.message]
+    response_logs = [r.message for r in caplog.records if "complete response:" in r.message]
+    assert len(request_logs) == 1
+    assert "provider=test" in request_logs[0]
+    assert f"base_url={BASE}" in request_logs[0]
+    assert f"url={BASE}/chat/completions" in request_logs[0]
+    assert len(response_logs) == 1
+    assert "http_status=200" in response_logs[0]
+    assert f"url={BASE}/chat/completions" in response_logs[0]
+
+
+def test_list_models_logs_provider_and_base_url(caplog: pytest.LogCaptureFixture) -> None:
+    async def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={"data": [{"id": "m1", "name": "Model 1", "context_length": 8}]},
+        )
+
+    async def _run() -> None:
+        provider = _make_provider(handler)
+        with caplog.at_level("INFO", logger="app.llm"):
+            models = await provider.list_models()
+        assert len(models) == 1
+
+    asyncio.run(_run())
+
+    logs = [r.message for r in caplog.records if "list_models:" in r.message]
+    assert len(logs) == 1
+    assert "provider=test" in logs[0]
+    assert f"base_url={BASE}" in logs[0]
+    assert f"url={BASE}/models" in logs[0]
+
+
+def test_http_error_logs_url(caplog: pytest.LogCaptureFixture) -> None:
+    async def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(400, json={"error": {"message": "bad model"}})
+
+    async def _run() -> None:
+        provider = _make_provider(handler, max_retries=0)
+        with caplog.at_level("WARNING", logger="app.llm"):
+            with pytest.raises(RuntimeError, match="bad model"):
+                await provider.complete(
+                    model="m", messages=[Message(role="user", content="hi")]
+                )
+
+    asyncio.run(_run())
+
+    warnings = [r.message for r in caplog.records if "complete HTTP 400" in r.message]
+    assert len(warnings) == 1
+    assert f"url={BASE}/chat/completions" in warnings[0]
+    assert "provider=test" in warnings[0]
