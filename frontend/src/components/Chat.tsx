@@ -24,6 +24,7 @@ interface ChatProps {
   onSend: (text: string, docIds?: string[]) => void
   onCancel: () => void
   onReconnect: () => void
+  onRemoveDocument?: (docId: string) => void
   onCreateSkill: () => void
   buildingSkill: boolean
   editingSkillName: string | null
@@ -43,6 +44,7 @@ export function Chat({
   onSend,
   onCancel,
   onReconnect,
+  onRemoveDocument,
   onCreateSkill,
   buildingSkill,
   editingSkillName,
@@ -148,6 +150,9 @@ export function Chat({
             <h2 className="mb-1 text-[11px] uppercase tracking-wide text-slate-500">
               Документы в сессии
             </h2>
+            <p className="mb-1 text-[11px] text-slate-600">
+              Агент видит только эти документы
+            </p>
             <ul className="flex flex-wrap gap-1.5" role="list">
               {sessionDocuments.map((d) => (
                 <li
@@ -159,6 +164,15 @@ export function Chat({
                     {d.kind}
                   </span>
                   <span className="truncate">{d.title}</span>
+                  <button
+                    type="button"
+                    className="ml-0.5 text-slate-400 hover:text-slate-100 disabled:opacity-50"
+                    aria-label={`Убрать ${d.title} из сессии`}
+                    disabled={streaming}
+                    onClick={() => onRemoveDocument?.(d.id)}
+                  >
+                    ×
+                  </button>
                 </li>
               ))}
             </ul>

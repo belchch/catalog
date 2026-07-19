@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   getSessionDocuments,
   listSessionMessages,
+  removeSessionDocument,
   type DocumentOut,
   type MessageOut,
 } from '../api.ts'
@@ -30,6 +31,8 @@ export interface UsePlannerSessionResult {
   send: (text: string, docIds?: string[]) => void
   cancel: () => void
   reconnect: () => void
+  removeDocument: (docId: string) => Promise<void>
+  refreshSessionDocuments: () => Promise<void>
 }
 
 export interface UsePlannerSessionOptions {
@@ -289,6 +292,32 @@ export function usePlannerSession(
     setReconnectNonce((n) => n + 1)
   }, [sessionId])
 
+  const removeDocument = useCallback(
+    async (docId: string) => {
+      if (!sessionId) return
+      setSessionDocuments((prev) => prev.filter((d) => d.id !== docId))
+      setError(null)
+      try {
+        await removeSessionDocument(sessionId, docId)
+      } catch (e: unknown) {
+        const docs = await getSessionDocuments(sessionId).catch(() => null)
+        if (docs) setSessionDocuments(docs)
+        setError(e instanceof Error ? e.message : String(e))
+      }
+    },
+    [sessionId],
+  )
+
+  const refreshSessionDocuments = useCallback(async () => {
+    if (!sessionId) return
+    try {
+      const docs = await getSessionDocuments(sessionId)
+      setSessionDocuments(docs)
+    } catch {
+      return
+    }
+  }, [sessionId])
+
   return {
     messages,
     streaming,
@@ -301,5 +330,7 @@ export function usePlannerSession(
     send,
     cancel,
     reconnect,
+    removeDocument,
+    refreshSessionDocuments,
   }
 }

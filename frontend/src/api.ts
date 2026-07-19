@@ -159,6 +159,19 @@ export function getSessionDocuments(sessionId: string): Promise<DocumentOut[]> {
   return jsonFetch<DocumentOut[]>(`/sessions/${sessionId}/documents`)
 }
 
+export async function removeSessionDocument(
+  sessionId: string,
+  docId: string,
+): Promise<void> {
+  const res = await fetch(
+    `${API_URL}/sessions/${sessionId}/documents/${docId}`,
+    { method: 'DELETE' },
+  )
+  if (res.status === 204 || res.status === 404) return
+  const body = await res.text().catch(() => '')
+  throw new Error(`${res.status} ${res.statusText}${body ? `: ${body}` : ''}`)
+}
+
 export async function deleteSession(sessionId: string): Promise<void> {
   const res = await fetch(`${API_URL}/sessions/${sessionId}`, { method: 'DELETE' })
   if (!res.ok) {

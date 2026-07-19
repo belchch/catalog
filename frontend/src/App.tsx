@@ -66,6 +66,7 @@ export default function App() {
   }, [])
 
   const planner = usePlannerSession(sessionId, { onSessionInvalid: handleSessionInvalid })
+  const { refreshSessionDocuments } = planner
   const run = useRunStream(activeRunId)
 
   useEffect(() => {
@@ -75,8 +76,9 @@ export default function App() {
   useEffect(() => {
     if (run.finished && run.status === 'ok' && run.outputDocId) {
       void docs.refresh()
+      void refreshSessionDocuments()
     }
-  }, [run.finished, run.status, run.outputDocId, docs])
+  }, [run.finished, run.status, run.outputDocId, docs, refreshSessionDocuments])
 
   const wasStreamingRef = useRef(false)
   useEffect(() => {
@@ -206,6 +208,7 @@ export default function App() {
         const doc = await saveRunResult(runId)
         setSavedResultDoc(doc)
         await docs.refresh()
+        await refreshSessionDocuments()
         setCurrentDocId(doc.id)
       } catch (e) {
         setNotice(e instanceof Error ? e.message : String(e))
@@ -213,7 +216,7 @@ export default function App() {
         setSavingResult(false)
       }
     },
-    [docs],
+    [docs, refreshSessionDocuments],
   )
 
   return (
@@ -336,6 +339,7 @@ export default function App() {
               onSend={handleSend}
               onCancel={planner.cancel}
               onReconnect={planner.reconnect}
+              onRemoveDocument={planner.removeDocument}
               onCreateSkill={handleCreateSkill}
               buildingSkill={buildingSkill}
               editingSkillName={editingSkill?.name ?? null}
