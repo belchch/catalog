@@ -22,7 +22,11 @@ from app.storage.repo_document import (
     reconcile_orphans,
 )
 from app.storage.repo_session import create_session
-from app.storage.repo_session_document import attach_documents, list_session_documents
+from app.storage.repo_session_document import (
+    attach_documents,
+    detach_documents,
+    list_session_documents,
+)
 
 
 
@@ -100,6 +104,20 @@ def test_attach_documents_idempotent(db: Database) -> None:
     docs = list_session_documents(db, session_id)
     assert [d.id for d in docs] == [a.id, b.id]
     assert [d.title for d in docs] == ["Alpha", "Beta"]
+
+
+def test_detach_documents_idempotent(db: Database) -> None:
+    session_id = create_session(db)
+    a = create_document(db, title="Alpha", path="documents/a.md", kind="md")
+    b = create_document(db, title="Beta", path="documents/b.md", kind="md")
+    attach_documents(db, session_id, [a.id, b.id])
+
+    assert detach_documents(db, session_id, [a.id]) == 1
+    assert [d.id for d in list_session_documents(db, session_id)] == [b.id]
+    assert detach_documents(db, session_id, [a.id]) == 0
+    assert detach_documents(db, session_id, []) == 0
+    assert get_document(db, a.id) is not None
+    assert [d.id for d in list_session_documents(db, session_id)] == [b.id]
 
 
 def test_ingest_md_and_read(db: Database, tmp_path: Path) -> None:

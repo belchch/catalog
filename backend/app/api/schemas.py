@@ -45,6 +45,7 @@ class ApplyRequest(BaseModel):
     doc_ids: list[str] = Field(default_factory=list)
     doc_id: str | None = None
     persist: bool = True
+    session_id: str | None = None
 
     @model_validator(mode="after")
     def _normalize_doc_ids(self) -> ApplyRequest:

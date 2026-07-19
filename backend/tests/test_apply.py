@@ -31,6 +31,8 @@ from app.skills.config import SkillConfig, VerifyCheck
 from app.skills.repo_run import get_run
 from app.skills.repo_skill import create_skill, get_skill
 from app.storage.db import Database
+from app.storage.repo_session import create_session
+from app.storage.repo_session_document import list_session_documents
 
 
 # --------------------------------------------------------------------------- #
@@ -170,6 +172,37 @@ def test_apply_success_first_try(db: Database, workspace: Path) -> None:
     assert row is not None
     assert row["status"] == "ok"
     assert row["output_doc_id"] == result.output_doc_id
+
+
+def test_apply_persist_attaches_output_to_session(
+    db: Database, workspace: Path
+) -> None:
+    session_id = create_session(db)
+    skill = _make_skill(verify_checks=[VerifyCheck("non_empty")])
+    skill_id = create_skill(
+        db, name=skill.name, description=skill.description, config=skill
+    )
+    input_doc_id = _ingest_input(db, workspace)
+    provider = ScriptProvider([_result("# Summary\n\nAttached.")])
+
+    result = asyncio.run(
+        apply_skill_collect(
+            provider=provider,
+            db=db,
+            workspace_dir=str(workspace),
+            skill=skill,
+            skill_id=skill_id,
+            input_doc_ids=[input_doc_id],
+            base_tools=build_document_tools(db, workspace),
+            session_id=session_id,
+        )
+    )
+
+    assert result.status == "ok"
+    assert result.output_doc_id is not None
+    assert [d.id for d in list_session_documents(db, session_id)] == [
+        result.output_doc_id
+    ]
 
 
 def test_apply_retry_then_success(db: Database, workspace: Path) -> None:

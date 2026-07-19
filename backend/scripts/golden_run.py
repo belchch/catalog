@@ -46,6 +46,7 @@ from app.skills.repo_skill import get_skill, update_status
 from app.storage.db import Database
 from app.storage.repo_message import add_message
 from app.storage.repo_session import create_session
+from app.storage.repo_session_document import attach_documents
 
 # Repo root = two parents up from backend/scripts/golden_run.py.
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -81,8 +82,6 @@ async def run_golden(
     Raises :class:`AssertionError` on any unmet acceptance criterion, so a
     caller can treat a non-raising return as "green".
     """
-    tools: ToolRegistry = build_document_tools(db, workspace_dir)
-
     # 1. Ingest the first golden docx.
     golden1 = samples_dir / "golden.docx"
     if not golden1.exists():
@@ -97,6 +96,8 @@ async def run_golden(
     #    planner at the ingested document id so a live run actually reads it.
     plan_message = PLAN_MESSAGE_TEMPLATE.format(doc_id=doc1.id)
     session_id = create_session(db)
+    attach_documents(db, session_id, [doc1.id])
+    tools: ToolRegistry = build_document_tools(db, workspace_dir, session_id)
     add_message(db, session_id=session_id, role="user", content=plan_message)
     plan_text, _planner_trace, planner_capped = await run_agent_collect(
         provider=provider,

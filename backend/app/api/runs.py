@@ -39,6 +39,7 @@ from app.skills.repo_run import create_run, get_run, set_output_doc_id
 from app.skills.repo_skill import get_skill
 from app.storage.db import Database
 from app.storage.repo_document import create_document
+from app.storage.repo_session_document import attach_documents
 
 router = APIRouter()
 
@@ -68,7 +69,11 @@ async def apply_endpoint(
             ),
         )
     run_id = create_run(
-        db, skill_id=skill_id, session_id=None, input_doc_ids=doc_ids, persist=req.persist
+        db,
+        skill_id=skill_id,
+        session_id=req.session_id,
+        input_doc_ids=doc_ids,
+        persist=req.persist,
     )
     return RunCreated(run_id=run_id)
 
@@ -127,6 +132,8 @@ async def save_run_result_endpoint(
     results_dir.mkdir(parents=True, exist_ok=True)
     (Path(workspace) / rel_path).write_text(run["result_text"], encoding="utf-8")
     set_output_doc_id(db, run_id, out_id)
+    if run["session_id"] is not None:
+        attach_documents(db, run["session_id"], [out_id])
 
     return DocumentOut(id=doc.id, title=doc.title, kind=doc.kind, created_at=doc.created_at)
 

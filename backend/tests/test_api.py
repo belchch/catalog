@@ -18,6 +18,7 @@ from app.skills.repo_skill import create_skill, get_skill, update_status
 from app.storage.repo_document import get_document
 from app.storage.repo_message import add_message, list_messages
 from app.storage.repo_session import get_session
+from app.storage.repo_session_document import attach_documents, list_session_documents
 
 
 def _completion(
@@ -287,6 +288,28 @@ def test_ws_session_attach_documents_and_prompt(client, provider, db) -> None:
 def test_get_session_documents_404(client) -> None:
     resp = client.get("/sessions/missing/documents")
     assert resp.status_code == 404
+
+
+def test_detach_session_document(client, db) -> None:
+    session_id = client.post("/sessions").json()["id"]
+    doc_a = _upload(client, "alpha.md", b"# Alpha\n")
+    doc_b = _upload(client, "beta.md", b"# Beta\n")
+    attach_documents(db, session_id, [doc_a, doc_b])
+
+    listed = client.get(f"/sessions/{session_id}/documents").json()
+    assert {d["id"] for d in listed} == {doc_a, doc_b}
+
+    resp = client.delete(f"/sessions/{session_id}/documents/{doc_a}")
+    assert resp.status_code == 204
+    listed2 = client.get(f"/sessions/{session_id}/documents").json()
+    assert [d["id"] for d in listed2] == [doc_b]
+    assert get_document(db, doc_a) is not None
+
+    resp2 = client.delete(f"/sessions/{session_id}/documents/{doc_a}")
+    assert resp2.status_code == 404
+
+    resp3 = client.delete(f"/sessions/missing/documents/{doc_b}")
+    assert resp3.status_code == 404
 
 
 def test_parse_suggestions_extracts_and_strips() -> None:
@@ -1306,6 +1329,25 @@ def test_save_run_result_materializes_preview_into_document(
     # Saving a second time is rejected (no duplicate document).
     resp2 = client.post(f"/runs/{run_id}/save")
     assert resp2.status_code == 409
+
+
+def test_save_run_result_attaches_to_session(client, provider, db) -> None:
+    session_id = client.post("/sessions").json()["id"]
+    doc_id = _upload(client, "input.md", b"source text")
+    skill_id = _seed_committed_skill(
+        db, verify_checks=[VerifyCheck("non_empty")], max_retries=2
+    )
+    provider.script = [_completion("# Result\n\nSaved into session.")]
+
+    run_id = client.post(
+        f"/skills/{skill_id}/apply",
+        json={"doc_id": doc_id, "persist": False, "session_id": session_id},
+    ).json()["run_id"]
+    _drain_run_ws(client, run_id)
+
+    saved = client.post(f"/runs/{run_id}/save").json()
+    session_docs = list_session_documents(db, session_id)
+    assert [d.id for d in session_docs] == [saved["id"]]
 
 
 def test_save_run_result_missing_run_returns_404(client, db) -> None:

@@ -37,11 +37,12 @@ from app.documents.extract import extract_text
 from app.documents.ingest import build_doc_path
 from app.llm.base import LLMProvider, Message
 from app.skills.config import SkillConfig
-from app.skills.repo_run import create_run, finish_run
+from app.skills.repo_run import create_run, finish_run, get_run
 from app.skills.script_runner import ScriptRuntimeError, run_script_async
 from app.skills.verify import run_verify
 from app.storage.db import Database
 from app.storage.repo_document import create_document, get_document
+from app.storage.repo_session_document import attach_documents
 
 logger = logging.getLogger("app.skills.apply")
 
@@ -131,6 +132,10 @@ async def _apply_core(
             input_doc_ids=input_doc_ids,
             persist=persist,
         )
+    elif session_id is None:
+        existing_run = get_run(db, run_id)
+        if existing_run is not None:
+            session_id = existing_run["session_id"]
 
     logger.info(
         "apply_skill start skill=%s skill_id=%s input_docs=%d run_id=%s",
@@ -314,6 +319,8 @@ async def _apply_core(
                 last_text or "", encoding="utf-8"
             )
             output_doc_id = out_id
+            if session_id is not None:
+                attach_documents(db, session_id, [out_id])
             logger.info("apply_skill persisted output_doc_id=%s", out_id)
 
         status = "ok" if passed else "failed"

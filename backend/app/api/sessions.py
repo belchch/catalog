@@ -31,6 +31,7 @@ from app.agent.registry import ToolRegistry
 from app.api.deps import agent_event_to_frame, get_db
 from app.api.schemas import DocumentOut, MessageOut, SessionCreated, SessionOut
 from app.config import Settings
+from app.documents.tools import build_document_tools
 from app.llm.base import Message
 from app.llm.log_context import prompt_log_context
 from app.storage.db import Database
@@ -41,7 +42,11 @@ from app.storage.repo_session import (
     get_session,
     list_sessions,
 )
-from app.storage.repo_session_document import attach_documents, list_session_documents
+from app.storage.repo_session_document import (
+    attach_documents,
+    detach_documents,
+    list_session_documents,
+)
 
 
 router = APIRouter()
@@ -50,8 +55,10 @@ PLANNER_SYSTEM_PROMPT = (
     "Ты — планировщик Catalog. Помогаешь аналитику составить план обработки "
     "документа, который затем превратится в переиспользуемый скилл. "
     "Используй инструменты list_documents и read_document, чтобы изучить "
-    "доступные документы. Задавай уточняющие вопросы и формулируй чёткое "
-    "задание для скилла.\n\n"
+    "доступные документы. Тебе доступны только документы, явно добавленные "
+    "пользователем в эту сессию. Если нужного документа нет в list_documents, "
+    "попроси пользователя добавить его — глобальное хранилище тебе недоступно. "
+    "Задавай уточняющие вопросы и формулируй чёткое задание для скилла.\n\n"
     "В конце КАЖДОГО своего ответа предлагай 1–3 коротких варианта следующего "
     "шага пользователя отдельной строкой строго в формате:\n"
     "<suggestions>вариант 1 | вариант 2 | вариант 3</suggestions>\n"
@@ -234,6 +241,19 @@ async def list_session_documents_endpoint(
     ]
 
 
+@router.delete("/sessions/{session_id}/documents/{doc_id}", status_code=204)
+async def detach_session_document_endpoint(
+    session_id: str,
+    doc_id: str,
+    db: Database = Depends(get_db),
+) -> Response:
+    if get_session(db, session_id) is None:
+        raise HTTPException(status_code=404, detail="session not found")
+    removed = detach_documents(db, session_id, [doc_id])
+    if removed == 0:
+        raise HTTPException(status_code=404, detail="document not attached")
+    return Response(status_code=204)
+
 
 @router.delete("/sessions/{session_id}", status_code=204)
 async def delete_session_endpoint(
@@ -346,13 +366,15 @@ async def session_ws(
     await websocket.accept()
 
     db: Database = websocket.app.state.db
-    tools: ToolRegistry = websocket.app.state.tools
     settings: Settings = websocket.app.state.settings
+    workspace: str = websocket.app.state.workspace
 
     if get_session(db, session_id) is None:
         await websocket.send_json({"type": "error", "message": "session not found"})
         await websocket.close()
         return
+
+    tools: ToolRegistry = build_document_tools(db, workspace, session_id)
 
     # CATALOG-13: starter suggestions for an empty session so the chat shows
     # quick-reply buttons before the first message.
