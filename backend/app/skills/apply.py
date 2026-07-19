@@ -35,6 +35,7 @@ from app.agent.runner import _run_agent_core
 from app.agent.trace import Trace, TraceEntry
 from app.documents.extract import extract_text
 from app.documents.ingest import build_doc_path
+from app.documents.obsidian import build_title_to_stem_map, rewrite_wiki_links
 from app.llm.base import LLMProvider, Message
 from app.skills.config import SkillConfig
 from app.skills.repo_run import create_run, finish_run, get_run
@@ -226,15 +227,25 @@ async def _apply_core(
         else:
             # ---- Agent path (ADR-0001/0002) ----
             # Build the start message listing every input document (CATALOG-4).
+            link_hint = (
+                "Если ссылаешься на документы Obsidian-линком [[...]], "
+                "используй имя файла (stem без расширения и пути), а не title."
+            )
+            stem_lines = "\n".join(
+                f"- «{d.title}» → [[{Path(d.path).stem}]]" for d in docs
+            )
             if len(docs) == 1:
                 start_content = (
-                    f"Обработай документ {input_doc_ids[0]} ({docs[0].title})."
+                    f"Обработай документ {input_doc_ids[0]} ({docs[0].title}).\n"
+                    f"{link_hint}\n{stem_lines}"
                 )
             else:
                 listing = ", ".join(
                     f"{did} ({d.title})" for did, d in zip(input_doc_ids, docs)
                 )
-                start_content = f"Обработай документы: {listing}."
+                start_content = (
+                    f"Обработай документы: {listing}.\n{link_hint}\n{stem_lines}"
+                )
             user_msg = Message(role="user", content=start_content)
             messages: list[Message] = [user_msg]
 
@@ -315,8 +326,11 @@ async def _apply_core(
             )
             results_dir = Path(workspace_dir) / "results"
             results_dir.mkdir(parents=True, exist_ok=True)
+            last_text = rewrite_wiki_links(
+                last_text or "", build_title_to_stem_map(db)
+            )
             (Path(workspace_dir) / rel_path).write_text(
-                last_text or "", encoding="utf-8"
+                last_text, encoding="utf-8"
             )
             output_doc_id = out_id
             if session_id is not None:

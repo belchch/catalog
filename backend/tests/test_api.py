@@ -1331,6 +1331,47 @@ def test_save_run_result_materializes_preview_into_document(
     assert resp2.status_code == 409
 
 
+def test_save_run_result_rewrites_obsidian_links(client, provider, db) -> None:
+    linked_id = _upload(client, "ekonomiya-tokenov.md", b"token savings")
+    linked = get_document(db, linked_id)
+    assert linked is not None
+    with db.connect() as conn:
+        conn.execute(
+            "UPDATE document SET title = ? WHERE id = ?",
+            ("Экономия токенов", linked_id),
+        )
+    stem = Path(linked.path).stem
+
+    doc_id = _upload(client, "input.md", b"source text")
+    skill_id = _seed_committed_skill(
+        db, verify_checks=[VerifyCheck("non_empty")], max_retries=2
+    )
+    provider.script = [_completion("См. [[Экономия токенов]].")]
+
+    run_id = client.post(
+        f"/skills/{skill_id}/apply", json={"doc_id": doc_id, "persist": False}
+    ).json()["run_id"]
+    _drain_run_ws(client, run_id)
+
+    run_before = client.get(f"/runs/{run_id}").json()
+    assert run_before["result_text"] == "См. [[Экономия токенов]]."
+
+    resp = client.post(f"/runs/{run_id}/save")
+    assert resp.status_code == 200, resp.text
+    saved = resp.json()
+
+    run_after = client.get(f"/runs/{run_id}").json()
+    assert run_after["result_text"] == "См. [[Экономия токенов]]."
+
+    out_doc = get_document(db, saved["id"])
+    assert out_doc is not None
+    file_text = (Path(client.app.state.workspace) / out_doc.path).read_text(
+        encoding="utf-8"
+    )
+    assert f"[[{stem}]]" in file_text
+    assert "[[Экономия токенов]]" not in file_text
+
+
 def test_save_run_result_attaches_to_session(client, provider, db) -> None:
     session_id = client.post("/sessions").json()["id"]
     doc_id = _upload(client, "input.md", b"source text")

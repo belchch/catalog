@@ -1,0 +1,241 @@
+from __future__ import annotations
+
+import asyncio
+from pathlib import Path
+from typing import Any
+
+import pytest
+
+from app.documents.ingest import ingest_file
+from app.documents.obsidian import build_title_to_stem_map, rewrite_wiki_links
+from app.documents.tools import build_document_tools
+from app.llm.base import CompletionResult, Message, ModelInfo, StreamDelta, ToolSpec
+from app.skills.apply import apply_skill_collect
+from app.skills.config import SkillConfig, VerifyCheck
+from app.skills.repo_skill import create_skill
+from app.storage.db import Database
+from app.storage.repo_document import create_document, get_document
+
+
+class ScriptProvider:
+    def __init__(self, script: list[CompletionResult]) -> None:
+        self.script: list[CompletionResult] = list(script)
+
+    async def list_models(self) -> list[ModelInfo]:
+        return []
+
+    async def complete(
+        self,
+        model: str,
+        messages: list[Message],
+        tools: list[ToolSpec] | None = None,
+        temperature: float = 0.0,
+        tool_choice: str = "auto",
+        reasoning: str = "",
+    ) -> CompletionResult:
+        return self.script.pop(0)
+
+    async def stream_complete(
+        self,
+        model: str,
+        messages: list[Message],
+        tools: list[ToolSpec] | None = None,
+        temperature: float = 0.0,
+        reasoning: str = "",
+    ) -> Any:
+        yield StreamDelta(content="")
+
+
+@pytest.fixture()
+def db() -> Database:
+    d = Database(":memory:")
+    d.init_schema()
+    return d
+
+
+@pytest.fixture()
+def workspace(tmp_path: Path) -> Path:
+    return tmp_path
+
+
+def _result(content: str) -> CompletionResult:
+    return CompletionResult(content=content, tool_calls=[], finish_reason="stop")
+
+
+def test_rewrite_wiki_links_title_to_stem() -> None:
+    mapping = {"Экономия токенов": "ekonomiya-tokov-abc12345"}
+    assert (
+        rewrite_wiki_links("[[Экономия токенов]] abc", mapping)
+        == "[[ekonomiya-tokov-abc12345]] abc"
+    )
+
+
+def test_rewrite_wiki_links_alias() -> None:
+    mapping = {"Экономия токенов": "ekonomiya-tokov-abc12345"}
+    assert (
+        rewrite_wiki_links("[[Экономия токенов|раздел]]", mapping)
+        == "[[ekonomiya-tokov-abc12345|раздел]]"
+    )
+
+
+def test_rewrite_wiki_links_heading() -> None:
+    mapping = {"Экономия токенов": "ekonomiya-tokov-abc12345"}
+    assert (
+        rewrite_wiki_links("[[Экономия токенов#Введение]]", mapping)
+        == "[[ekonomiya-tokov-abc12345#Введение]]"
+    )
+
+
+def test_rewrite_wiki_links_heading_and_alias() -> None:
+    mapping = {"Экономия токенов": "ekonomiya-tokov-abc12345"}
+    assert (
+        rewrite_wiki_links("[[Экономия токенов#Введение|раздел]]", mapping)
+        == "[[ekonomiya-tokov-abc12345#Введение|раздел]]"
+    )
+
+
+def test_rewrite_wiki_links_unknown_unchanged() -> None:
+    mapping = {"Экономия токенов": "ekonomiya-tokov-abc12345"}
+    assert rewrite_wiki_links("[[unknown]]", mapping) == "[[unknown]]"
+
+
+def test_rewrite_wiki_links_already_stem_unchanged() -> None:
+    mapping = {"Экономия токенов": "ekonomiya-tokov-abc12345"}
+    assert (
+        rewrite_wiki_links("[[ekonomiya-tokov-abc12345]]", mapping)
+        == "[[ekonomiya-tokov-abc12345]]"
+    )
+
+
+def test_rewrite_wiki_links_special_chars_in_title() -> None:
+    mapping = {"A & B (draft)": "a-b-draft-abc12345"}
+    assert (
+        rewrite_wiki_links("see [[A & B (draft)]] please", mapping)
+        == "see [[a-b-draft-abc12345]] please"
+    )
+
+
+def test_build_title_to_stem_map(db: Database) -> None:
+    create_document(
+        db,
+        title="Экономия токенов",
+        path="documents/ekonomiya-tokov-abc12345.md",
+        kind="md",
+    )
+    create_document(
+        db,
+        title="Cover letter",
+        path="documents/cover-letter-spiiran-ntbvt-java-ea411722.md",
+        kind="md",
+    )
+    mapping = build_title_to_stem_map(db)
+    assert mapping["Экономия токенов"] == "ekonomiya-tokov-abc12345"
+    assert mapping["Cover letter"] == "cover-letter-spiiran-ntbvt-java-ea411722"
+
+
+def test_apply_persist_rewrites_obsidian_links(
+    db: Database, workspace: Path
+) -> None:
+    linked = create_document(
+        db,
+        title="Экономия токенов",
+        path="documents/ekonomiya-tokov-abc12345.md",
+        kind="md",
+    )
+    (workspace / "documents").mkdir(parents=True, exist_ok=True)
+    (workspace / linked.path).write_text("token savings", encoding="utf-8")
+
+    input_doc = ingest_file(
+        db, workspace, filename="input.md", content=b"source text"
+    )
+    skill = SkillConfig(
+        name="linker",
+        description="test",
+        system_prompt="Link docs.",
+        allowed_tools=["read_document"],
+        model="test/model",
+        temperature=0.0,
+        max_iterations=4,
+        max_retries=0,
+        verify_checks=[VerifyCheck("non_empty")],
+    )
+    skill_id = create_skill(
+        db, name=skill.name, description=skill.description, config=skill
+    )
+    provider = ScriptProvider(
+        [_result("См. [[Экономия токенов]] и [[unknown]].")]
+    )
+
+    result = asyncio.run(
+        apply_skill_collect(
+            provider=provider,
+            db=db,
+            workspace_dir=str(workspace),
+            skill=skill,
+            skill_id=skill_id,
+            input_doc_ids=[input_doc.id],
+            base_tools=build_document_tools(db, workspace),
+        )
+    )
+
+    assert result.status == "ok"
+    assert result.output_doc_id is not None
+    assert "[[ekonomiya-tokov-abc12345]]" in (result.result_text or "")
+    assert "[[Экономия токенов]]" not in (result.result_text or "")
+    assert "[[unknown]]" in (result.result_text or "")
+
+    out_doc = get_document(db, result.output_doc_id)
+    assert out_doc is not None
+    file_text = (workspace / out_doc.path).read_text(encoding="utf-8")
+    assert "[[ekonomiya-tokov-abc12345]]" in file_text
+    assert "[[Экономия токенов]]" not in file_text
+
+
+def test_apply_prompt_mentions_file_stem(
+    db: Database, workspace: Path
+) -> None:
+    input_doc = ingest_file(
+        db, workspace, filename="input.md", content=b"source text"
+    )
+    skill = SkillConfig(
+        name="linker",
+        description="test",
+        system_prompt="Link docs.",
+        allowed_tools=["read_document"],
+        model="test/model",
+        temperature=0.0,
+        max_iterations=4,
+        max_retries=0,
+        verify_checks=[],
+    )
+    skill_id = create_skill(
+        db, name=skill.name, description=skill.description, config=skill
+    )
+    seen: list[str] = []
+    provider = ScriptProvider([_result("ok")])
+    original_complete = provider.complete
+
+    async def capturing_complete(*args, **kwargs):
+        messages = kwargs.get("messages") or args[1]
+        for m in messages:
+            if m.role == "user" and isinstance(m.content, str):
+                seen.append(m.content)
+        return await original_complete(*args, **kwargs)
+
+    provider.complete = capturing_complete  # type: ignore[method-assign]
+
+    asyncio.run(
+        apply_skill_collect(
+            provider=provider,
+            db=db,
+            workspace_dir=str(workspace),
+            skill=skill,
+            skill_id=skill_id,
+            input_doc_ids=[input_doc.id],
+            base_tools=build_document_tools(db, workspace),
+        )
+    )
+
+    assert seen
+    assert "имя файла" in seen[0]
+    assert Path(input_doc.path).stem in seen[0]

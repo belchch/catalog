@@ -31,6 +31,7 @@ from app.api.deps import agent_event_to_frame, get_db, get_workspace
 from app.api.schemas import ApplyRequest, DocumentOut, RunCreated, RunOut
 from app.api.sessions import _is_cancel_frame
 from app.documents.ingest import build_doc_path
+from app.documents.obsidian import build_title_to_stem_map, rewrite_wiki_links
 from app.llm.base import LLMProvider
 from app.llm.factory import provider_for_skill, provider_name_for_skill
 from app.llm.log_context import prompt_log_context
@@ -130,7 +131,10 @@ async def save_run_result_endpoint(
     )
     results_dir = Path(workspace) / "results"
     results_dir.mkdir(parents=True, exist_ok=True)
-    (Path(workspace) / rel_path).write_text(run["result_text"], encoding="utf-8")
+    file_text = rewrite_wiki_links(
+        run["result_text"], build_title_to_stem_map(db)
+    )
+    (Path(workspace) / rel_path).write_text(file_text, encoding="utf-8")
     set_output_doc_id(db, run_id, out_id)
     if run["session_id"] is not None:
         attach_documents(db, run["session_id"], [out_id])
