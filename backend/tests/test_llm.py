@@ -288,6 +288,52 @@ def test_complete_retries_on_timeout() -> None:
     asyncio.run(_run())
 
 
+def test_complete_exhausted_timeout_raises_llm_timeout_error() -> None:
+    from app.llm.timeout import LLMTimeoutError, llm_timeout_context
+
+    async def _run() -> None:
+        calls = {"n": 0}
+
+        async def handler(request: httpx.Request) -> httpx.Response:
+            calls["n"] += 1
+            raise httpx.ReadTimeout("slow", request=request)
+
+        provider = _make_provider(handler, max_retries=2, backoff_base=0)
+        with llm_timeout_context(45.0):
+            with pytest.raises(LLMTimeoutError, match="timed out after 45s") as exc_info:
+                await provider.complete(
+                    model="openai/gpt-4",
+                    messages=[Message(role="user", content="Hi")],
+                )
+        assert exc_info.value.timeout_seconds == 45.0
+        assert calls["n"] == 3
+
+    asyncio.run(_run())
+
+
+def test_complete_uses_session_timeout_override() -> None:
+    from app.llm.timeout import llm_timeout_context
+
+    async def _run() -> None:
+        seen: dict[str, object] = {}
+
+        async def handler(request: httpx.Request) -> httpx.Response:
+            seen["timeout"] = request.extensions.get("timeout")
+            return _ok_response()
+
+        provider = _make_provider(handler, max_retries=0, backoff_base=0)
+        with llm_timeout_context(90.0):
+            await provider.complete(
+                model="openai/gpt-4",
+                messages=[Message(role="user", content="Hi")],
+            )
+        timeout = seen.get("timeout")
+        assert timeout is not None
+        assert float(timeout["read"]) == 90.0  # type: ignore[index]
+
+    asyncio.run(_run())
+
+
 def test_auth_error_not_retried() -> None:
     """A 401 is permanent: it surfaces immediately without retrying."""
 

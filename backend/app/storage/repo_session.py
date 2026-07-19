@@ -11,9 +11,14 @@ import uuid
 from dataclasses import dataclass
 from datetime import datetime, timezone
 
+from app.llm.timeout import DEFAULT_LLM_TIMEOUT_SECONDS
 from app.storage.db import Database
 
 _TITLE_MAX_LEN = 80
+
+_SESSION_COLUMNS = (
+    "id, status, created_at, skill_id, title, updated_at, llm_timeout_seconds"
+)
 
 
 @dataclass
@@ -24,6 +29,7 @@ class SessionRow:
     skill_id: str | None = None
     title: str | None = None
     updated_at: str | None = None
+    llm_timeout_seconds: int = DEFAULT_LLM_TIMEOUT_SECONDS
 
 
 def _now_iso() -> str:
@@ -40,6 +46,10 @@ def _title_from_content(content: str) -> str:
 def _row_to_session(row: sqlite3.Row) -> SessionRow:
     created_at = row["created_at"]
     updated_at = row["updated_at"] if "updated_at" in row.keys() else None
+    if "llm_timeout_seconds" in row.keys() and row["llm_timeout_seconds"] is not None:
+        timeout = int(row["llm_timeout_seconds"])
+    else:
+        timeout = DEFAULT_LLM_TIMEOUT_SECONDS
     return SessionRow(
         id=row["id"],
         status=row["status"],
@@ -47,6 +57,7 @@ def _row_to_session(row: sqlite3.Row) -> SessionRow:
         skill_id=row["skill_id"],
         title=row["title"] if "title" in row.keys() else None,
         updated_at=updated_at or created_at,
+        llm_timeout_seconds=timeout,
     )
 
 
@@ -62,9 +73,16 @@ def create_session(
     now = _now_iso()
     with db.connect() as conn:
         conn.execute(
-            "INSERT INTO session(id, status, created_at, skill_id, title, updated_at) "
-            "VALUES (?, ?, ?, ?, NULL, ?)",
-            (session_id, status, now, skill_id, now),
+            "INSERT INTO session(id, status, created_at, skill_id, title, updated_at, "
+            "llm_timeout_seconds) VALUES (?, ?, ?, ?, NULL, ?, ?)",
+            (
+                session_id,
+                status,
+                now,
+                skill_id,
+                now,
+                DEFAULT_LLM_TIMEOUT_SECONDS,
+            ),
         )
     return session_id
 
@@ -72,8 +90,7 @@ def create_session(
 def get_session(db: Database, session_id: str) -> SessionRow | None:
     with db.connect() as conn:
         row = conn.execute(
-            "SELECT id, status, created_at, skill_id, title, updated_at "
-            "FROM session WHERE id = ?",
+            f"SELECT {_SESSION_COLUMNS} FROM session WHERE id = ?",
             (session_id,),
         ).fetchone()
     return _row_to_session(row) if row is not None else None
@@ -89,7 +106,7 @@ def list_sessions(
     params: list[object] = []
     if status is not None:
         sql = (
-            "SELECT id, status, created_at, skill_id, title, updated_at "
+            f"SELECT {_SESSION_COLUMNS} "
             "FROM session WHERE status = ? "
             "ORDER BY COALESCE(updated_at, created_at) DESC, created_at DESC "
             "LIMIT ? OFFSET ?"
@@ -97,7 +114,7 @@ def list_sessions(
         params.extend([status, limit, offset])
     else:
         sql = (
-            "SELECT id, status, created_at, skill_id, title, updated_at "
+            f"SELECT {_SESSION_COLUMNS} "
             "FROM session "
             "ORDER BY COALESCE(updated_at, created_at) DESC, created_at DESC "
             "LIMIT ? OFFSET ?"
@@ -153,3 +170,16 @@ def update_session_status(db: Database, session_id: str, status: str) -> None:
             "UPDATE session SET status = ? WHERE id = ?",
             (status, session_id),
         )
+
+
+def update_session_llm_timeout(
+    db: Database, session_id: str, llm_timeout_seconds: int
+) -> SessionRow | None:
+    with db.connect() as conn:
+        cur = conn.execute(
+            "UPDATE session SET llm_timeout_seconds = ? WHERE id = ?",
+            (llm_timeout_seconds, session_id),
+        )
+        if cur.rowcount == 0:
+            return None
+    return get_session(db, session_id)

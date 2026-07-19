@@ -30,6 +30,11 @@ from app.api.schemas import (
 from app.config import Settings
 from app.llm.base import LLMProvider, Message, ToolSpec
 from app.llm.log_context import prompt_log_context
+from app.llm.timeout import (
+    DEFAULT_LLM_TIMEOUT_SECONDS,
+    LLMTimeoutError,
+    llm_timeout_context,
+)
 from app.agent.registry import ToolRegistry
 from app.skills.config import SkillConfig, VerifyCheck, compute_tags
 from app.skills.repo_skill import (
@@ -384,7 +389,24 @@ async def _build_skill_from_session_llm(
 
     raise HTTPException(
         status_code=422,
-        detail="failed to build a valid skill after retries",
+        detail=(
+            "failed to build a valid skill after retries; "
+            "the model did not produce a valid SkillConfig. "
+            "Refine the plan or retry; if calls are slow, increase the "
+            "session LLM timeout and try again."
+        ),
+    )
+
+
+def _build_timeout_detail(exc: LLMTimeoutError, timeout_seconds: int) -> str:
+    seconds = (
+        int(exc.timeout_seconds)
+        if exc.timeout_seconds is not None
+        else timeout_seconds
+    )
+    return (
+        f"skill build timed out after {seconds}s. "
+        "Increase the session LLM timeout (30–300s) and retry."
     )
 
 
@@ -406,13 +428,35 @@ async def build_skill_from_session(
     )
     if packed is not None:
         return packed
-    return await _build_skill_from_session_llm(
-        provider=provider,
-        db=db,
-        base_tools=base_tools,
-        session_id=session_id,
-        model_default=model_default,
+    session_row = get_session(db, session_id)
+    timeout = (
+        session_row.llm_timeout_seconds
+        if session_row is not None
+        else DEFAULT_LLM_TIMEOUT_SECONDS
     )
+    try:
+        with llm_timeout_context(float(timeout)):
+            return await _build_skill_from_session_llm(
+                provider=provider,
+                db=db,
+                base_tools=base_tools,
+                session_id=session_id,
+                model_default=model_default,
+            )
+    except LLMTimeoutError as exc:
+        raise HTTPException(
+            status_code=504,
+            detail=_build_timeout_detail(exc, timeout),
+        ) from exc
+    except RuntimeError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                f"skill build failed: {exc}. "
+                "If the provider is slow, increase the session LLM timeout "
+                "and retry."
+            ),
+        ) from exc
 
 
 def seed_session_artifacts_from_skill(

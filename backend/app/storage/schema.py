@@ -19,7 +19,8 @@ CREATE TABLE IF NOT EXISTS session(
   id TEXT PRIMARY KEY, status TEXT NOT NULL, created_at TEXT NOT NULL,
   skill_id TEXT,                   -- nullable; set when editing an existing skill (CATALOG-17)
   title TEXT,
-  updated_at TEXT NOT NULL
+  updated_at TEXT NOT NULL,
+  llm_timeout_seconds INTEGER NOT NULL DEFAULT 60
 );                                -- status: planning|done
 CREATE TABLE IF NOT EXISTS session_document(
   session_id TEXT NOT NULL,
@@ -80,4 +81,9 @@ ADDITIVE_MIGRATIONS: list[tuple[str, str, str]] = [
     ("skill_run", "user_prompt", "ALTER TABLE skill_run ADD COLUMN user_prompt TEXT"),
     ("session", "title", "ALTER TABLE session ADD COLUMN title TEXT"),
     ("session", "updated_at", "ALTER TABLE session ADD COLUMN updated_at TEXT"),
+    (
+        "session",
+        "llm_timeout_seconds",
+        "ALTER TABLE session ADD COLUMN llm_timeout_seconds INTEGER NOT NULL DEFAULT 60",
+    ),
 ]

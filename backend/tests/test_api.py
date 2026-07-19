@@ -962,6 +962,68 @@ def test_build_skill_invalid_allowed_tools_returns_422(client, provider, db) -> 
 
     resp = client.post(f"/sessions/{session_id}/skills")
     assert resp.status_code == 422
+    detail = resp.json()["detail"]
+    assert "failed to build a valid skill after retries" in detail
+    assert "session LLM timeout" in detail
+
+
+def test_build_skill_timeout_returns_504(client, provider, db) -> None:
+    from app.llm.timeout import LLMTimeoutError
+
+    session_id = client.post("/sessions").json()["id"]
+    add_message(db, session_id=session_id, role="user", content="make a skill")
+
+    async def _timeout(*_args, **_kwargs):
+        raise LLMTimeoutError(
+            "openrouter request timed out after 60s (3 retries exhausted)",
+            timeout_seconds=60,
+        )
+
+    provider.complete = _timeout  # type: ignore[method-assign]
+
+    resp = client.post(f"/sessions/{session_id}/skills")
+    assert resp.status_code == 504
+    detail = resp.json()["detail"]
+    assert "timed out after 60s" in detail
+    assert "Increase the session LLM timeout" in detail
+
+
+def test_session_timeout_default_and_patch(client) -> None:
+    session_id = client.post("/sessions").json()["id"]
+
+    got = client.get(f"/sessions/{session_id}")
+    assert got.status_code == 200
+    assert got.json()["llm_timeout_seconds"] == 60
+
+    listed = client.get("/sessions").json()
+    by_id = {s["id"]: s for s in listed}
+    assert by_id[session_id]["llm_timeout_seconds"] == 60
+
+    patched = client.patch(
+        f"/sessions/{session_id}",
+        json={"llm_timeout_seconds": 120},
+    )
+    assert patched.status_code == 200, patched.text
+    assert patched.json()["llm_timeout_seconds"] == 120
+    assert client.get(f"/sessions/{session_id}").json()["llm_timeout_seconds"] == 120
+
+    too_low = client.patch(
+        f"/sessions/{session_id}",
+        json={"llm_timeout_seconds": 10},
+    )
+    assert too_low.status_code == 422
+
+    too_high = client.patch(
+        f"/sessions/{session_id}",
+        json={"llm_timeout_seconds": 999},
+    )
+    assert too_high.status_code == 422
+
+    missing = client.patch(
+        "/sessions/does-not-exist",
+        json={"llm_timeout_seconds": 90},
+    )
+    assert missing.status_code == 404
 
 
 def test_build_script_skill_valid_code(client, provider, db) -> None:

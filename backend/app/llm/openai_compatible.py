@@ -30,6 +30,7 @@ from app.llm.base import (
     tool_specs_to_dicts,
 )
 from app.llm.prompt_log import write_prompt_log
+from app.llm.timeout import LLMTimeoutError, current_llm_timeout
 
 logger = logging.getLogger("app.llm")
 
@@ -136,6 +137,12 @@ class OpenAICompatibleProvider:
 
     # --- HTTP with retry ---------------------------------------------------
 
+    def _request_timeout(self) -> httpx.Timeout | None:
+        seconds = current_llm_timeout()
+        if seconds is None:
+            return None
+        return httpx.Timeout(seconds)
+
     async def _post_with_retry(
         self, url: str, body: dict[str, Any]
     ) -> httpx.Response:
@@ -147,12 +154,37 @@ class OpenAICompatibleProvider:
         with a clear, UI-friendly message.
         """
         resp: httpx.Response | None = None
+        timeout = self._request_timeout()
         for attempt in range(self._max_retries + 1):
             try:
-                resp = await self._client.post(
-                    url, headers=self._auth_headers(), json=body
+                post_kwargs: dict[str, Any] = {
+                    "headers": self._auth_headers(),
+                    "json": body,
+                }
+                if timeout is not None:
+                    post_kwargs["timeout"] = timeout
+                resp = await self._client.post(url, **post_kwargs)
+            except httpx.TimeoutException as exc:
+                if attempt < self._max_retries:
+                    logger.warning(
+                        "complete timeout provider=%s url=%s "
+                        "(attempt %d/%d): %s",
+                        self._provider_name,
+                        url,
+                        attempt + 1,
+                        self._max_retries,
+                        exc,
+                    )
+                    await asyncio.sleep(self._backoff_delay(attempt))
+                    continue
+                seconds = current_llm_timeout()
+                detail = (
+                    f"{self._provider_name} request timed out"
+                    + (f" after {int(seconds)}s" if seconds is not None else "")
+                    + f" ({self._max_retries} retries exhausted)"
                 )
-            except (httpx.TimeoutException, httpx.NetworkError) as exc:
+                raise LLMTimeoutError(detail, timeout_seconds=seconds) from exc
+            except httpx.NetworkError as exc:
                 if attempt < self._max_retries:
                     logger.warning(
                         "complete network error provider=%s url=%s "
@@ -415,13 +447,15 @@ class OpenAICompatibleProvider:
         assembled_text = ""
         assembled_reasoning = ""
         http_status: int | None = None
+        stream_timeout = self._request_timeout()
+        stream_kwargs: dict[str, Any] = {
+            "headers": self._auth_headers(),
+            "json": body,
+        }
+        if stream_timeout is not None:
+            stream_kwargs["timeout"] = stream_timeout
         try:
-            async with self._client.stream(
-                "POST",
-                url,
-                headers=self._auth_headers(),
-                json=body,
-            ) as resp:
+            async with self._client.stream("POST", url, **stream_kwargs) as resp:
                 http_status = resp.status_code
                 if resp.status_code == 401:
                     raise ValueError(self._auth_error_message)
@@ -462,6 +496,34 @@ class OpenAICompatibleProvider:
                         assembled_reasoning += reasoning
                     if content or reasoning:
                         yield StreamDelta(content=content or "", reasoning=reasoning)
+        except httpx.TimeoutException as exc:
+            seconds = current_llm_timeout()
+            err = LLMTimeoutError(
+                f"{self._provider_name} stream timed out"
+                + (f" after {int(seconds)}s" if seconds is not None else ""),
+                timeout_seconds=seconds,
+            )
+            await write_prompt_log(
+                provider=self._provider_name,
+                model=model,
+                messages=messages,
+                tools=tools,
+                temperature=temperature,
+                tool_choice="auto",
+                stream=True,
+                response={
+                    "assembled_text": assembled_text,
+                    "assembled_reasoning": assembled_reasoning or None,
+                    "usage": {},
+                    "finish_reason": "error",
+                },
+                error=str(err),
+                latency_ms=round((time.monotonic() - t0) * 1000),
+                base_url=self._base_url,
+                url=url,
+                http_status=http_status,
+            )
+            raise err from exc
         except Exception as exc:
             await write_prompt_log(
                 provider=self._provider_name,

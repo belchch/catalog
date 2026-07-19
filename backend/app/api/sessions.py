@@ -36,12 +36,14 @@ from app.api.schemas import (
     SessionArtifactOut,
     SessionCreated,
     SessionOut,
+    SessionUpdate,
     SkillMetaPatchRequest,
 )
 from app.config import Settings
 from app.documents.tools import build_document_tools
 from app.llm.base import Message
 from app.llm.log_context import prompt_log_context
+from app.llm.timeout import DEFAULT_LLM_TIMEOUT_SECONDS, llm_timeout_context
 from app.skills.artifact_tools import artifacts_frame, build_artifact_tools
 from app.skills.script_runner import ScriptValidationError, validate_script
 from app.skills.verify import registered_checks
@@ -52,6 +54,7 @@ from app.storage.repo_session import (
     delete_session,
     get_session,
     list_sessions,
+    update_session_llm_timeout,
 )
 from app.storage.repo_session_artifact import (
     ARTIFACT_TYPES,
@@ -220,6 +223,18 @@ async def create_session_endpoint(db: Database = Depends(get_db)) -> SessionCrea
     return SessionCreated(id=create_session(db))
 
 
+def _session_out(row) -> SessionOut:
+    return SessionOut(
+        id=row.id,
+        status=row.status,
+        created_at=row.created_at,
+        updated_at=row.updated_at or row.created_at,
+        title=row.title,
+        skill_id=row.skill_id,
+        llm_timeout_seconds=row.llm_timeout_seconds,
+    )
+
+
 @router.get("/sessions", response_model=list[SessionOut])
 async def list_sessions_endpoint(
     limit: int = 50,
@@ -228,17 +243,30 @@ async def list_sessions_endpoint(
     db: Database = Depends(get_db),
 ) -> list[SessionOut]:
     rows = list_sessions(db, limit=limit, offset=offset, status=status)
-    return [
-        SessionOut(
-            id=r.id,
-            status=r.status,
-            created_at=r.created_at,
-            updated_at=r.updated_at or r.created_at,
-            title=r.title,
-            skill_id=r.skill_id,
-        )
-        for r in rows
-    ]
+    return [_session_out(r) for r in rows]
+
+
+@router.get("/sessions/{session_id}", response_model=SessionOut)
+async def get_session_endpoint(
+    session_id: str,
+    db: Database = Depends(get_db),
+) -> SessionOut:
+    row = get_session(db, session_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="session not found")
+    return _session_out(row)
+
+
+@router.patch("/sessions/{session_id}", response_model=SessionOut)
+async def update_session_endpoint(
+    session_id: str,
+    req: SessionUpdate,
+    db: Database = Depends(get_db),
+) -> SessionOut:
+    row = update_session_llm_timeout(db, session_id, req.llm_timeout_seconds)
+    if row is None:
+        raise HTTPException(status_code=404, detail="session not found")
+    return _session_out(row)
 
 
 @router.get("/sessions/{session_id}/messages", response_model=list[MessageOut])
@@ -592,16 +620,23 @@ async def session_ws(
                 or settings.default_model
             )
 
-            final_text, final_capped, cancelled, buffered = await _run_planner_turn(
-                websocket,
-                provider=provider,
-                model=model,
-                messages=messages,
-                tools=tools,
-                db=db,
-                session_id=session_id,
-                system_prompt=_planner_system_prompt(db, session_id),
+            session_row = get_session(db, session_id)
+            timeout = (
+                session_row.llm_timeout_seconds
+                if session_row is not None
+                else DEFAULT_LLM_TIMEOUT_SECONDS
             )
+            with llm_timeout_context(float(timeout)):
+                final_text, final_capped, cancelled, buffered = await _run_planner_turn(
+                    websocket,
+                    provider=provider,
+                    model=model,
+                    messages=messages,
+                    tools=tools,
+                    db=db,
+                    session_id=session_id,
+                    system_prompt=_planner_system_prompt(db, session_id),
+                )
 
             # Emit the final assistant text as a single token frame (collect
             # mode does not stream tokens incrementally — see module docstring).

@@ -99,6 +99,11 @@ class SessionOut(BaseModel):
     updated_at: str
     title: str | None = None
     skill_id: str | None = None
+    llm_timeout_seconds: int = 60
+
+
+class SessionUpdate(BaseModel):
+    llm_timeout_seconds: int = Field(..., ge=30, le=300)
 
 
 class MessageOut(BaseModel):
