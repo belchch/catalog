@@ -988,6 +988,24 @@ def test_build_skill_timeout_returns_504(client, provider, db) -> None:
     assert "Increase the session LLM timeout" in detail
 
 
+def test_build_skill_provider_runtime_error_not_timeout_advice(
+    client, provider, db
+) -> None:
+    session_id = client.post("/sessions").json()["id"]
+    add_message(db, session_id=session_id, role="user", content="make a skill")
+
+    async def _rate_limited(*_args, **_kwargs):
+        raise RuntimeError("OpenRouter returned HTTP 429 after 3 retries")
+
+    provider.complete = _rate_limited  # type: ignore[method-assign]
+
+    resp = client.post(f"/sessions/{session_id}/skills")
+    assert resp.status_code == 502
+    detail = resp.json()["detail"]
+    assert "429" in detail
+    assert "session LLM timeout" not in detail.lower()
+
+
 def test_session_timeout_default_and_patch(client) -> None:
     session_id = client.post("/sessions").json()["id"]
 

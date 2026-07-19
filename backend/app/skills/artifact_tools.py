@@ -130,8 +130,11 @@ def build_artifact_tools(
             available_tools=available_tools,
             available_checks=available_checks,
         )
+        name_text = name.strip() if isinstance(name, str) else ""
+        if not name_text:
+            errors.append("name must be non-empty")
         payload = {
-            "name": name,
+            "name": name_text,
             "description": description,
             "kind": kind,
             "input_arity": input_arity,

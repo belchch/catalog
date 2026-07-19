@@ -30,7 +30,12 @@ from app.llm.base import (
     tool_specs_to_dicts,
 )
 from app.llm.prompt_log import write_prompt_log
-from app.llm.timeout import LLMTimeoutError, current_llm_timeout
+from app.llm.timeout import (
+    LLMTimeoutError,
+    current_llm_deadline,
+    current_llm_timeout,
+    remaining_llm_timeout,
+)
 
 logger = logging.getLogger("app.llm")
 
@@ -138,10 +143,12 @@ class OpenAICompatibleProvider:
     # --- HTTP with retry ---------------------------------------------------
 
     def _request_timeout(self) -> httpx.Timeout | None:
-        seconds = current_llm_timeout()
-        if seconds is None:
+        remaining = remaining_llm_timeout()
+        if remaining is None:
             return None
-        return httpx.Timeout(seconds)
+        if remaining <= 0:
+            raise self._llm_timeout_error()
+        return httpx.Timeout(remaining)
 
     def _llm_timeout_error(self, *, retries_exhausted: bool = False) -> LLMTimeoutError:
         seconds = current_llm_timeout()
@@ -173,10 +180,7 @@ class OpenAICompatibleProvider:
         with a clear, UI-friendly message.
         """
         resp: httpx.Response | None = None
-        total_timeout = current_llm_timeout()
-        deadline = (
-            time.monotonic() + total_timeout if total_timeout is not None else None
-        )
+        deadline = current_llm_deadline()
         for attempt in range(self._max_retries + 1):
             try:
                 post_kwargs: dict[str, Any] = {
@@ -484,14 +488,14 @@ class OpenAICompatibleProvider:
         assembled_text = ""
         assembled_reasoning = ""
         http_status: int | None = None
-        stream_timeout = self._request_timeout()
-        stream_kwargs: dict[str, Any] = {
-            "headers": self._auth_headers(),
-            "json": body,
-        }
-        if stream_timeout is not None:
-            stream_kwargs["timeout"] = stream_timeout
         try:
+            stream_timeout = self._request_timeout()
+            stream_kwargs: dict[str, Any] = {
+                "headers": self._auth_headers(),
+                "json": body,
+            }
+            if stream_timeout is not None:
+                stream_kwargs["timeout"] = stream_timeout
             async with self._client.stream("POST", url, **stream_kwargs) as resp:
                 http_status = resp.status_code
                 if resp.status_code == 401:

@@ -96,6 +96,29 @@ def test_save_skill_script_valid(mem_db: Database) -> None:
     assert row.content == code
 
 
+def test_set_skill_meta_rejects_empty_name(mem_db: Database) -> None:
+    session_id = create_session(mem_db)
+    tools = build_artifact_tools(
+        mem_db, session_id, available_tools=["read_document"]
+    )
+    _, set_meta = tools.get("set_skill_meta")
+
+    async def _run():
+        return await set_meta(
+            name="   ",
+            description="x",
+            kind="agent",
+            allowed_tools=["read_document"],
+        )
+
+    result = asyncio.run(_run())
+    assert result["ok"] is False
+    assert "name" in (result.get("error") or "").lower()
+    row = get_artifact(mem_db, session_id, "meta")
+    assert row is not None
+    assert row.is_valid is False
+
+
 def test_patch_artifacts_meta_rejects_empty_name(client) -> None:
     session_id = client.post("/sessions").json()["id"]
     resp = client.patch(

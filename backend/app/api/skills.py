@@ -450,12 +450,8 @@ async def build_skill_from_session(
         ) from exc
     except RuntimeError as exc:
         raise HTTPException(
-            status_code=422,
-            detail=(
-                f"skill build failed: {exc}. "
-                "If the provider is slow, increase the session LLM timeout "
-                "and retry."
-            ),
+            status_code=502,
+            detail=f"skill build failed: {exc}",
         ) from exc
 
 

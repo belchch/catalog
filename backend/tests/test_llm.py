@@ -339,6 +339,37 @@ def test_complete_timeout_is_wall_clock_across_retries() -> None:
     asyncio.run(_run())
 
 
+def test_complete_timeout_budget_shared_across_calls() -> None:
+    from app.llm.timeout import LLMTimeoutError, llm_timeout_context
+
+    async def _run() -> None:
+        calls = {"n": 0}
+
+        async def handler(request: httpx.Request) -> httpx.Response:
+            calls["n"] += 1
+            await asyncio.sleep(1.1)
+            return _ok_response()
+
+        provider = _make_provider(handler, max_retries=0, backoff_base=0)
+        t0 = time.monotonic()
+        with llm_timeout_context(1.0):
+            await provider.complete(
+                model="openai/gpt-4",
+                messages=[Message(role="user", content="first")],
+            )
+            with pytest.raises(LLMTimeoutError, match="timed out after 1s") as exc_info:
+                await provider.complete(
+                    model="openai/gpt-4",
+                    messages=[Message(role="user", content="second")],
+                )
+        elapsed = time.monotonic() - t0
+        assert exc_info.value.timeout_seconds == 1.0
+        assert calls["n"] == 1
+        assert elapsed < 2.0
+
+    asyncio.run(_run())
+
+
 def test_complete_uses_session_timeout_override() -> None:
     from app.llm.timeout import llm_timeout_context
 
