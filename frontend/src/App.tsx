@@ -351,6 +351,8 @@ export default function App() {
         <SkillSettingsModal
           skillId={settingsSkill.skillId}
           preview={settingsSkill.preview}
+          defaultProvider={settingsHook.provider}
+          defaultModel={settingsHook.model}
           onSave={handleSkillConfigured}
           onClose={() => {
             void skillsHook.refresh()

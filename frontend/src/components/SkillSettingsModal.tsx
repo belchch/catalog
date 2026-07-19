@@ -12,6 +12,8 @@ import { ModelCombobox } from './ModelCombobox.tsx'
 interface SkillSettingsModalProps {
   skillId: string
   preview: SkillPreview
+  defaultProvider: string
+  defaultModel: string
   onSave: () => Promise<void>
   onClose: () => void
 }
@@ -29,13 +31,20 @@ const ARITY_OPTIONS: { value: InputArity; label: string }[] = [
   { value: null, label: 'Список' },
 ]
 
-export function SkillSettingsModal({ skillId, preview, onSave, onClose }: SkillSettingsModalProps) {
+export function SkillSettingsModal({
+  skillId,
+  preview,
+  defaultProvider,
+  defaultModel,
+  onSave,
+  onClose,
+}: SkillSettingsModalProps) {
   const [models, setModels] = useState<ModelOut[]>([])
   const [providers, setProviders] = useState<ProviderOut[]>([])
   const [name, setName] = useState(preview.name)
   const [inputArity, setInputArity] = useState<InputArity>(() => initialArity(preview.input_arity))
-  const [model, setModel] = useState(preview.model)
-  const [provider, setProvider] = useState(preview.provider)
+  const [model, setModel] = useState(preview.model || defaultModel)
+  const [provider, setProvider] = useState(preview.provider || defaultProvider)
   const [reasoning, setReasoning] = useState(preview.reasoning)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
