@@ -89,6 +89,18 @@ def test_ensure_parent_wikilinks_idempotent_when_present() -> None:
     assert ensure_parent_wikilinks(text, ["cover-letter-ea411722"]) == text
 
 
+def test_ensure_parent_wikilinks_prefix_stem_not_enough() -> None:
+    text = "see [[foo-123456789abc]] already"
+    out = ensure_parent_wikilinks(text, ["foo-12345678"])
+    assert "Источник: [[foo-12345678]]" in out
+    assert "[[foo-123456789abc]]" in out
+
+
+def test_ensure_parent_wikilinks_alias_counts_as_present() -> None:
+    text = "see [[cover-letter-ea411722|письмо]]"
+    assert ensure_parent_wikilinks(text, ["cover-letter-ea411722"]) == text
+
+
 def test_ensure_parent_wikilinks_heading_counts_as_present() -> None:
     text = "see [[cover-letter-ea411722#Intro]]"
     assert ensure_parent_wikilinks(text, ["cover-letter-ea411722"]) == text

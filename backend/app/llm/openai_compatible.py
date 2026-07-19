@@ -143,6 +143,25 @@ class OpenAICompatibleProvider:
             return None
         return httpx.Timeout(seconds)
 
+    def _llm_timeout_error(self, *, retries_exhausted: bool = False) -> LLMTimeoutError:
+        seconds = current_llm_timeout()
+        detail = f"{self._provider_name} request timed out"
+        if seconds is not None:
+            detail += f" after {int(seconds)}s"
+        if retries_exhausted:
+            detail += f" ({self._max_retries} retries exhausted)"
+        return LLMTimeoutError(detail, timeout_seconds=seconds)
+
+    async def _sleep_for_retry(self, attempt: int, deadline: float | None) -> None:
+        delay = self._backoff_delay(attempt)
+        if deadline is not None:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise self._llm_timeout_error()
+            delay = min(delay, remaining)
+        if delay > 0:
+            await asyncio.sleep(delay)
+
     async def _post_with_retry(
         self, url: str, body: dict[str, Any]
     ) -> httpx.Response:
@@ -154,49 +173,62 @@ class OpenAICompatibleProvider:
         with a clear, UI-friendly message.
         """
         resp: httpx.Response | None = None
-        timeout = self._request_timeout()
+        total_timeout = current_llm_timeout()
+        deadline = (
+            time.monotonic() + total_timeout if total_timeout is not None else None
+        )
         for attempt in range(self._max_retries + 1):
             try:
                 post_kwargs: dict[str, Any] = {
                     "headers": self._auth_headers(),
                     "json": body,
                 }
-                if timeout is not None:
-                    post_kwargs["timeout"] = timeout
+                if deadline is not None:
+                    remaining = deadline - time.monotonic()
+                    if remaining <= 0:
+                        raise self._llm_timeout_error()
+                    post_kwargs["timeout"] = httpx.Timeout(remaining)
                 resp = await self._client.post(url, **post_kwargs)
+            except LLMTimeoutError:
+                raise
             except httpx.TimeoutException as exc:
                 if attempt < self._max_retries:
-                    logger.warning(
-                        "complete timeout provider=%s url=%s "
-                        "(attempt %d/%d): %s",
-                        self._provider_name,
-                        url,
-                        attempt + 1,
-                        self._max_retries,
-                        exc,
+                    remaining = (
+                        None if deadline is None else deadline - time.monotonic()
                     )
-                    await asyncio.sleep(self._backoff_delay(attempt))
-                    continue
-                seconds = current_llm_timeout()
-                detail = (
-                    f"{self._provider_name} request timed out"
-                    + (f" after {int(seconds)}s" if seconds is not None else "")
-                    + f" ({self._max_retries} retries exhausted)"
-                )
-                raise LLMTimeoutError(detail, timeout_seconds=seconds) from exc
+                    if remaining is None or remaining > 0:
+                        logger.warning(
+                            "complete timeout provider=%s url=%s "
+                            "(attempt %d/%d): %s",
+                            self._provider_name,
+                            url,
+                            attempt + 1,
+                            self._max_retries,
+                            exc,
+                        )
+                        await self._sleep_for_retry(attempt, deadline)
+                        continue
+                raise self._llm_timeout_error(
+                    retries_exhausted=attempt >= self._max_retries
+                ) from exc
             except httpx.NetworkError as exc:
                 if attempt < self._max_retries:
-                    logger.warning(
-                        "complete network error provider=%s url=%s "
-                        "(attempt %d/%d): %s",
-                        self._provider_name,
-                        url,
-                        attempt + 1,
-                        self._max_retries,
-                        exc,
+                    remaining = (
+                        None if deadline is None else deadline - time.monotonic()
                     )
-                    await asyncio.sleep(self._backoff_delay(attempt))
-                    continue
+                    if remaining is None or remaining > 0:
+                        logger.warning(
+                            "complete network error provider=%s url=%s "
+                            "(attempt %d/%d): %s",
+                            self._provider_name,
+                            url,
+                            attempt + 1,
+                            self._max_retries,
+                            exc,
+                        )
+                        await self._sleep_for_retry(attempt, deadline)
+                        continue
+                    raise self._llm_timeout_error() from exc
                 raise RuntimeError(
                     f"{self._provider_name} request failed after "
                     f"{self._max_retries} retries: {exc}"
@@ -210,6 +242,11 @@ class OpenAICompatibleProvider:
                 resp.status_code in _RETRY_STATUS
                 and attempt < self._max_retries
             ):
+                remaining = (
+                    None if deadline is None else deadline - time.monotonic()
+                )
+                if remaining is not None and remaining <= 0:
+                    raise self._llm_timeout_error()
                 logger.warning(
                     "complete HTTP %d provider=%s url=%s "
                     "(attempt %d/%d), retrying",
@@ -219,7 +256,7 @@ class OpenAICompatibleProvider:
                     attempt + 1,
                     self._max_retries,
                 )
-                await asyncio.sleep(self._backoff_delay(attempt))
+                await self._sleep_for_retry(attempt, deadline)
                 continue
             break
 

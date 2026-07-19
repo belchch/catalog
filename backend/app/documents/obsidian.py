@@ -57,18 +57,31 @@ def rewrite_wiki_links(text: str, mapping: dict[str, str]) -> str:
     return _WIKI_LINK_RE.sub(_replace, text)
 
 
+def _wikilink_file_parts(text: str) -> set[str]:
+    parts: set[str] = set()
+    for match in _WIKI_LINK_RE.finditer(text):
+        inner = match.group(1)
+        alias_sep = inner.find("|")
+        target = inner[:alias_sep] if alias_sep >= 0 else inner
+        heading_sep = target.find("#")
+        file_part = target[:heading_sep] if heading_sep >= 0 else target
+        parts.add(file_part)
+    return parts
+
+
 def ensure_parent_wikilinks(text: str, parent_stems: list[str]) -> str:
     body = text or ""
     if not parent_stems:
         return body
 
+    linked = _wikilink_file_parts(body)
     seen: set[str] = set()
     missing: list[str] = []
     for stem in parent_stems:
         if not stem or stem in seen:
             continue
         seen.add(stem)
-        if f"[[{stem}" not in body:
+        if stem not in linked:
             missing.append(stem)
 
     if not missing:

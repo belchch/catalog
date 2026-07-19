@@ -96,6 +96,49 @@ def test_save_skill_script_valid(mem_db: Database) -> None:
     assert row.content == code
 
 
+def test_patch_artifacts_meta_rejects_empty_name(client) -> None:
+    session_id = client.post("/sessions").json()["id"]
+    resp = client.patch(
+        f"/sessions/{session_id}/artifacts/meta",
+        json={
+            "content": json.dumps(
+                {
+                    "name": "   ",
+                    "description": "x",
+                    "kind": "agent",
+                    "allowed_tools": ["read_document"],
+                },
+                ensure_ascii=False,
+            )
+        },
+    )
+    assert resp.status_code == 200
+    assert resp.json()["is_valid"] is False
+    assert "name" in (resp.json()["error"] or "").lower()
+
+
+def test_patch_artifacts_meta_rejects_missing_name(client) -> None:
+    session_id = client.post("/sessions").json()["id"]
+    resp = client.patch(
+        f"/sessions/{session_id}/artifacts/meta",
+        json={
+            "content": json.dumps(
+                {
+                    "description": "x",
+                    "kind": "agent",
+                    "allowed_tools": ["read_document"],
+                },
+                ensure_ascii=False,
+            )
+        },
+    )
+    assert resp.status_code == 200
+    assert resp.json()["is_valid"] is False
+    assert "name" in (resp.json()["error"] or "").lower()
+    build = client.post(f"/sessions/{session_id}/skills")
+    assert build.status_code == 422
+
+
 def test_build_from_artifacts_without_llm(client, provider, db) -> None:
     session_id = client.post("/sessions").json()["id"]
     client.patch(

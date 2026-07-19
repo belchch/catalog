@@ -368,14 +368,19 @@ async def patch_session_artifact_endpoint(
         allowed = list(payload.get("allowed_tools") or [])
         checks = list(payload.get("verify_checks") or [])
         errors: list[str] = []
+        name = payload.get("name")
+        if not isinstance(name, str) or not name.strip():
+            errors.append("name must be non-empty")
+        else:
+            payload["name"] = name.strip()
         if kind not in ("agent", "script"):
             errors.append(f"unknown skill kind: {kind!r}")
         else:
             if kind == "agent":
                 available = set(tools.names())
-                for name in allowed:
-                    if name not in available:
-                        errors.append(f"unknown tool: {name!r}")
+                for tool_name in allowed:
+                    if tool_name not in available:
+                        errors.append(f"unknown tool: {tool_name!r}")
             available_checks = set(registered_checks())
             for vc in checks:
                 check_id = vc.get("check") if isinstance(vc, dict) else None

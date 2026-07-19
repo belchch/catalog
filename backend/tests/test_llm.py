@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import time
 
 import httpx
 import pytest
@@ -311,6 +312,33 @@ def test_complete_exhausted_timeout_raises_llm_timeout_error() -> None:
     asyncio.run(_run())
 
 
+def test_complete_timeout_is_wall_clock_across_retries() -> None:
+    from app.llm.timeout import LLMTimeoutError, llm_timeout_context
+
+    async def _run() -> None:
+        calls = {"n": 0}
+
+        async def handler(request: httpx.Request) -> httpx.Response:
+            calls["n"] += 1
+            await asyncio.sleep(0.4)
+            raise httpx.ReadTimeout("slow", request=request)
+
+        provider = _make_provider(handler, max_retries=5, backoff_base=0)
+        t0 = time.monotonic()
+        with llm_timeout_context(1.0):
+            with pytest.raises(LLMTimeoutError, match="timed out after 1s") as exc_info:
+                await provider.complete(
+                    model="openai/gpt-4",
+                    messages=[Message(role="user", content="Hi")],
+                )
+        elapsed = time.monotonic() - t0
+        assert exc_info.value.timeout_seconds == 1.0
+        assert calls["n"] < 6
+        assert elapsed < 2.0
+
+    asyncio.run(_run())
+
+
 def test_complete_uses_session_timeout_override() -> None:
     from app.llm.timeout import llm_timeout_context
 
@@ -329,7 +357,7 @@ def test_complete_uses_session_timeout_override() -> None:
             )
         timeout = seen.get("timeout")
         assert timeout is not None
-        assert float(timeout["read"]) == 90.0  # type: ignore[index]
+        assert float(timeout["read"]) == pytest.approx(90.0, abs=0.05)  # type: ignore[index]
 
     asyncio.run(_run())
 
