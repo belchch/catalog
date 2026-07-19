@@ -2,13 +2,13 @@
 """Переключатель режима моделей для catalog-pipeline.
 
 Атомарно переписывает поле `model:` в frontmatter четырёх агентов
-catalog-* между двумя пресетами: default и glm. Не трогает parent-skill
+catalog-* между пресетами: default, glm, grok. Не трогает parent-skill
 catalog-pipeline/SKILL.md — модель parent'а выбирает пользователь в UI/CLI.
 
 Команды:
     status         показать текущий режим и результирующие модели
     list           распечатать пресеты
-    set <mode>     применить режим (default | glm)
+    set <mode>     применить режим (default | glm | grok)
 
 State-файл: .cursor/state/pipeline-model-mode.json (в .gitignore).
 """
@@ -45,6 +45,12 @@ MODES: dict[str, dict[str, str]] = {
         "catalog-designer": "glm-5.2",
         "catalog-reviewer": "claude-sonnet-5[effort=high]",
         "catalog-ui-reviewer": "gemini-3.5-flash",
+    },
+    "grok": {
+        "catalog-generator": "cursor-grok-4.5[effort=high]",
+        "catalog-designer": "cursor-grok-4.5[effort=high]",
+        "catalog-reviewer": "cursor-grok-4.5[effort=high]",
+        "catalog-ui-reviewer": "cursor-grok-4.5[effort=high]",
     },
 }
 
@@ -181,7 +187,7 @@ def main(argv: list[str]) -> int:
         return cmd_list()
     if cmd == "set":
         if len(argv) < 3:
-            print("ERROR: `set` требует аргумент: default | glm", file=sys.stderr)
+            print("ERROR: `set` требует аргумент: default | glm | grok", file=sys.stderr)
             return 2
         mode = argv[2].strip().lower()
         if mode not in MODES:

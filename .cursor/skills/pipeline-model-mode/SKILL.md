@@ -1,6 +1,6 @@
 ---
 name: pipeline-model-mode
-description: Переключает режим моделей для цепочки catalog-pipeline. Меняет `model:` в `.cursor/agents/catalog-*.md` между двумя пресетами — `default` (Grok/Claude/Gemini) и `glm` (GLM-семейство z.ai). Использовать явно через `/pipeline-model-mode <default|glm|status|list>` или когда пользователь просит переключить/показать режим моделей пайплайна.
+description: Переключает режим моделей для цепочки catalog-pipeline. Меняет `model:` в `.cursor/agents/catalog-*.md` между пресетами — `default` (Grok/Claude/Gemini), `glm` (GLM-семейство z.ai) и `grok` (все роли на Grok). Использовать явно через `/pipeline-model-mode <default|glm|grok|status|list>` или когда пользователь просит переключить/показать режим моделей пайплайна.
 disable-model-invocation: true
 ---
 
@@ -10,14 +10,14 @@ disable-model-invocation: true
 
 ## Режимы и пресеты
 
-| Роль | Файл | `default` | `glm` |
-|---|---|---|---|
-| catalog-generator | `.cursor/agents/catalog-generator.md` | `cursor-grok-4.5[effort=high]` | `glm-5-turbo` |
-| catalog-designer | `.cursor/agents/catalog-designer.md` | `claude-opus-4-8[effort=high]` | `glm-5.2` |
-| catalog-reviewer | `.cursor/agents/catalog-reviewer.md` | `claude-sonnet-5[effort=high]` | `claude-sonnet-5[effort=high]` |
-| catalog-ui-reviewer | `.cursor/agents/catalog-ui-reviewer.md` | `gemini-3.5-flash` | `gemini-3.5-flash` |
+| Роль | Файл | `default` | `glm` | `grok` |
+|---|---|---|---|---|
+| catalog-generator | `.cursor/agents/catalog-generator.md` | `cursor-grok-4.5[effort=high]` | `glm-5-turbo` | `cursor-grok-4.5[effort=high]` |
+| catalog-designer | `.cursor/agents/catalog-designer.md` | `claude-opus-4-8[effort=high]` | `glm-5.2` | `cursor-grok-4.5[effort=high]` |
+| catalog-reviewer | `.cursor/agents/catalog-reviewer.md` | `claude-sonnet-5[effort=high]` | `claude-sonnet-5[effort=high]` | `cursor-grok-4.5[effort=high]` |
+| catalog-ui-reviewer | `.cursor/agents/catalog-ui-reviewer.md` | `gemini-3.5-flash` | `gemini-3.5-flash` | `cursor-grok-4.5[effort=high]` |
 
-`reviewer` и `ui-reviewer` одинаковы в обоих режимах — пресеты оставлены в таблице явно, чтобы не было соблазна «дополировать» их под GLM.
+В `default` и `glm` у `reviewer` / `ui-reviewer` модели совпадают — пресеты оставлены в таблице явно. В `grok` все четыре роли на одном slug.
 
 Slug'и GLM — bare z.ai id (`glm-5.2`, `glm-5-turbo`), без суффикса `[effort=…]` и без префикса провайдера. Соответствуют каталогу `backend/app/llm/zai.py`.
 
@@ -35,13 +35,14 @@ python .cursor/skills/pipeline-model-mode/scripts/apply_mode.py list
 # Установить режим
 python .cursor/skills/pipeline-model-mode/scripts/apply_mode.py set default
 python .cursor/skills/pipeline-model-mode/scripts/apply_mode.py set glm
+python .cursor/skills/pipeline-model-mode/scripts/apply_mode.py set grok
 ```
 
-Допустимые значения `set`: `default`, `glm`. Любое другое → скрипт выходит с ошибкой и ниччего не меняет.
+Допустимые значения `set`: `default`, `glm`, `grok`. Любое другое → скрипт выходит с ошибкой и ничего не меняет.
 
 ## Что делает агент при запросе
 
-1. Если пользователь назвал режим (`default` / `glm`) или команду (`status` / `list`) — запусти скрипт с нужным аргументом. Имя режима нормализуй регистром (`GLM` → `glm`, `Default` → `default`).
+1. Если пользователь назвал режим (`default` / `glm` / `grok`) или команду (`status` / `list`) — запусти скрипт с нужным аргументом. Имя режима нормализуй регистром (`GLM` → `glm`, `Default` → `default`, `Grok` → `grok`).
 2. Если режим не указан — сначала `status`, затем спроси у пользователя, какой режим поставить, и только потом `set`.
 3. После `set` всегда показывай вывод скрипта целиком (проверка валидации и фактические `model:` после записи).
 4. Не комментируй решение пользователя — какой режим ставить, решает он. Если выбранный режим уже активен, сообщи об этом и ничего не меняй.
@@ -56,4 +57,4 @@ python .cursor/skills/pipeline-model-mode/scripts/apply_mode.py set glm
 
 ## Расширение пресетов
 
-Чтобы добавить третий режим (например, `cheap`): заведи новый ключ в словаре `MODES` в `scripts/apply_mode.py` с теми же четырьмя ролями и обнови таблицу выше. Сами роли (четыре файла) фиксированы архитектурой `catalog-pipeline` — добавлять/убирать роли без правки parent-skill нельзя.
+Чтобы добавить ещё один режим (например, `cheap`): заведи новый ключ в словаре `MODES` в `scripts/apply_mode.py` с теми же четырьмя ролями и обнови таблицу выше. Сами роли (четыре файла) фиксированы архитектурой `catalog-pipeline` — добавлять/убирать роли без правки parent-skill нельзя.

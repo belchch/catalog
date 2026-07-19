@@ -1,7 +1,7 @@
 ---
 name: catalog-generator
 description: Реализует один шаг pipeline (план CATALOG-*) минимальными изменениями и доводит проверки до зелёного. Не коммитит, не пушит, не создаёт PR и не трогает git branch/checkout — этим владеет parent-оркестратор catalog-pipeline. Резюмируется (resume) между циклами ревью одним и тем же agent id.
-model: glm-5-turbo
+model: cursor-grok-4.5[effort=high]
 readonly: false
 ---
 
