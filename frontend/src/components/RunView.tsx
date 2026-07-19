@@ -1,7 +1,6 @@
-import ReactMarkdown from 'react-markdown'
-import remarkGfm from 'remark-gfm'
 import type { DocumentOut } from '../api.ts'
 import type { UseRunStreamResult } from '../hooks/useRunStream.ts'
+import { MarkdownView } from './MarkdownView.tsx'
 import { TraceSteps } from './TraceSteps.tsx'
 
 interface RunViewProps {
@@ -125,9 +124,11 @@ export function RunView({
             </button>
           )}
           {run.resultText ? (
-            <div className="run-markdown text-sm text-slate-200">
-              <ReactMarkdown remarkPlugins={[remarkGfm]}>{run.resultText}</ReactMarkdown>
-            </div>
+            <MarkdownView
+              text={run.resultText}
+              defaultMode="md"
+              className="text-sm text-slate-200"
+            />
           ) : (
             <p className="text-xs text-slate-500">
               {run.finished ? 'Нет текстового результата.' : 'Ожидание результата…'}

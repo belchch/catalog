@@ -1,4 +1,5 @@
 import type { PlannerMessage } from '../hooks/usePlannerSession.ts'
+import { MarkdownView } from './MarkdownView.tsx'
 import { MessageCommands } from './MessageCommands.tsx'
 
 interface ChatMessageProps {
@@ -36,8 +37,12 @@ export function ChatMessage({ message, onRepeat, streaming, closed }: ChatMessag
   }
   return (
     <div className="my-2 flex justify-start">
-      <div className="max-w-[80%] whitespace-pre-wrap rounded-lg bg-slate-800 px-3 py-2 text-sm text-slate-100">
-        {message.content}
+      <div className="max-w-[80%] rounded-lg bg-slate-800 px-3 py-2">
+        <MarkdownView
+          text={message.content}
+          defaultMode="md"
+          className="text-sm text-slate-100"
+        />
       </div>
     </div>
   )
