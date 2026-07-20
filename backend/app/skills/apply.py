@@ -41,7 +41,7 @@ from app.documents.obsidian import (
     rewrite_wiki_links,
 )
 from app.llm.base import LLMProvider, Message
-from app.skills.config import SkillConfig
+from app.skills.config import SkillConfig, ensure_read_document_tool
 from app.skills.repo_run import create_run, finish_run, get_run
 from app.skills.script_runner import ScriptRuntimeError, run_script_async
 from app.skills.verify import run_verify
@@ -131,8 +131,14 @@ async def _apply_core(
 
     runtime_prompt = (user_prompt or "").strip() or None
 
-    # 2. Filter tools (fail-closed on unknown names).
-    tools = base_tools.filter(skill.allowed_tools)
+    if skill.kind == "agent":
+        tools = base_tools.filter(ensure_read_document_tool(skill.allowed_tools))
+    else:
+        tools = base_tools.filter(skill.allowed_tools)
+
+    doc_texts = [
+        extract_text(str(Path(workspace_dir) / d.path), d.kind) for d in docs
+    ]
 
     # 3. Create the skill_run row (or reuse a pre-created one).
     if run_id is None:
@@ -190,9 +196,6 @@ async def _apply_core(
             # once over the document text. Retrying is pointless (same input
             # always yields the same output), so there is a single attempt and
             # a single verify pass — then the shared persist/finish tail.
-            doc_texts = [
-                extract_text(str(Path(workspace_dir) / d.path), d.kind) for d in docs
-            ]
             # Single document → its text verbatim. Multiple → joined with a
             # separator so the script sees all input content.
             doc_text = doc_texts[0] if len(doc_texts) == 1 else "\n\n---\n\n".join(doc_texts)
@@ -249,20 +252,31 @@ async def _apply_core(
                 "Если нужны другие Obsidian-ссылки [[...]], используй имя файла "
                 "(stem без расширения и пути), а не title."
             )
+            content_note = (
+                "Ниже приведён полный текст каждого входного документа — "
+                "опирайся на него. Это не вложение файла: текст уже в этом "
+                "сообщении. При необходимости дополнительно вызови "
+                "read_document(doc_id=...)."
+            )
             stem_lines = "\n".join(
                 f"- «{d.title}» → [[{Path(d.path).stem}]]" for d in docs
+            )
+            inline_blocks = "\n\n".join(
+                f"--- документ {did}: {d.title} ---\n{text}"
+                for did, d, text in zip(input_doc_ids, docs, doc_texts)
             )
             if len(docs) == 1:
                 start_content = (
                     f"Обработай документ {input_doc_ids[0]} ({docs[0].title}).\n"
-                    f"{link_hint}\n{stem_lines}"
+                    f"{content_note}\n{link_hint}\n{stem_lines}\n\n{inline_blocks}"
                 )
             else:
                 listing = ", ".join(
                     f"{did} ({d.title})" for did, d in zip(input_doc_ids, docs)
                 )
                 start_content = (
-                    f"Обработай документы: {listing}.\n{link_hint}\n{stem_lines}"
+                    f"Обработай документы: {listing}.\n"
+                    f"{content_note}\n{link_hint}\n{stem_lines}\n\n{inline_blocks}"
                 )
             if runtime_prompt is not None:
                 start_content = (

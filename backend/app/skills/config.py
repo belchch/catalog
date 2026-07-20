@@ -129,6 +129,13 @@ class SkillConfig:
         )
 
 
+def ensure_read_document_tool(allowed_tools: list[str]) -> list[str]:
+    tools = list(allowed_tools)
+    if "read_document" not in tools:
+        tools.append("read_document")
+    return tools
+
+
 def compute_tags(config: SkillConfig) -> list[str]:
     """Derive capability tags from a skill config (CATALOG-8).
 

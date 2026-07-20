@@ -46,7 +46,12 @@ from app.llm.timeout import (
     llm_timeout_context,
 )
 from app.agent.registry import ToolRegistry
-from app.skills.config import SkillConfig, VerifyCheck, compute_tags
+from app.skills.config import (
+    SkillConfig,
+    VerifyCheck,
+    compute_tags,
+    ensure_read_document_tool,
+)
 from app.skills.repo_skill import (
     SkillRecord,
     create_skill,
@@ -311,7 +316,9 @@ def _args_to_config(args: dict, default_model: str) -> SkillConfig:
     if kind == "script":
         allowed_tools: list[str] = []
     else:
-        allowed_tools = list(args.get("allowed_tools") or [])
+        allowed_tools = ensure_read_document_tool(
+            list(args.get("allowed_tools") or [])
+        )
     return SkillConfig(
         name=args["name"],
         description=args["description"],

@@ -336,6 +336,70 @@ def test_apply_filters_tools(db: Database, workspace: Path) -> None:
     assert "list_documents" not in names
 
 
+def test_apply_agent_empty_allowed_tools_still_gets_read_document(
+    db: Database, workspace: Path
+) -> None:
+    skill = _make_skill(allowed_tools=[])
+    skill_id = create_skill(
+        db, name=skill.name, description=skill.description, config=skill
+    )
+    input_doc_id = _ingest_input(db, workspace)
+    provider = ScriptProvider([_result("# Summary\n\nOk.")])
+
+    result = asyncio.run(
+        apply_skill_collect(
+            provider=provider,
+            db=db,
+            workspace_dir=str(workspace),
+            skill=skill,
+            skill_id=skill_id,
+            input_doc_ids=[input_doc_id],
+            base_tools=build_document_tools(db, workspace),
+        )
+    )
+
+    assert result.status == "ok"
+    assert len(provider.seen_tools) == 1
+    tools_seen = provider.seen_tools[0]
+    assert tools_seen is not None
+    names = [t.name for t in tools_seen]
+    assert "read_document" in names
+    assert "list_documents" not in names
+
+
+def test_apply_agent_inlines_input_document_text(
+    db: Database, workspace: Path
+) -> None:
+    skill = _make_skill(allowed_tools=[])
+    skill_id = create_skill(
+        db, name=skill.name, description=skill.description, config=skill
+    )
+    input_doc_id = _ingest_input(db, workspace)
+    provider = ScriptProvider([_result("# Summary\n\nBased on source.")])
+
+    result = asyncio.run(
+        apply_skill_collect(
+            provider=provider,
+            db=db,
+            workspace_dir=str(workspace),
+            skill=skill,
+            skill_id=skill_id,
+            input_doc_ids=[input_doc_id],
+            base_tools=build_document_tools(db, workspace),
+        )
+    )
+
+    assert result.status == "ok"
+    assert provider.seen_messages
+    user_msgs = [m for m in provider.seen_messages[0] if m.role == "user"]
+    assert user_msgs
+    content = user_msgs[0].content or ""
+    assert "source text" in content
+    assert f"--- документ {input_doc_id}:" in content
+    assert "полный текст" in content
+    assert "не вложение файла" in content
+
+
 def test_apply_unknown_allowed_tool(db: Database, workspace: Path) -> None:
     skill = _make_skill(allowed_tools=["read_document", "nonexistent_tool"])
     skill_id = create_skill(

@@ -967,6 +967,24 @@ def test_build_skill_invalid_allowed_tools_returns_422(client, provider, db) -> 
     assert "session LLM timeout" in detail
 
 
+def test_build_agent_skill_empty_allowed_tools_adds_read_document(
+    client, provider, db
+) -> None:
+    session_id = client.post("/sessions").json()["id"]
+    add_message(db, session_id=session_id, role="user", content="make a skill")
+
+    provider.script = [
+        _completion(tool_calls=[_build_skill_call(name="NoTools", allowed_tools=[])])
+    ]
+
+    resp = client.post(f"/sessions/{session_id}/skills")
+    assert resp.status_code == 200, resp.text
+    skill = get_skill(db, resp.json()["skill_id"])
+    assert skill is not None
+    assert skill.config.kind == "agent"
+    assert "read_document" in skill.config.allowed_tools
+
+
 def test_build_skill_timeout_returns_504(client, provider, db) -> None:
     from app.llm.timeout import LLMTimeoutError
 
