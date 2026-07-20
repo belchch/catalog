@@ -8,9 +8,16 @@ interface SkillTrackPickerProps {
 }
 
 function arityLabel(arity: number | null): string {
+  if (arity == null) return 'Список'
   if (arity === 1) return '1 документ'
   if (arity === 2) return '2 документа'
-  return 'Список'
+  const mod10 = arity % 10
+  const mod100 = arity % 100
+  if (mod10 === 1 && mod100 !== 11) return `${arity} документ`
+  if (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) {
+    return `${arity} документа`
+  }
+  return `${arity} документов`
 }
 
 export function SkillTrackPicker({

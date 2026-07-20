@@ -295,8 +295,6 @@ export default function App() {
       proposed = await proposeSkillTracks(sessionId)
     } catch {
       proposed = null
-    } finally {
-      setProposingTracks(false)
     }
 
     if (
@@ -305,6 +303,7 @@ export default function App() {
       proposed.fallback ||
       proposed.tracks.length === 0
     ) {
+      setProposingTracks(false)
       await runBuildSkill(sessionId)
       return
     }
@@ -312,11 +311,18 @@ export default function App() {
     if (proposed.tracks.length === 1) {
       try {
         await selectSkillTrack(sessionId, proposed.tracks[0])
-      } catch {}
+      } catch (e) {
+        setBuildError(extractApiDetail(e))
+        setBuildErrorIsTimeout(false)
+        return
+      } finally {
+        setProposingTracks(false)
+      }
       await runBuildSkill(sessionId)
       return
     }
 
+    setProposingTracks(false)
     setTrackChoice(proposed.tracks)
   }, [
     sessionId,
