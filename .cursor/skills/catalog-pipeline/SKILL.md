@@ -60,6 +60,7 @@ disable-model-invocation: true
 - STATE пишешь атомарно после каждого перехода. Никогда не коммить `.cursor/state/night-shift.json`.
 - Не мерджи PR сам — финальное решение за Bugbot/человеком.
 - Не постишь `gh pr review`/`gh pr comment` на каждый цикл — шум в PR недопустим.
+- **Модели подагентов не выбираешь и не пишешь в STATE.** При `Task` **не передавай** параметр `model` — модель роли берётся из frontmatter `.cursor/agents/catalog-*.md` (переключается скилом `/pipeline-model-mode`). В STATE не заводи поля вроде `requested_models` / `actual_models`.
 
 ## Схема `.cursor/state/night-shift.json`
 ```json
@@ -77,8 +78,6 @@ disable-model-invocation: true
       "generator_agent_id": null,
       "designer_agent_id": null,
       "design_path": null,
-      "requested_models": { "generator": "cursor-grok-4.5[effort=high]", "reviewer": "claude-sonnet-5[effort=high]", "designer": "claude-opus-4-8[effort=high]", "ui_reviewer": "gemini-3.5-flash" },
-      "actual_models": {},
       "verdict": null,
       "code_verdict": null,
       "ui_verdict": null,
