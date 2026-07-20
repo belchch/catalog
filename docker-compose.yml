@@ -1,0 +1,14 @@
+services:
+  catalog:
+    image: catalog-app:latest
+    container_name: catalog-app
+    ports:
+      - "8000:8000"
+    volumes:
+      - catalog-data:/data
+    env_file:
+      - .env
+    restart: unless-stopped
+
+volumes:
+  catalog-data:

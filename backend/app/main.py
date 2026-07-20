@@ -27,6 +27,7 @@ from pathlib import Path
 import httpx
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 
 from app.api import documents, models, runs, sessions, skills
 from app.config import Settings, get_settings
@@ -106,3 +107,8 @@ app.include_router(models.router)
 @app.get("/health")
 def health() -> dict[str, str]:
     return {"status": "ok"}
+
+
+_STATIC = Path(__file__).resolve().parent.parent / "static"
+if _STATIC.is_dir():
+    app.mount("/", StaticFiles(directory=str(_STATIC), html=True), name="spa")
