@@ -259,3 +259,41 @@ class SkillMetaPatchRequest(BaseModel):
         if value is not None and value not in (1, 2):
             raise ValueError("input_arity must be 1, 2, or null (document list)")
         return value
+
+
+class SkillTrack(BaseModel):
+    name: str = Field(min_length=1)
+    description: str = Field(min_length=1)
+    operation: str = Field(min_length=1)
+    input_arity: int | None = None
+    rationale: str = Field(min_length=1)
+
+    @field_validator("name", "description", "operation", "rationale")
+    @classmethod
+    def _strip_non_empty(cls, value: str) -> str:
+        stripped = value.strip()
+        if not stripped:
+            raise ValueError("must be non-empty")
+        return stripped
+
+    @field_validator("input_arity")
+    @classmethod
+    def _allowed_track_arity(cls, value: int | None) -> int | None:
+        if value is not None and value < 1:
+            raise ValueError("input_arity must be >= 1 or null")
+        return value
+
+
+class SkillTracksOut(BaseModel):
+    tracks: list[SkillTrack] = Field(default_factory=list)
+    skipped: bool = False
+    fallback: bool = False
+
+
+class SkillTrackSelectRequest(BaseModel):
+    track: SkillTrack
+
+
+class SkillTrackSelected(BaseModel):
+    session_id: str
+    content: str

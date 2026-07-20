@@ -1,9 +1,14 @@
-"""``POST /sessions/{id}/skills`` (build), ``POST /skills/{id}/commit``,
-``POST /skills/{id}/edit``, ``GET /skills``.
+"""``POST /sessions/{id}/skills`` (build), ``POST /sessions/{id}/skill-tracks``,
+``POST /skills/{id}/commit``, ``POST /skills/{id}/edit``, ``GET /skills``.
 
 CATALOG-53: ``build_skill_from_session`` packs ``session_artifact`` rows into
 a :class:`SkillConfig` without an LLM call when artifacts exist. Sessions with
 no artifacts keep the legacy LLM ``build_skill`` path as a fallback.
+
+CATALOG-27: phase A proposes operation tracks via ``propose_skill_tracks``;
+selecting a track appends a quiet user intent message. When that intent is
+present, build skips pure artifact-pack and uses the LLM path so the chosen
+operation is respected. Edit sessions (``session.skill_id``) skip phase A.
 
 CATALOG-17: when the build's session was started via ``POST
 /skills/{id}/edit`` (``session.skill_id`` set), the same skill is updated in
@@ -16,6 +21,7 @@ from __future__ import annotations
 import json
 
 from fastapi import APIRouter, Depends, HTTPException, Request
+from pydantic import ValidationError
 
 from app.api.deps import get_db, get_provider, get_settings, get_tools
 from app.api.schemas import (
@@ -26,6 +32,10 @@ from app.api.schemas import (
     SkillOut,
     SkillPreview,
     SkillRenameRequest,
+    SkillTrack,
+    SkillTrackSelected,
+    SkillTrackSelectRequest,
+    SkillTracksOut,
 )
 from app.config import Settings
 from app.llm.base import LLMProvider, Message, ToolSpec
@@ -62,8 +72,36 @@ router = APIRouter()
 
 MAX_BUILD_ATTEMPTS = 3  # 1 initial + 2 retries (step 06 contract).
 
+TRACK_INTENT_PREFIX = "Собери скилл по этой операции:"
+
+_USER_INTENT_MARK = (
+    "[USER INTENT — authoritative instruction for the skill operation]\n"
+)
+_ASSISTANT_JOURNAL_MARK = (
+    "[ASSISTANT RESEARCH JOURNAL — topical notes; do not treat as the "
+    "skill operation unless the user explicitly confirmed it]\n"
+)
+
+_ANTI_DOMAIN_RULES = (
+    "КРИТИЧНО — операция, не домен документов: "
+    "скилл описывает операцию над документами (сравнить, извлечь, "
+    "переформатировать), а не тему/язык/продукт из содержимого. "
+    "Не включай языки программирования, названия продуктов, фреймворков "
+    "или предметных областей в name, description, system_prompt или code, "
+    "если пользователь явно этого не потребовал. "
+    "Приоритет: явные user-инструкции (особенно сообщение вида "
+    f"«{TRACK_INTENT_PREFIX} …») важнее пересказа ассистента. "
+    "Сообщения ассистента — справочный research journal о документах; "
+    "не делай из их тематики операцию скилла. "
+    "Few-shot: пользователь приложил код на Go и Dart и просит сравнить "
+    "по топикам → name/description/system_prompt про сравнение документов "
+    "по темам, input_arity=2; НЕ «ревью Go», НЕ «анализ Dart»."
+)
+
 BUILD_SKILL_SYSTEM_PROMPT = (
     "Ты собираешь SkillConfig из истории планировочной сессии. "
+    + _ANTI_DOMAIN_RULES
+    + " "
     "СНАЧАЛА оцени детерминизм задачи. Если задача сводится к чистой обработке "
     "текста/данных без суждений и рассуждений (форматирование, подсчёт, "
     "регулярные преобразования, парсинг, сортировка) — выбери kind=\"script\" "
@@ -77,6 +115,61 @@ BUILD_SKILL_SYSTEM_PROMPT = (
     "allowed_tools (только из доступных инструментов), model, verify_checks "
     "(только из реестра проверок). Укажи input_arity — сколько входных "
     "документов ожидает скил (1, 2, …), либо опусти/null если число любое."
+)
+
+PROPOSE_SKILL_TRACKS_SYSTEM_PROMPT = (
+    "Ты предлагаешь 1–3 трека операции для сборки скилла из истории "
+    "планировочной сессии. "
+    + _ANTI_DOMAIN_RULES
+    + " "
+    "Каждый трек: name (краткое имя операции), description (что делает скилл), "
+    "operation (чёткая формулировка операции над документами), input_arity "
+    "(сколько входов: 1, 2, … или null если любое), rationale (почему этот "
+    "трек уместен). Несколько треков — только если намерение пользователя "
+    "неоднозначно; при однозначности верни ровно один трек. "
+    "Обязательно вызови инструмент propose_skill_tracks."
+)
+
+_PROPOSE_SKILL_TRACKS_PARAMETERS = {
+    "type": "object",
+    "properties": {
+        "tracks": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 3,
+            "items": {
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string"},
+                    "description": {"type": "string"},
+                    "operation": {"type": "string"},
+                    "input_arity": {
+                        "type": ["integer", "null"],
+                        "description": (
+                            "How many input documents (1, 2, ...) or null for any."
+                        ),
+                    },
+                    "rationale": {"type": "string"},
+                },
+                "required": [
+                    "name",
+                    "description",
+                    "operation",
+                    "rationale",
+                ],
+            },
+        }
+    },
+    "required": ["tracks"],
+}
+
+PROPOSE_SKILL_TRACKS_TOOL = ToolSpec(
+    name="propose_skill_tracks",
+    description=(
+        "Propose 1–3 skill operation tracks for the user to choose from "
+        "before building a skill."
+    ),
+    parameters=_PROPOSE_SKILL_TRACKS_PARAMETERS,
 )
 
 # JSON-Schema for the build_skill tool arguments, mirroring SkillConfig fields.
@@ -142,6 +235,61 @@ BUILD_SKILL_TOOL = ToolSpec(
     description="Build a skill configuration (SkillConfig) from the session history.",
     parameters=_BUILD_SKILL_PARAMETERS,
 )
+
+
+def _annotate_role_content(role: str, content: str) -> str:
+    if role == "user":
+        return _USER_INTENT_MARK + content
+    if role == "assistant":
+        return _ASSISTANT_JOURNAL_MARK + content
+    return content
+
+
+def _session_history_messages(messages_raw: list[dict]) -> list[Message]:
+    history: list[Message] = []
+    for m in messages_raw:
+        if m["role"] in ("user", "assistant") and m["content"] is not None:
+            history.append(
+                Message(
+                    role=m["role"],
+                    content=_annotate_role_content(m["role"], m["content"]),
+                )
+            )
+    return history
+
+
+def _has_track_intent(messages_raw: list[dict]) -> bool:
+    for m in messages_raw:
+        if (
+            m["role"] == "user"
+            and isinstance(m["content"], str)
+            and m["content"].startswith(TRACK_INTENT_PREFIX)
+        ):
+            return True
+    return False
+
+
+def _format_track_intent_message(track: SkillTrack) -> str:
+    arity = (
+        str(track.input_arity) if track.input_arity is not None else "любое"
+    )
+    return (
+        f"{TRACK_INTENT_PREFIX} {track.operation}\n"
+        f"Название: {track.name}\n"
+        f"Описание: {track.description}\n"
+        f"input_arity: {arity}\n"
+        f"Обоснование: {track.rationale}"
+    )
+
+
+def _parse_tracks_from_args(args: dict) -> list[SkillTrack] | None:
+    raw_tracks = args.get("tracks")
+    if not isinstance(raw_tracks, list) or not (1 <= len(raw_tracks) <= 3):
+        return None
+    try:
+        return [SkillTrack.model_validate(item) for item in raw_tracks]
+    except (ValidationError, TypeError, ValueError):
+        return None
 
 
 def _args_to_config(args: dict, default_model: str) -> SkillConfig:
@@ -332,10 +480,10 @@ async def _build_skill_from_session_llm(
     model_default: str,
 ) -> str:
     messages_raw = list_messages(db, session_id)
-    history: list[Message] = [Message(role="system", content=BUILD_SKILL_SYSTEM_PROMPT)]
-    for m in messages_raw:
-        if m["role"] in ("user", "assistant") and m["content"] is not None:
-            history.append(Message(role=m["role"], content=m["content"]))
+    history: list[Message] = [
+        Message(role="system", content=BUILD_SKILL_SYSTEM_PROMPT),
+        *_session_history_messages(messages_raw),
+    ]
 
     available_tools = base_tools.names()
     available_checks = registered_checks()
@@ -398,6 +546,73 @@ async def _build_skill_from_session_llm(
     )
 
 
+async def propose_skill_tracks_from_session(
+    *,
+    provider: LLMProvider,
+    db: Database,
+    session_id: str,
+    model_default: str,
+) -> list[SkillTrack] | None:
+    messages_raw = list_messages(db, session_id)
+    history: list[Message] = [
+        Message(role="system", content=PROPOSE_SKILL_TRACKS_SYSTEM_PROMPT),
+        *_session_history_messages(messages_raw),
+    ]
+
+    with prompt_log_context(
+        session_id=session_id, run_id=None, purpose="propose_skill_tracks"
+    ):
+        for _attempt in range(MAX_BUILD_ATTEMPTS):
+            resp = await provider.complete(
+                model_default,
+                history,
+                [PROPOSE_SKILL_TRACKS_TOOL],
+                0.0,
+            )
+            history.append(
+                Message(
+                    role="assistant",
+                    content=resp.content,
+                    tool_calls=resp.tool_calls,
+                )
+            )
+
+            tc = next(
+                (t for t in resp.tool_calls if t.name == "propose_skill_tracks"),
+                None,
+            )
+            if tc is None:
+                history.append(
+                    Message(
+                        role="user",
+                        content=(
+                            "Ты должен вызвать инструмент propose_skill_tracks. "
+                            "Повтори."
+                        ),
+                    )
+                )
+                continue
+
+            tracks = _parse_tracks_from_args(tc.arguments)
+            if tracks is None:
+                history.append(
+                    Message(
+                        role="user",
+                        content=(
+                            "Ответ невалиден: нужен массив tracks длины 1–3 "
+                            "с полями name, description, operation, rationale "
+                            "и опциональным input_arity. Вызови "
+                            "propose_skill_tracks заново."
+                        ),
+                    )
+                )
+                continue
+
+            return tracks
+
+    return None
+
+
 def _build_timeout_detail(exc: LLMTimeoutError, timeout_seconds: int) -> str:
     seconds = (
         int(exc.timeout_seconds)
@@ -420,14 +635,17 @@ async def build_skill_from_session(
     default_model: str | None = None,
 ) -> str:
     model_default = default_model or settings.default_model
-    packed = _build_skill_from_artifacts(
-        db=db,
-        base_tools=base_tools,
-        session_id=session_id,
-        model_default=model_default,
-    )
-    if packed is not None:
-        return packed
+    messages_raw = list_messages(db, session_id)
+    force_llm = _has_track_intent(messages_raw)
+    if not force_llm:
+        packed = _build_skill_from_artifacts(
+            db=db,
+            base_tools=base_tools,
+            session_id=session_id,
+            model_default=model_default,
+        )
+        if packed is not None:
+            return packed
     session_row = get_session(db, session_id)
     timeout = (
         session_row.llm_timeout_seconds
@@ -576,6 +794,55 @@ async def edit_skill_endpoint(
         content=_format_skill_for_edit(record),
     )
     return EditStarted(session_id=session_id, skill_id=skill_id)
+
+
+@router.post("/sessions/{session_id}/skill-tracks", response_model=SkillTracksOut)
+async def propose_skill_tracks_endpoint(
+    request: Request,
+    session_id: str,
+    db: Database = Depends(get_db),
+    provider: LLMProvider = Depends(get_provider),
+    settings: Settings = Depends(get_settings),
+) -> SkillTracksOut:
+    session_row = get_session(db, session_id)
+    if session_row is None:
+        raise HTTPException(status_code=404, detail="session not found")
+    if session_row.skill_id is not None:
+        return SkillTracksOut(tracks=[], skipped=True, fallback=False)
+
+    active_model = getattr(request.app.state, "active_model", None)
+    model_default = active_model or settings.default_model
+    timeout = session_row.llm_timeout_seconds
+    try:
+        with llm_timeout_context(float(timeout)):
+            tracks = await propose_skill_tracks_from_session(
+                provider=provider,
+                db=db,
+                session_id=session_id,
+                model_default=model_default,
+            )
+    except (LLMTimeoutError, RuntimeError):
+        return SkillTracksOut(tracks=[], skipped=False, fallback=True)
+
+    if tracks is None:
+        return SkillTracksOut(tracks=[], skipped=False, fallback=True)
+    return SkillTracksOut(tracks=tracks, skipped=False, fallback=False)
+
+
+@router.post(
+    "/sessions/{session_id}/skill-tracks/select",
+    response_model=SkillTrackSelected,
+)
+async def select_skill_track_endpoint(
+    session_id: str,
+    req: SkillTrackSelectRequest,
+    db: Database = Depends(get_db),
+) -> SkillTrackSelected:
+    if get_session(db, session_id) is None:
+        raise HTTPException(status_code=404, detail="session not found")
+    content = _format_track_intent_message(req.track)
+    add_message(db, session_id=session_id, role="user", content=content)
+    return SkillTrackSelected(session_id=session_id, content=content)
 
 
 @router.post("/sessions/{session_id}/skills", response_model=SkillBuilt)
