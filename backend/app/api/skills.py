@@ -129,7 +129,7 @@ PROPOSE_SKILL_TRACKS_SYSTEM_PROMPT = (
     + " "
     "Каждый трек: name (краткое имя операции), description (что делает скилл), "
     "operation (чёткая формулировка операции над документами), input_arity "
-    "(сколько входов: 1, 2, … или null если любое), rationale (почему этот "
+    "(сколько входов: 1, 2 или null если любое), rationale (почему этот "
     "трек уместен). Несколько треков — только если намерение пользователя "
     "неоднозначно; при однозначности верни ровно один трек. "
     "Обязательно вызови инструмент propose_skill_tracks."
@@ -151,7 +151,7 @@ _PROPOSE_SKILL_TRACKS_PARAMETERS = {
                     "input_arity": {
                         "type": ["integer", "null"],
                         "description": (
-                            "How many input documents (1, 2, ...) or null for any."
+                            "How many input documents: 1, 2, or null for any."
                         ),
                     },
                     "rationale": {"type": "string"},
@@ -816,6 +816,8 @@ async def propose_skill_tracks_endpoint(
         raise HTTPException(status_code=404, detail="session not found")
     if session_row.skill_id is not None:
         return SkillTracksOut(tracks=[], skipped=True, fallback=False)
+    if _has_track_intent(list_messages(db, session_id)):
+        return SkillTracksOut(tracks=[], skipped=True, fallback=False)
 
     active_model = getattr(request.app.state, "active_model", None)
     model_default = active_model or settings.default_model
@@ -845,8 +847,24 @@ async def select_skill_track_endpoint(
     req: SkillTrackSelectRequest,
     db: Database = Depends(get_db),
 ) -> SkillTrackSelected:
-    if get_session(db, session_id) is None:
+    session_row = get_session(db, session_id)
+    if session_row is None:
         raise HTTPException(status_code=404, detail="session not found")
+    if session_row.skill_id is not None:
+        raise HTTPException(
+            status_code=400,
+            detail="edit session cannot select skill tracks",
+        )
+    messages_raw = list_messages(db, session_id)
+    for m in messages_raw:
+        if (
+            m["role"] == "user"
+            and isinstance(m["content"], str)
+            and m["content"].startswith(TRACK_INTENT_PREFIX)
+        ):
+            return SkillTrackSelected(
+                session_id=session_id, content=m["content"]
+            )
     content = _format_track_intent_message(req.track)
     add_message(db, session_id=session_id, role="user", content=content)
     return SkillTrackSelected(session_id=session_id, content=content)

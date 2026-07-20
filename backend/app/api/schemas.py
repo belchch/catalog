@@ -279,8 +279,8 @@ class SkillTrack(BaseModel):
     @field_validator("input_arity")
     @classmethod
     def _allowed_track_arity(cls, value: int | None) -> int | None:
-        if value is not None and value < 1:
-            raise ValueError("input_arity must be >= 1 or null")
+        if value is not None and value not in (1, 2):
+            raise ValueError("input_arity must be 1, 2, or null (document list)")
         return value
 
 

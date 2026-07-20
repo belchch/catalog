@@ -209,6 +209,98 @@ def test_select_skill_track_appends_user_message_without_planner(
     assert msgs[0]["content"] == body["content"]
 
 
+def test_select_skill_track_edit_session_rejected(client, db) -> None:
+    from app.skills.config import SkillConfig
+    from app.skills.repo_skill import create_skill
+
+    sid = create_skill(
+        db,
+        name="Existing",
+        description="d",
+        config=SkillConfig(
+            name="Existing",
+            description="d",
+            system_prompt="p",
+            allowed_tools=["read_document"],
+            model="test/model",
+        ),
+        status="committed",
+    )
+    edit = client.post(f"/skills/{sid}/edit")
+    assert edit.status_code == 200
+    session_id = edit.json()["session_id"]
+
+    resp = client.post(
+        f"/sessions/{session_id}/skill-tracks/select",
+        json={"track": _track()},
+    )
+    assert resp.status_code == 400, resp.text
+    assert "edit session" in resp.json()["detail"]
+    msgs = list_messages(db, session_id)
+    assert not any(
+        m["role"] == "user"
+        and isinstance(m["content"], str)
+        and m["content"].startswith(TRACK_INTENT_PREFIX)
+        for m in msgs
+    )
+
+
+def test_select_skill_track_idempotent_when_intent_exists(client, db) -> None:
+    session_id = client.post("/sessions").json()["id"]
+    first = client.post(
+        f"/sessions/{session_id}/skill-tracks/select",
+        json={"track": _track()},
+    )
+    assert first.status_code == 200, first.text
+    content = first.json()["content"]
+
+    second = client.post(
+        f"/sessions/{session_id}/skill-tracks/select",
+        json={"track": _track(name="Другой", operation="другая операция")},
+    )
+    assert second.status_code == 200, second.text
+    assert second.json()["content"] == content
+    msgs = [
+        m
+        for m in list_messages(db, session_id)
+        if m["role"] == "user"
+        and isinstance(m["content"], str)
+        and m["content"].startswith(TRACK_INTENT_PREFIX)
+    ]
+    assert len(msgs) == 1
+
+
+def test_propose_skill_tracks_skips_when_track_intent_exists(
+    client, provider, db
+) -> None:
+    session_id = client.post("/sessions").json()["id"]
+    select = client.post(
+        f"/sessions/{session_id}/skill-tracks/select",
+        json={"track": _track()},
+    )
+    assert select.status_code == 200, select.text
+
+    provider.script = [
+        _completion(tool_calls=[_propose_call([_track(name="ShouldNotRun")])])
+    ]
+    resp = client.post(f"/sessions/{session_id}/skill-tracks")
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["skipped"] is True
+    assert body["tracks"] == []
+    assert body["fallback"] is False
+    assert provider.requests == []
+
+
+def test_skill_track_rejects_input_arity_above_two(client, db) -> None:
+    session_id = client.post("/sessions").json()["id"]
+    resp = client.post(
+        f"/sessions/{session_id}/skill-tracks/select",
+        json={"track": _track(input_arity=3)},
+    )
+    assert resp.status_code == 422, resp.text
+
+
 def test_build_without_skill_tracks_still_works(client, provider, db) -> None:
     session_id = client.post("/sessions").json()["id"]
     add_message(db, session_id=session_id, role="user", content="Хочу саммаризатор")
