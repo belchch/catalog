@@ -270,6 +270,42 @@ export function buildSkill(sessionId: string): Promise<SkillBuilt> {
   return jsonFetch<SkillBuilt>(`/sessions/${sessionId}/skills`, { method: 'POST' })
 }
 
+export interface SkillTrack {
+  name: string
+  description: string
+  operation: string
+  input_arity: number | null
+  rationale: string
+}
+
+export interface SkillTracksOut {
+  tracks: SkillTrack[]
+  skipped: boolean
+  fallback: boolean
+}
+
+export interface SkillTrackSelected {
+  session_id: string
+  content: string
+}
+
+export function proposeSkillTracks(sessionId: string): Promise<SkillTracksOut> {
+  return jsonFetch<SkillTracksOut>(`/sessions/${sessionId}/skill-tracks`, {
+    method: 'POST',
+  })
+}
+
+export function selectSkillTrack(
+  sessionId: string,
+  track: SkillTrack,
+): Promise<SkillTrackSelected> {
+  return jsonFetch<SkillTrackSelected>(`/sessions/${sessionId}/skill-tracks/select`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ track }),
+  })
+}
+
 /** Start an edit session for an existing skill (CATALOG-17). */
 export function startEditSession(skillId: string): Promise<EditStarted> {
   return jsonFetch<EditStarted>(`/skills/${skillId}/edit`, { method: 'POST' })

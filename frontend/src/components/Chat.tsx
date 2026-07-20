@@ -27,6 +27,7 @@ interface ChatProps {
   onRemoveDocument?: (docId: string) => void
   onCreateSkill: () => void
   buildingSkill: boolean
+  proposingTracks: boolean
   editingSkillName: string | null
   buildError: string | null
   buildErrorIsTimeout: boolean
@@ -52,6 +53,7 @@ export function Chat({
   onRemoveDocument,
   onCreateSkill,
   buildingSkill,
+  proposingTracks,
   editingSkillName,
   buildError,
   buildErrorIsTimeout,
@@ -279,14 +281,16 @@ export function Chat({
         <button
           className="mt-2 rounded-md border border-slate-700 px-3 py-1.5 text-xs text-slate-300 disabled:opacity-50"
           onClick={onCreateSkill}
-          disabled={buildingSkill || messages.length === 0}
-          aria-busy={buildingSkill}
+          disabled={buildingSkill || proposingTracks || messages.length === 0}
+          aria-busy={buildingSkill || proposingTracks}
         >
-          {buildingSkill
-            ? 'Собираю скилл…'
-            : editingSkillName
-              ? 'Сохранить изменения'
-              : 'Создать скилл из сессии'}
+          {proposingTracks
+            ? 'Подбираю варианты…'
+            : buildingSkill
+              ? 'Собираю скилл…'
+              : editingSkillName
+                ? 'Сохранить изменения'
+                : 'Создать скилл из сессии'}
         </button>
         {sessionId && (
           <div className="mt-1.5 text-[11px] text-slate-500">

@@ -5,13 +5,16 @@ import {
   extractApiDetail,
   getSession,
   isBuildTimeoutError,
+  proposeSkillTracks,
   saveRunResult,
+  selectSkillTrack,
   startEditSession,
   updateSessionTimeout,
   type ApplyMode,
   type ArtifactType,
   type DocumentOut,
   type SkillPreview,
+  type SkillTrack,
 } from './api.ts'
 import { ArtifactsPanel } from './components/ArtifactsPanel.tsx'
 import { Chat } from './components/Chat.tsx'
@@ -22,6 +25,7 @@ import { RunView } from './components/RunView.tsx'
 import { SessionsPanel } from './components/SessionsPanel.tsx'
 import { SessionTimeoutModal } from './components/SessionTimeoutModal.tsx'
 import { SkillSettingsModal } from './components/SkillSettingsModal.tsx'
+import { SkillTrackPicker } from './components/SkillTrackPicker.tsx'
 import { SkillsPanel } from './components/SkillsPanel.tsx'
 import { useDocuments } from './hooks/useDocuments.ts'
 import { usePlannerSession } from './hooks/usePlannerSession.ts'
@@ -84,6 +88,8 @@ export default function App() {
   const [sessionId, setSessionId] = useState<string | null>(() => readStoredSessionId())
   const [currentDocId, setCurrentDocId] = useState<string | null>(null)
   const [buildingSkill, setBuildingSkill] = useState(false)
+  const [proposingTracks, setProposingTracks] = useState(false)
+  const [trackChoice, setTrackChoice] = useState<SkillTrack[] | null>(null)
   const [buildError, setBuildError] = useState<string | null>(null)
   const [buildErrorIsTimeout, setBuildErrorIsTimeout] = useState(false)
   const [timeoutModalOpen, setTimeoutModalOpen] = useState(false)
@@ -246,15 +252,14 @@ export default function App() {
     [skillsHook, editingSkill],
   )
 
-  const handleCreateSkill = useCallback(async () => {
-    if (!sessionId) return
+  const runBuildSkill = useCallback(async (sid: string) => {
     setBuildingSkill(true)
     setNotice(null)
     setBuildError(null)
     setBuildErrorIsTimeout(false)
     setArtifactHighlight(null)
     try {
-      const built = await buildSkill(sessionId)
+      const built = await buildSkill(sid)
       setSettingsSkill({ skillId: built.skill_id, preview: built.config })
     } catch (e) {
       const detail = extractApiDetail(e)
@@ -270,7 +275,77 @@ export default function App() {
     } finally {
       setBuildingSkill(false)
     }
-  }, [sessionId])
+  }, [])
+
+  const handleCreateSkill = useCallback(async () => {
+    if (!sessionId || buildingSkill || proposingTracks || trackChoice) return
+
+    if (editingSkill != null) {
+      await runBuildSkill(sessionId)
+      return
+    }
+
+    setProposingTracks(true)
+    setNotice(null)
+    setBuildError(null)
+    setBuildErrorIsTimeout(false)
+    setArtifactHighlight(null)
+    let proposed: Awaited<ReturnType<typeof proposeSkillTracks>> | null = null
+    try {
+      proposed = await proposeSkillTracks(sessionId)
+    } catch {
+      proposed = null
+    } finally {
+      setProposingTracks(false)
+    }
+
+    if (
+      !proposed ||
+      proposed.skipped ||
+      proposed.fallback ||
+      proposed.tracks.length === 0
+    ) {
+      await runBuildSkill(sessionId)
+      return
+    }
+
+    if (proposed.tracks.length === 1) {
+      try {
+        await selectSkillTrack(sessionId, proposed.tracks[0])
+      } catch {}
+      await runBuildSkill(sessionId)
+      return
+    }
+
+    setTrackChoice(proposed.tracks)
+  }, [
+    sessionId,
+    buildingSkill,
+    proposingTracks,
+    trackChoice,
+    editingSkill,
+    runBuildSkill,
+  ])
+
+  const handleTrackSelect = useCallback(
+    async (track: SkillTrack) => {
+      if (!sessionId) return
+      try {
+        await selectSkillTrack(sessionId, track)
+        await runBuildSkill(sessionId)
+      } catch (e) {
+        setBuildError(extractApiDetail(e))
+        setBuildErrorIsTimeout(false)
+      } finally {
+        setTrackChoice(null)
+      }
+    },
+    [sessionId, runBuildSkill],
+  )
+
+  const handleTrackCancel = useCallback(() => {
+    setTrackChoice(null)
+  }, [])
 
   const handleSaveSessionTimeout = useCallback(
     async (seconds: number) => {
@@ -493,6 +568,7 @@ export default function App() {
                       onRemoveDocument={planner.removeDocument}
                       onCreateSkill={handleCreateSkill}
                       buildingSkill={buildingSkill}
+                      proposingTracks={proposingTracks}
                       editingSkillName={editingSkill?.name ?? null}
                       buildError={buildError}
                       buildErrorIsTimeout={buildErrorIsTimeout}
@@ -546,6 +622,13 @@ export default function App() {
             setSettingsSkill(null)
             setEditingSkill(null)
           }}
+        />
+      )}
+      {trackChoice && (
+        <SkillTrackPicker
+          tracks={trackChoice}
+          onSelect={handleTrackSelect}
+          onCancel={handleTrackCancel}
         />
       )}
       {timeoutModalOpen && sessionId && (
