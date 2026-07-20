@@ -66,11 +66,18 @@ def _result(content: str) -> CompletionResult:
     return CompletionResult(content=content, tool_calls=[], finish_reason="stop")
 
 
+def _links_section(*stems: str) -> str:
+    lines = ["## Ссылки", ""]
+    lines.extend(f"- [[{stem}]]" for stem in stems)
+    return "\n".join(lines) + "\n"
+
+
 def test_ensure_parent_wikilinks_single() -> None:
     out = ensure_parent_wikilinks("body", ["cover-letter-ea411722"])
-    assert "[[cover-letter-ea411722]]" in out
-    assert "Источник: [[cover-letter-ea411722]]" in out
     assert out.startswith("body")
+    assert "## Ссылки" in out
+    assert "- [[cover-letter-ea411722]]" in out
+    assert out.index("body") < out.index("## Ссылки")
 
 
 def test_ensure_parent_wikilinks_multiple() -> None:
@@ -78,51 +85,92 @@ def test_ensure_parent_wikilinks_multiple() -> None:
         "body",
         ["parent-aaa11111", "parent-bbb22222"],
     )
-    assert "[[parent-aaa11111]]" in out
-    assert "[[parent-bbb22222]]" in out
-    assert "Источники:" in out
+    assert "## Ссылки" in out
+    assert "- [[parent-aaa11111]]" in out
+    assert "- [[parent-bbb22222]]" in out
     assert out.index("[[parent-aaa11111]]") < out.index("[[parent-bbb22222]]")
 
 
-def test_ensure_parent_wikilinks_idempotent_when_present() -> None:
+def test_ensure_parent_wikilinks_section_when_mid_body_present() -> None:
     text = "see [[cover-letter-ea411722]] already"
-    assert ensure_parent_wikilinks(text, ["cover-letter-ea411722"]) == text
+    out = ensure_parent_wikilinks(text, ["cover-letter-ea411722"])
+    assert "see [[cover-letter-ea411722]] already" in out
+    assert "## Ссылки" in out
+    assert "- [[cover-letter-ea411722]]" in out
+    assert out.count("[[cover-letter-ea411722]]") == 2
+
+
+def test_ensure_parent_wikilinks_idempotent() -> None:
+    text = "body with [[cover-letter-ea411722]] mid"
+    once = ensure_parent_wikilinks(text, ["cover-letter-ea411722"])
+    twice = ensure_parent_wikilinks(once, ["cover-letter-ea411722"])
+    assert twice == once
+    assert once.count("## Ссылки") == 1
 
 
 def test_ensure_parent_wikilinks_prefix_stem_not_enough() -> None:
     text = "see [[foo-123456789abc]] already"
     out = ensure_parent_wikilinks(text, ["foo-12345678"])
-    assert "Источник: [[foo-12345678]]" in out
+    assert "## Ссылки" in out
+    assert "- [[foo-12345678]]" in out
     assert "[[foo-123456789abc]]" in out
 
 
-def test_ensure_parent_wikilinks_alias_counts_as_present() -> None:
+def test_ensure_parent_wikilinks_alias_still_gets_section() -> None:
     text = "see [[cover-letter-ea411722|письмо]]"
-    assert ensure_parent_wikilinks(text, ["cover-letter-ea411722"]) == text
+    out = ensure_parent_wikilinks(text, ["cover-letter-ea411722"])
+    assert "[[cover-letter-ea411722|письмо]]" in out
+    assert "- [[cover-letter-ea411722]]" in out
 
 
-def test_ensure_parent_wikilinks_heading_counts_as_present() -> None:
+def test_ensure_parent_wikilinks_heading_still_gets_section() -> None:
     text = "see [[cover-letter-ea411722#Intro]]"
-    assert ensure_parent_wikilinks(text, ["cover-letter-ea411722"]) == text
+    out = ensure_parent_wikilinks(text, ["cover-letter-ea411722"])
+    assert "[[cover-letter-ea411722#Intro]]" in out
+    assert "- [[cover-letter-ea411722]]" in out
 
 
-def test_ensure_parent_wikilinks_only_missing() -> None:
+def test_ensure_parent_wikilinks_all_parents_in_section() -> None:
     text = "see [[parent-aaa11111]]"
     out = ensure_parent_wikilinks(
         text, ["parent-aaa11111", "parent-bbb22222"]
     )
-    assert out.count("[[parent-aaa11111]]") == 1
-    assert "Источник: [[parent-bbb22222]]" in out
+    assert "see [[parent-aaa11111]]" in out
+    assert "- [[parent-aaa11111]]" in out
+    assert "- [[parent-bbb22222]]" in out
 
 
 def test_ensure_parent_wikilinks_empty_text() -> None:
     out = ensure_parent_wikilinks("", ["parent-aaa11111"])
-    assert out == "Источник: [[parent-aaa11111]]\n"
+    assert out == _links_section("parent-aaa11111")
 
 
 def test_ensure_parent_wikilinks_dedupes_stems() -> None:
     out = ensure_parent_wikilinks("body", ["same-stem", "same-stem"])
     assert out.count("[[same-stem]]") == 1
+    assert "## Ссылки" in out
+
+
+def test_ensure_parent_wikilinks_migrates_old_istochnik() -> None:
+    text = "body\n\nИсточник: [[parent-aaa11111]]\n"
+    out = ensure_parent_wikilinks(text, ["parent-aaa11111"])
+    assert "Источник:" not in out
+    assert out == "body\n\n" + _links_section("parent-aaa11111")
+
+
+def test_ensure_parent_wikilinks_migrates_old_istochniki() -> None:
+    text = (
+        "body\n\nИсточники:\n"
+        "- [[parent-aaa11111]]\n"
+        "- [[parent-bbb22222]]\n"
+    )
+    out = ensure_parent_wikilinks(
+        text, ["parent-aaa11111", "parent-bbb22222"]
+    )
+    assert "Источники:" not in out
+    assert out == "body\n\n" + _links_section(
+        "parent-aaa11111", "parent-bbb22222"
+    )
 
 
 def test_rewrite_wiki_links_title_to_stem() -> None:
@@ -281,7 +329,8 @@ def test_apply_persist_rewrites_obsidian_links(
     assert "[[ekonomiya-tokov-abc12345]]" in file_text
     assert "[[Экономия токенов]]" not in file_text
     input_stem = Path(input_doc.path).stem
-    assert f"[[{input_stem}]]" in file_text
+    assert f"- [[{input_stem}]]" in file_text
+    assert "## Ссылки" in file_text
 
 
 def test_apply_persist_ensures_parent_wikilinks(
@@ -326,7 +375,8 @@ def test_apply_persist_ensures_parent_wikilinks(
     out_doc = get_document(db, result.output_doc_id)
     assert out_doc is not None
     file_text = (workspace / out_doc.path).read_text(encoding="utf-8")
-    assert f"Источник: [[{input_stem}]]" in file_text
+    assert "## Ссылки" in file_text
+    assert f"- [[{input_stem}]]" in file_text
 
 
 def test_apply_persist_ensures_all_parent_wikilinks(
@@ -373,8 +423,9 @@ def test_apply_persist_ensures_all_parent_wikilinks(
     out_doc = get_document(db, result.output_doc_id)
     assert out_doc is not None
     file_text = (workspace / out_doc.path).read_text(encoding="utf-8")
+    assert "## Ссылки" in file_text
     for stem in stems:
-        assert f"[[{stem}]]" in file_text
+        assert f"- [[{stem}]]" in file_text
 
 
 def test_apply_prompt_mentions_file_stem(
@@ -423,5 +474,6 @@ def test_apply_prompt_mentions_file_stem(
     )
 
     assert seen
+    assert "раздел «Ссылки»" in seen[0]
     assert "имя файла" in seen[0]
     assert Path(input_doc.path).stem in seen[0]

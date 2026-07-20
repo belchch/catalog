@@ -7,6 +7,16 @@ from app.storage.db import Database
 from app.storage.repo_document import list_documents
 
 _WIKI_LINK_RE = re.compile(r"\[\[([^\]]+)\]\]")
+_LINKS_HEADING = "## Ссылки"
+_TRAILING_LINKS_SECTION_RE = re.compile(
+    r"(?:\n{2,}|\A)## Ссылки\n[\s\S]*\Z"
+)
+_TRAILING_SOURCE_MULTI_RE = re.compile(
+    r"(?:\n{2,}|\A)Источники:\n(?:- \[\[[^\]]+\]\]\n?)+\Z"
+)
+_TRAILING_SOURCE_SINGLE_RE = re.compile(
+    r"(?:\n{2,}|\A)Источник: \[\[[^\]]+\]\]\n?\Z"
+)
 
 
 def build_title_to_stem_map(db: Database) -> dict[str, str]:
@@ -57,44 +67,51 @@ def rewrite_wiki_links(text: str, mapping: dict[str, str]) -> str:
     return _WIKI_LINK_RE.sub(_replace, text)
 
 
-def _wikilink_file_parts(text: str) -> set[str]:
-    parts: set[str] = set()
-    for match in _WIKI_LINK_RE.finditer(text):
-        inner = match.group(1)
-        alias_sep = inner.find("|")
-        target = inner[:alias_sep] if alias_sep >= 0 else inner
-        heading_sep = target.find("#")
-        file_part = target[:heading_sep] if heading_sep >= 0 else target
-        parts.add(file_part)
-    return parts
-
-
-def ensure_parent_wikilinks(text: str, parent_stems: list[str]) -> str:
-    body = text or ""
-    if not parent_stems:
-        return body
-
-    linked = _wikilink_file_parts(body)
+def _unique_stems(parent_stems: list[str]) -> list[str]:
     seen: set[str] = set()
-    missing: list[str] = []
+    stems: list[str] = []
     for stem in parent_stems:
         if not stem or stem in seen:
             continue
         seen.add(stem)
-        if stem not in linked:
-            missing.append(stem)
+        stems.append(stem)
+    return stems
 
-    if not missing:
+
+def _format_links_section(stems: list[str]) -> str:
+    lines = [_LINKS_HEADING, ""]
+    lines.extend(f"- [[{stem}]]" for stem in stems)
+    return "\n".join(lines) + "\n"
+
+
+def _strip_trailing_links_blocks(text: str) -> str:
+    body = text
+    while True:
+        matched = False
+        for pattern in (
+            _TRAILING_LINKS_SECTION_RE,
+            _TRAILING_SOURCE_MULTI_RE,
+            _TRAILING_SOURCE_SINGLE_RE,
+        ):
+            match = pattern.search(body)
+            if match is not None:
+                body = body[: match.start()]
+                matched = True
+                break
+        if not matched:
+            break
+    return body
+
+
+def ensure_parent_wikilinks(text: str, parent_stems: list[str]) -> str:
+    body = text or ""
+    stems = _unique_stems(parent_stems)
+    if not stems:
         return body
 
-    if len(missing) == 1:
-        block = f"Источник: [[{missing[0]}]]"
-    else:
-        lines = ["Источники:"]
-        lines.extend(f"- [[{stem}]]" for stem in missing)
-        block = "\n".join(lines)
-
+    body = _strip_trailing_links_blocks(body)
+    section = _format_links_section(stems)
     base = body.rstrip()
     if base:
-        return f"{base}\n\n{block}\n"
-    return f"{block}\n"
+        return f"{base}\n\n{section}"
+    return section

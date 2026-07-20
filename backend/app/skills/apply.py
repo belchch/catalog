@@ -244,8 +244,10 @@ async def _apply_core(
             # ---- Agent path (ADR-0001/0002) ----
             # Build the start message listing every input document (CATALOG-4).
             link_hint = (
-                "Если ссылаешься на документы Obsidian-линком [[...]], "
-                "используй имя файла (stem без расширения и пути), а не title."
+                "Не вставляй связи с входными документами в текст ответа — "
+                "система добавит раздел «Ссылки» при сохранении. "
+                "Если нужны другие Obsidian-ссылки [[...]], используй имя файла "
+                "(stem без расширения и пути), а не title."
             )
             stem_lines = "\n".join(
                 f"- «{d.title}» → [[{Path(d.path).stem}]]" for d in docs

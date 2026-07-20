@@ -1611,7 +1611,8 @@ def test_save_run_result_ensures_parent_wikilinks(client, provider, db) -> None:
     file_text = (Path(client.app.state.workspace) / out_doc.path).read_text(
         encoding="utf-8"
     )
-    assert f"Источник: [[{input_stem}]]" in file_text
+    assert "## Ссылки" in file_text
+    assert f"- [[{input_stem}]]" in file_text
     run_after = client.get(f"/runs/{run_id}").json()
     assert run_after["result_text"] == "Summary without wiki links."
 

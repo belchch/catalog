@@ -168,7 +168,8 @@ def test_apply_success_first_try(db: Database, workspace: Path) -> None:
     assert out_path.exists()
     file_text = out_path.read_text(encoding="utf-8")
     assert "# Summary\n\nGreat document." in file_text
-    assert f"Источник: [[{input_stem}]]" in file_text
+    assert "## Ссылки" in file_text
+    assert f"- [[{input_stem}]]" in file_text
 
     # skill_run row reflects success.
     # Find the run via the DB (only one run exists).
@@ -467,7 +468,8 @@ def test_apply_script_skill(db: Database, workspace: Path) -> None:
     assert out_path.exists()
     file_text = out_path.read_text(encoding="utf-8")
     assert "SOURCE TEXT" in file_text
-    assert f"Источник: [[{input_stem}]]" in file_text
+    assert "## Ссылки" in file_text
+    assert f"- [[{input_stem}]]" in file_text
 
     # skill_run row reflects success.
     with db.connect() as conn:
