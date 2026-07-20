@@ -108,6 +108,31 @@ def test_ensure_parent_wikilinks_idempotent() -> None:
     assert once.count("## Ссылки") == 1
 
 
+def test_ensure_parent_wikilinks_strips_single_newline_before_section() -> None:
+    text = "body\n## Ссылки\n\n- [[cover-letter-ea411722]]\n"
+    out = ensure_parent_wikilinks(text, ["cover-letter-ea411722"])
+    assert out.count("## Ссылки") == 1
+    assert out == "body\n\n" + _links_section("cover-letter-ea411722")
+
+
+def test_ensure_parent_wikilinks_migrates_istochnik_single_newline() -> None:
+    text = "body\nИсточник: [[parent-aaa11111]]\n"
+    out = ensure_parent_wikilinks(text, ["parent-aaa11111"])
+    assert "Источник:" not in out
+    assert out == "body\n\n" + _links_section("parent-aaa11111")
+
+
+def test_ensure_parent_wikilinks_migrates_istochniki_single_newline() -> None:
+    text = "body\nИсточники:\n- [[parent-aaa11111]]\n- [[parent-bbb22222]]\n"
+    out = ensure_parent_wikilinks(
+        text, ["parent-aaa11111", "parent-bbb22222"]
+    )
+    assert "Источники:" not in out
+    assert out == "body\n\n" + _links_section(
+        "parent-aaa11111", "parent-bbb22222"
+    )
+
+
 def test_ensure_parent_wikilinks_prefix_stem_not_enough() -> None:
     text = "see [[foo-123456789abc]] already"
     out = ensure_parent_wikilinks(text, ["foo-12345678"])

@@ -9,13 +9,13 @@ from app.storage.repo_document import list_documents
 _WIKI_LINK_RE = re.compile(r"\[\[([^\]]+)\]\]")
 _LINKS_HEADING = "## Ссылки"
 _TRAILING_LINKS_SECTION_RE = re.compile(
-    r"(?:\n{2,}|\A)## Ссылки\n[\s\S]*\Z"
+    r"(?:\n+|\A)## Ссылки\n[\s\S]*\Z"
 )
 _TRAILING_SOURCE_MULTI_RE = re.compile(
-    r"(?:\n{2,}|\A)Источники:\n(?:- \[\[[^\]]+\]\]\n?)+\Z"
+    r"(?:\n+|\A)Источники:\n(?:- \[\[[^\]]+\]\]\n?)+\Z"
 )
 _TRAILING_SOURCE_SINGLE_RE = re.compile(
-    r"(?:\n{2,}|\A)Источник: \[\[[^\]]+\]\]\n?\Z"
+    r"(?:\n+|\A)Источник: \[\[[^\]]+\]\]\n?\Z"
 )
 
 
