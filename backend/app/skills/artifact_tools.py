@@ -6,7 +6,11 @@ from typing import Any
 
 from app.agent.registry import ToolRegistry
 from app.llm.base import ToolSpec
-from app.skills.script_runner import ScriptValidationError, validate_script
+from app.skills.script_runner import (
+    SCRIPT_CODE_CONTRACT_EN,
+    ScriptValidationError,
+    validate_script,
+)
 from app.skills.verify import registered_checks
 from app.storage.db import Database
 from app.storage.repo_session_artifact import (
@@ -197,12 +201,19 @@ def build_artifact_tools(
             name="save_skill_script",
             description=(
                 "Save the deterministic Python script draft for this session. "
-                "The script is validated (no import/open/eval/exec). On "
-                "validation error, fix the code and call again."
+                + SCRIPT_CODE_CONTRACT_EN
+                + ". On validation error, fix the code and call again."
             ),
             parameters={
                 "type": "object",
-                "properties": {"code": {"type": "string"}},
+                "properties": {
+                    "code": {
+                        "type": "string",
+                        "description": (
+                            "Python source. " + SCRIPT_CODE_CONTRACT_EN + "."
+                        ),
+                    }
+                },
                 "required": ["code"],
             },
         ),

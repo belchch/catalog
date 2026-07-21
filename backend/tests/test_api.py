@@ -206,6 +206,16 @@ def test_extract_csv_cp1251_fallback(tmp_path) -> None:
     assert "Тверь" in text
 
 
+def test_extract_csv_utf8_bom(tmp_path) -> None:
+    from app.documents.extract import extract_text
+
+    p = tmp_path / "bom.csv"
+    p.write_bytes("\ufeffname,city\nAnna,Moscow\n".encode("utf-8"))
+    text = extract_text(str(p), "csv")
+    assert text.startswith("name,city")
+    assert "\ufeff" not in text
+
+
 def test_extract_xlsx() -> None:
     from app.documents.extract import extract_text
 
@@ -216,6 +226,25 @@ def test_extract_xlsx() -> None:
     assert "| Anna | Moscow | 42 |" in text
     assert "первый" in text
     assert "второй" in text
+
+
+def test_extract_xlsx_escapes_pipes_and_newlines(tmp_path) -> None:
+    import openpyxl
+    from app.documents.extract import extract_text
+
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Data"
+    ws.append(["a|b", "line1\nline2"])
+    ws.append(["ok", "c\r\nd"])
+    path = tmp_path / "special.xlsx"
+    wb.save(path)
+    wb.close()
+
+    text = extract_text(str(path), "xlsx")
+    assert "| a\\|b | line1 line2 |" in text
+    assert "| ok | c d |" in text
+    assert "| a|b |" not in text
 
 
 def test_extract_pdf() -> None:

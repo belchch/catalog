@@ -14,7 +14,11 @@ from __future__ import annotations
 
 import pytest
 
+from app.api.sessions import PLANNER_SYSTEM_PROMPT
+from app.api.skills import BUILD_SKILL_SYSTEM_PROMPT, _BUILD_SKILL_PARAMETERS
 from app.skills.script_runner import (
+    SCRIPT_CODE_CONTRACT_EN,
+    SCRIPT_CODE_CONTRACT_RU,
     ScriptRuntimeError,
     ScriptValidationError,
     run_script,
@@ -148,6 +152,20 @@ def test_run_script_uses_safe_modules() -> None:
     code2 = "result = re.sub(r'\\d+', '#', document)\n"
     out2 = run_script(code2, "abc123def456", memory_bytes=_TEST_MEM)
     assert out2 == "abc#def#"
+
+
+def test_script_code_contract_lists_preinjected_modules() -> None:
+    for name in ("collections", "json", "math", "re", "statistics"):
+        assert name in SCRIPT_CODE_CONTRACT_RU
+        assert name in SCRIPT_CODE_CONTRACT_EN
+    assert "import/from-import запрещены" in SCRIPT_CODE_CONTRACT_RU
+    assert "import/from-import are forbidden" in SCRIPT_CODE_CONTRACT_EN
+    assert SCRIPT_CODE_CONTRACT_RU in BUILD_SKILL_SYSTEM_PROMPT
+    assert SCRIPT_CODE_CONTRACT_RU in PLANNER_SYSTEM_PROMPT
+    assert (
+        SCRIPT_CODE_CONTRACT_EN
+        in _BUILD_SKILL_PARAMETERS["properties"]["code"]["description"]
+    )
 
 
 def test_run_script_empty_output() -> None:

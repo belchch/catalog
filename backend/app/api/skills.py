@@ -62,7 +62,12 @@ from app.skills.repo_skill import (
     update_status,
     update_skill_config,
 )
-from app.skills.script_runner import ScriptValidationError, validate_script
+from app.skills.script_runner import (
+    SCRIPT_CODE_CONTRACT_EN,
+    SCRIPT_CODE_CONTRACT_RU,
+    ScriptValidationError,
+    validate_script,
+)
 from app.skills.verify import registered_checks
 from app.storage.db import Database
 from app.storage.repo_message import add_message, list_messages
@@ -110,7 +115,9 @@ BUILD_SKILL_SYSTEM_PROMPT = (
     "СНАЧАЛА оцени детерминизм задачи. Если задача сводится к чистой обработке "
     "текста/данных без суждений и рассуждений (форматирование, подсчёт, "
     "регулярные преобразования, парсинг, сортировка) — выбери kind=\"script\" "
-    "и напиши валидный Python-код в поле code: без import, без open/eval/exec; "
+    "и напиши валидный Python-код в поле code: "
+    + SCRIPT_CODE_CONTRACT_RU
+    + "; "
     "вход: document/input_text (склеенный текст) и documents (list[str] по "
     "каждому входу); результат — return из main()/main(document)/main(documents), "
     "глобальная result или print. Если задача требует суждений, "
@@ -194,8 +201,9 @@ _BUILD_SKILL_PARAMETERS = {
         "code": {
             "type": "string",
             "description": (
-                "Python source for kind=script skills. No import/open/eval/exec; "
-                "input via `document`/`documents`; output via "
+                "Python source for kind=script skills. "
+                + SCRIPT_CODE_CONTRACT_EN
+                + "; input via `document`/`documents`; output via "
                 "main()/main(document)/main(documents)/result/print."
             ),
         },

@@ -128,6 +128,22 @@ try:  # pragma: no cover
 except ImportError:  # pragma: no cover
     pass
 
+_SAFE_MODULE_LIST = ", ".join(sorted(_SAFE_MODULES))
+
+SCRIPT_CODE_CONTRACT_RU = (
+    f"операторы import/from-import запрещены и не нужны: в namespace уже "
+    f"доступны модули {_SAFE_MODULE_LIST} (пиши сразу json.loads, re.sub и т.п.); "
+    f"без open/eval/exec; вход — текст документа (xlsx уже как markdown-таблицы), "
+    f"pandas/openpyxl и бинарные файлы недоступны"
+)
+
+SCRIPT_CODE_CONTRACT_EN = (
+    f"import/from-import are forbidden and unnecessary: {_SAFE_MODULE_LIST} "
+    f"are pre-injected into the namespace (use json.loads, re.sub, etc. directly); "
+    f"no open/eval/exec; input is document text (xlsx is already markdown tables); "
+    f"no pandas/openpyxl or binary file access"
+)
+
 # Names that must never be reachable, used by the AST checker. The dynamic
 # attribute helpers (getattr/hasattr/setattr/delattr) take an attribute name as
 # a string, which the dunder guard cannot inspect — so they are fail-closed

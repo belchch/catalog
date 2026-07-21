@@ -45,7 +45,11 @@ from app.llm.base import Message
 from app.llm.log_context import prompt_log_context
 from app.llm.timeout import DEFAULT_LLM_TIMEOUT_SECONDS, llm_timeout_context
 from app.skills.artifact_tools import artifacts_frame, build_artifact_tools
-from app.skills.script_runner import ScriptValidationError, validate_script
+from app.skills.script_runner import (
+    SCRIPT_CODE_CONTRACT_RU,
+    ScriptValidationError,
+    validate_script,
+)
 from app.skills.verify import registered_checks
 from app.storage.db import Database
 from app.storage.repo_message import add_message, list_messages
@@ -81,6 +85,9 @@ PLANNER_SYSTEM_PROMPT = (
     "Когда задача прояснилась — определи kind (agent или script) и "
     "материализуй черновик инструментами: set_skill_meta, затем "
     "save_skill_prompt (для agent) или save_skill_script (для script). "
+    "Для kind=script: "
+    + SCRIPT_CODE_CONTRACT_RU
+    + ". "
     "Поддерживай черновик актуальным через эти инструменты. "
     "Не дублируй полный prompt или script простынёй в чат — они живут в "
     "панели артефактов; в ответе кратко сообщи, что сохранил или обновил "

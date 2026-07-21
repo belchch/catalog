@@ -31,7 +31,7 @@ def _extract_csv(path: str) -> str:
     """Read a CSV file with utf-8, falling back to cp1251 then latin-1."""
     with open(path, "rb") as f:
         raw = f.read()
-    for encoding in ("utf-8", "cp1251", "latin-1"):
+    for encoding in ("utf-8-sig", "cp1251", "latin-1"):
         try:
             return raw.decode(encoding)
         except UnicodeDecodeError:
@@ -100,7 +100,9 @@ def _extract_pdf(path: str) -> str:
 def _cell_to_str(value: object) -> str:
     if value is None:
         return ""
-    return str(value)
+    text = str(value)
+    text = text.replace("\r\n", " ").replace("\n", " ").replace("\r", " ")
+    return text.replace("|", "\\|")
 
 
 def _cell_is_blank(value: object) -> bool:
