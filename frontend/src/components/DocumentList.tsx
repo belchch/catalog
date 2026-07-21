@@ -30,11 +30,11 @@ export function DocumentList({ docs, currentDocId, onSelect }: DocumentListProps
   return (
     <div className="flex flex-col gap-2">
       <label className="cursor-pointer rounded-md border border-dashed border-slate-700 px-3 py-2 text-center text-xs text-slate-400 hover:border-slate-500">
-        {uploading ? 'Загрузка…' : '+ Загрузить .md / .docx'}
+        {uploading ? 'Загрузка…' : '+ Загрузить документ'}
         <input
           ref={inputRef}
           type="file"
-          accept=".md,.docx"
+          accept=".md,.docx,.pdf,.csv,.xlsx"
           className="hidden"
           onChange={(e) => void onFile(e.target.files?.[0])}
         />
