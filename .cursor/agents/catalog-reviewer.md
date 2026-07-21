@@ -1,7 +1,7 @@
 ---
 name: catalog-reviewer
 description: Ревьюит диф одного шага pipeline (catalog-pipeline) против плана и ADR. Только readonly — не правит код, не коммитит, не пушит. Возвращает строго формализованный вердикт APPROVED/CHANGES_REQUESTED. Вызывается ЗАНОВО (без resume) каждый цикл ревью.
-model: cursor-grok-4.5[effort=high]
+model: claude-sonnet-5[effort=high]
 readonly: true
 ---
 
