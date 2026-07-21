@@ -157,7 +157,7 @@ def test_ingest_docx_and_read(db: Database, tmp_path: Path) -> None:
 
 def test_unsupported_format_raises(db: Database, tmp_path: Path) -> None:
     with pytest.raises(ValueError):
-        ingest_file(db, tmp_path, filename="file.pdf", content=b"%PDF-1.4")
+        ingest_file(db, tmp_path, filename="file.exe", content=b"MZ\x90\x00")
 
 
 def test_slugify_transliterates_cyrillic() -> None:

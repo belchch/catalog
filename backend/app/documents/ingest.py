@@ -8,7 +8,13 @@ from pathlib import Path
 from app.storage.db import Database
 from app.storage.repo_document import DocumentRow, create_document
 
-_EXT_TO_KIND = {".md": "md", ".docx": "docx"}
+_EXT_TO_KIND = {
+    ".md": "md",
+    ".docx": "docx",
+    ".pdf": "pdf",
+    ".csv": "csv",
+    ".xlsx": "xlsx",
+}
 
 _CYRILLIC_TO_LATIN = {
     "а": "a", "б": "b", "в": "v", "г": "g", "д": "d", "е": "e", "ё": "yo",

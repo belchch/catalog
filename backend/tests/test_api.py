@@ -137,10 +137,103 @@ def test_upload_and_list_documents(client) -> None:
 
 def test_upload_unsupported_format(client) -> None:
     resp = client.post(
-        "/documents", files={"file": ("bad.pdf", b"%PDF-1.4", "application/pdf")}
+        "/documents", files={"file": ("bad.exe", b"MZ\x90\x00", "application/octet-stream")}
     )
     assert resp.status_code == 400
     assert "unsupported" in resp.json()["detail"].lower()
+
+
+def test_upload_csv(client) -> None:
+    resp = client.post(
+        "/documents",
+        files={"file": ("sample.csv", b"name,city\nAnna,Moscow\n", "text/csv")},
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["kind"] == "csv"
+    assert data["title"] == "sample"
+
+
+def test_upload_xlsx(client) -> None:
+    xlsx_bytes = (Path(__file__).parent / "fixtures" / "sample.xlsx").read_bytes()
+    resp = client.post(
+        "/documents",
+        files={
+            "file": (
+                "sample.xlsx",
+                xlsx_bytes,
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            )
+        },
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["kind"] == "xlsx"
+    assert data["title"] == "sample"
+
+
+def test_upload_pdf(client) -> None:
+    pdf_bytes = (Path(__file__).parent / "fixtures" / "sample-text.pdf").read_bytes()
+    resp = client.post(
+        "/documents",
+        files={"file": ("sample-text.pdf", pdf_bytes, "application/pdf")},
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["kind"] == "pdf"
+    assert data["title"] == "sample-text"
+
+
+_FIXTURES = Path(__file__).parent / "fixtures"
+
+
+def test_extract_csv() -> None:
+    from app.documents.extract import extract_text
+
+    text = extract_text(str(_FIXTURES / "sample.csv"), "csv")
+    assert "name,city,score" in text
+    assert "Москва" in text
+    assert "Казань" in text
+
+
+def test_extract_csv_cp1251_fallback(tmp_path) -> None:
+    from app.documents.extract import extract_text
+
+    cp1251_bytes = "name,city\nAnna,Тверь\n".encode("cp1251")
+    p = tmp_path / "win.csv"
+    p.write_bytes(cp1251_bytes)
+    text = extract_text(str(p), "csv")
+    assert "Тверь" in text
+
+
+def test_extract_xlsx() -> None:
+    from app.documents.extract import extract_text
+
+    text = extract_text(str(_FIXTURES / "sample.xlsx"), "xlsx")
+    assert "## Sheet: Data" in text
+    assert "## Sheet: Notes" in text
+    assert "| name | city | score |" in text
+    assert "| Anna | Moscow | 42 |" in text
+    assert "первый" in text
+    assert "второй" in text
+
+
+def test_extract_pdf() -> None:
+    from app.documents.extract import extract_text
+
+    text = extract_text(str(_FIXTURES / "sample-text.pdf"), "pdf")
+    assert "--- page 1 ---" in text
+    assert "--- page 2 ---" in text
+    assert "Hello Page 1" in text
+    assert "World Page 2" in text
+
+
+def test_extract_pdf_scan_returns_warning() -> None:
+    from app.documents.extract import extract_text
+
+    text = extract_text(str(_FIXTURES / "sample-scan.pdf"), "pdf")
+    assert "no extractable text" in text.lower()
+    assert "scanned" in text.lower()
 
 
 def test_delete_document(client, db) -> None:
