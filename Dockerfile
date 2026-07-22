@@ -9,10 +9,12 @@ RUN pnpm run build
 
 FROM python:3.11-slim AS runtime
 WORKDIR /app
+ARG GIT_SHA=unknown
 ENV PYTHONUNBUFFERED=1 \
-    PIP_NO_CACHE_DIR=1
+    PIP_NO_CACHE_DIR=1 \
+    GIT_SHA=${GIT_SHA}
 COPY backend/pyproject.toml ./
-RUN pip install fastapi 'uvicorn[standard]' httpx pydantic python-dotenv jsonschema python-docx python-multipart dulwich
+RUN pip install fastapi 'uvicorn[standard]' httpx pydantic python-dotenv jsonschema python-docx python-multipart dulwich pypdf openpyxl
 COPY backend/app ./app
 COPY --from=frontend /build/dist ./static
 

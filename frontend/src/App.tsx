@@ -3,6 +3,7 @@ import {
   buildSkill,
   createSession,
   extractApiDetail,
+  getHealth,
   getSession,
   isBuildTimeoutError,
   proposeSkillTracks,
@@ -105,6 +106,7 @@ export default function App() {
   const [openSkills, setOpenSkills] = useState(false)
   const [mainPane, setMainPane] = useState<MainPane>('chat')
   const [artifactHighlight, setArtifactHighlight] = useState<ArtifactType | null>(null)
+  const [gitSha, setGitSha] = useState('')
 
   const handleSessionInvalid = useCallback(() => {
     writeStoredSessionId(null)
@@ -122,6 +124,15 @@ export default function App() {
   useEffect(() => {
     writeStoredSessionId(sessionId)
   }, [sessionId])
+
+  useEffect(() => {
+    void getHealth()
+      .then((h) => {
+        const sha = (h.git_sha || '').trim()
+        if (sha && sha !== 'unknown') setGitSha(sha)
+      })
+      .catch(() => {})
+  }, [])
 
   useEffect(() => {
     setArtifactHighlight(null)
@@ -408,7 +419,14 @@ export default function App() {
   return (
     <div className="flex h-screen flex-col bg-slate-950 text-slate-100">
       <header className="flex items-center justify-between border-b border-slate-800 px-4 py-2">
-        <h1 className="text-base font-semibold">Catalog — планировщик скиллов</h1>
+        <div className="flex min-w-0 items-center gap-3">
+          <h1 className="truncate text-base font-semibold">Catalog — планировщик скиллов</h1>
+          {gitSha ? (
+            <span className="shrink-0 font-mono text-xs text-slate-500" title="git sha">
+              {gitSha}
+            </span>
+          ) : null}
+        </div>
         <ModelSelector
           provider={settingsHook.provider}
           model={settingsHook.model}

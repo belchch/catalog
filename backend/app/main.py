@@ -20,6 +20,8 @@ paths via a patched ``get_settings``) and then override only
 
 from __future__ import annotations
 
+import os
+import subprocess
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -104,9 +106,34 @@ app.include_router(runs.router)
 app.include_router(models.router)
 
 
+_REPO_ROOT = Path(__file__).resolve().parents[2]
+_REPO_GIT_SHA: str | None = None
+
+
+def _resolve_git_sha() -> str:
+    env = os.getenv("GIT_SHA", "").strip()
+    if env and env != "unknown":
+        return env
+    global _REPO_GIT_SHA
+    if _REPO_GIT_SHA is None:
+        try:
+            out = subprocess.run(
+                ["git", "rev-parse", "--short", "HEAD"],
+                cwd=_REPO_ROOT,
+                check=True,
+                capture_output=True,
+                text=True,
+                timeout=2,
+            )
+            _REPO_GIT_SHA = out.stdout.strip()
+        except (OSError, subprocess.SubprocessError):
+            _REPO_GIT_SHA = ""
+    return _REPO_GIT_SHA
+
+
 @app.get("/health")
 def health() -> dict[str, str]:
-    return {"status": "ok"}
+    return {"status": "ok", "git_sha": _resolve_git_sha()}
 
 
 _STATIC = Path(__file__).resolve().parent.parent / "static"

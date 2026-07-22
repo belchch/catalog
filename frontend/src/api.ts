@@ -176,6 +176,11 @@ export interface RunCreated {
   run_id: string
 }
 
+export interface HealthOut {
+  status: string
+  git_sha: string
+}
+
 const envUrl: string | undefined = import.meta.env.VITE_API_URL
 export const API_URL: string =
   envUrl && envUrl.length > 0 ? envUrl : 'http://localhost:8000'
@@ -192,6 +197,10 @@ async function jsonFetch<T>(path: string, init?: RequestInit): Promise<T> {
     throw new ApiError(res.status, res.statusText, body)
   }
   return (await res.json()) as T
+}
+
+export function getHealth(): Promise<HealthOut> {
+  return jsonFetch<HealthOut>('/health')
 }
 
 export function listDocuments(): Promise<DocumentOut[]> {

@@ -115,7 +115,9 @@ def _upload(client, filename: str, content: bytes) -> str:
 def test_health(client) -> None:
     resp = client.get("/health")
     assert resp.status_code == 200
-    assert resp.json() == {"status": "ok"}
+    body = resp.json()
+    assert body["status"] == "ok"
+    assert "git_sha" in body
 
 
 def test_upload_and_list_documents(client) -> None:

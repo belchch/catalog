@@ -1,6 +1,10 @@
 services:
   catalog:
     image: catalog-app:latest
+    build:
+      context: .
+      args:
+        GIT_SHA: ${GIT_SHA:-unknown}
     container_name: catalog-app
     ports:
       - "8000:8000"
