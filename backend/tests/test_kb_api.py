@@ -115,6 +115,68 @@ def test_rescan_removes_orphans(client, tmp_path: Path) -> None:
     assert client.get("/documents").json() == []
 
 
+def test_connect_rejects_empty_path(client) -> None:
+    resp = client.post("/kb/connect", json={"path": ""})
+
+    assert resp.status_code == 422
+
+
+def test_connect_rejects_relative_path(client) -> None:
+    """A relative path would resolve against the server's CWD (its source
+    tree), not wherever the caller intended (ADR-0022 review)."""
+    resp = client.post("/kb/connect", json={"path": "some/relative/path"})
+
+    assert resp.status_code == 422
+
+
+def test_connect_refuses_when_switching_away_from_a_nonempty_index_to_a_missing_path(
+    client, tmp_path: Path
+) -> None:
+    first = tmp_path / "first-kb"
+    (first / "documents").mkdir(parents=True)
+    (first / "documents" / "note.md").write_text("hi", encoding="utf-8")
+    client.post("/kb/connect", json={"path": str(first)})
+    assert len(client.get("/documents").json()) == 1
+
+    second = tmp_path / "second-kb-does-not-exist"
+    resp = client.post("/kb/connect", json={"path": str(second)})
+
+    assert resp.status_code == 409
+    # Refused before anything was touched — old index/connection intact.
+    assert client.app.state.repo_root == str(first)
+    assert len(client.get("/documents").json()) == 1
+
+
+def test_connect_force_bypasses_the_guard(client, tmp_path: Path) -> None:
+    first = tmp_path / "first-kb"
+    (first / "documents").mkdir(parents=True)
+    (first / "documents" / "note.md").write_text("hi", encoding="utf-8")
+    client.post("/kb/connect", json={"path": str(first)})
+
+    second = tmp_path / "second-kb-does-not-exist"
+    resp = client.post("/kb/connect", json={"path": str(second), "force": True})
+
+    assert resp.status_code == 200
+    assert client.app.state.repo_root == str(second)
+    assert client.get("/documents").json() == []
+
+
+def test_rescan_refuses_when_repo_path_vanished(client, tmp_path: Path) -> None:
+    import shutil
+
+    target = tmp_path / "vanish-kb"
+    (target / "documents").mkdir(parents=True)
+    (target / "documents" / "note.md").write_text("hi", encoding="utf-8")
+    client.post("/kb/connect", json={"path": str(target)})
+    assert len(client.get("/documents").json()) == 1
+
+    shutil.rmtree(target)
+    resp = client.post("/kb/rescan")
+
+    assert resp.status_code == 409
+    assert len(client.get("/documents").json()) == 1  # untouched
+
+
 def test_connect_persists_across_lifespan_restart(client, settings, tmp_path: Path) -> None:
     """A prior connect wins over the Settings default at the next startup."""
     from fastapi.testclient import TestClient

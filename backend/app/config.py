@@ -56,9 +56,13 @@ LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
 
 # Prompt logging — raw request/response capture for quality analysis.
 # Disabled by default; opt-in via PROMPT_LOG_ENABLED=1.
+# Lives under the data-root, deliberately *not* under the KB repo (ADR-0022
+# review): prompt logs hold full LLM request/response text, and the KB repo's
+# "Commit" button does a `git add -A` — nesting logs inside it would sweep
+# them into a commit (and an optional push) by default.
 _TRUTHY = {"1", "true", "yes", "on"}
 PROMPT_LOG_ENABLED = os.getenv("PROMPT_LOG_ENABLED", "").strip().lower() in _TRUTHY
-PROMPT_LOG_DIR = str(resolve_override("PROMPT_LOG_DIR", Path(APP_WORKSPACE) / "prompt_logs"))
+PROMPT_LOG_DIR = str(resolve_override("PROMPT_LOG_DIR", _DATA_DIR / "prompt_logs"))
 
 
 @dataclass(frozen=True)
@@ -93,7 +97,7 @@ def get_settings() -> Settings:
     data_dir = resolve_data_dir()
     workspace_dir = resolve_override("APP_KB_REPO", _default_kb_repo_dir(data_dir))
     db_path = resolve_override("APP_DB_PATH", data_dir / "catalog.db")
-    prompt_log_dir = resolve_override("PROMPT_LOG_DIR", workspace_dir / "prompt_logs")
+    prompt_log_dir = resolve_override("PROMPT_LOG_DIR", data_dir / "prompt_logs")
     return Settings(
         db_path=str(db_path),
         workspace_dir=str(workspace_dir),

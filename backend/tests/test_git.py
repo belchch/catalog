@@ -10,7 +10,9 @@ from dulwich.repo import Repo
 from app.storage.git import (
     PathEscapesRepoError,
     commit,
+    ensure_gitignore,
     ensure_repo,
+    pending_paths,
     stage_all,
     stage_paths,
     stage_removal,
@@ -126,3 +128,55 @@ def test_stage_paths_rejects_traversal(tmp_path: Path) -> None:
 
     with pytest.raises(PathEscapesRepoError):
         stage_paths(tmp_path, ["../outside.md"])
+
+
+def test_ensure_gitignore_writes_and_commits_immediately(tmp_path: Path) -> None:
+    ensure_repo(tmp_path).close()
+
+    ensure_gitignore(tmp_path)
+
+    text = (tmp_path / ".gitignore").read_text(encoding="utf-8")
+    assert "prompt_logs/" in text
+    assert ".DS_Store" in text
+    assert ".obsidian/" in text
+    # Committed immediately (it's bootstrap plumbing, not user content) so it
+    # never dangles as an "other pending change" for e.g. the skill-commit
+    # isolation check.
+    assert status(tmp_path).is_clean
+
+
+def test_ensure_gitignore_is_idempotent(tmp_path: Path) -> None:
+    ensure_repo(tmp_path).close()
+    ensure_gitignore(tmp_path)
+    text_before = (tmp_path / ".gitignore").read_text(encoding="utf-8")
+
+    ensure_gitignore(tmp_path)  # second call: nothing to add, no new commit
+
+    assert (tmp_path / ".gitignore").read_text(encoding="utf-8") == text_before
+    assert status(tmp_path).is_clean
+
+
+def test_stage_all_respects_gitignore(tmp_path: Path) -> None:
+    ensure_repo(tmp_path).close()
+    ensure_gitignore(tmp_path)
+    (tmp_path / "prompt_logs").mkdir()
+    (tmp_path / "prompt_logs" / "run.json").write_text("{}", encoding="utf-8")
+    (tmp_path / "documents").mkdir()
+    (tmp_path / "documents" / "note.md").write_text("hi", encoding="utf-8")
+
+    stage_all(tmp_path)
+
+    st = status(tmp_path)
+    assert "documents/note.md" in st.staged_add
+    assert not any("prompt_logs" in p for p in st.staged_add)
+
+
+def test_pending_paths_expands_untracked_directory(tmp_path: Path) -> None:
+    ensure_repo(tmp_path).close()
+    (tmp_path / "skills").mkdir()
+    (tmp_path / "skills" / "alpha-abcd1234.json").write_text("{}", encoding="utf-8")
+
+    # status() collapses a wholly-untracked dir to one entry ("skills/") —
+    # pending_paths must expand it to the actual file.
+    assert "skills/" in status(tmp_path).untracked
+    assert pending_paths(tmp_path) == {"skills/alpha-abcd1234.json"}

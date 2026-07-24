@@ -60,7 +60,10 @@ def test_get_settings_defaults_are_absolute_under_data_root() -> None:
     # startup (see test_kb_api.py).
     assert Path(settings.workspace_dir) == data_dir / "kb"
     assert Path(settings.db_path) == data_dir / "catalog.db"
-    assert Path(settings.prompt_log_dir) == Path(settings.workspace_dir) / "prompt_logs"
+    # ADR-0022 review: prompt logs live under the data-root, deliberately
+    # *not* under the KB repo — nesting them there would let `POST /kb/commit`
+    # (git add -A) sweep full LLM request/response text into a commit/push.
+    assert Path(settings.prompt_log_dir) == data_dir / "prompt_logs"
 
     # Nothing lands in the source tree / process CWD by default.
     assert not str(settings.workspace_dir).startswith(str(Path.cwd()))
@@ -74,7 +77,7 @@ def test_app_data_dir_overrides_root(monkeypatch: pytest.MonkeyPatch, tmp_path: 
 
     assert Path(settings.workspace_dir) == tmp_path / "kb"
     assert Path(settings.db_path) == tmp_path / "catalog.db"
-    assert Path(settings.prompt_log_dir) == tmp_path / "kb" / "prompt_logs"
+    assert Path(settings.prompt_log_dir) == tmp_path / "prompt_logs"
 
 
 def test_point_overrides_still_win(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:

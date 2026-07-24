@@ -1284,6 +1284,27 @@ def test_commit_skill(client, db) -> None:
     assert git_status(repo_root).is_clean  # committed, nothing left pending
 
 
+def test_commit_skill_refuses_when_other_kb_changes_are_pending(client, db) -> None:
+    """ADR-0022 review: commit_skill must not silently fold in unrelated
+    pending document/skill changes — that breaks the "point commit" promise
+    the historical separate button makes."""
+    from pathlib import Path
+
+    repo_root = Path(client.app.state.repo_root)
+    (repo_root / "documents").mkdir(parents=True, exist_ok=True)
+    (repo_root / "documents" / "unrelated.md").write_text("wip", encoding="utf-8")
+
+    skill_id = _seed_committed_skill(db, name="Committed")
+    update_status(db, skill_id, "draft")
+
+    resp = client.post(f"/skills/{skill_id}/commit")
+
+    assert resp.status_code == 409
+    skill = get_skill(db, skill_id)
+    assert skill is not None
+    assert skill.status == "draft"  # not flipped — commit never happened
+
+
 def test_delete_draft_skill(client, db) -> None:
     skill_id = create_skill(
         db,

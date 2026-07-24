@@ -275,15 +275,40 @@ def skill_file_relpath(record: SkillRecord) -> str:
     return f"{_SKILLS_SUBDIR}/{stem}.json"
 
 
-def materialize_skill(repo_root: str | Path, record: SkillRecord) -> str:
-    """Write ``record`` as one JSON file under ``skills/``; return its rel path.
+def _read_skill_payload(path: Path) -> dict | None:
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return None
+    return payload if isinstance(payload, dict) else None
 
-    Overwrites any previous file for this skill wholesale (including a stale
-    file left over from a rename, since the slug in the filename may change).
+
+def materialize_skill(repo_root: str | Path, record: SkillRecord) -> tuple[str, list[str]]:
+    """Write ``record`` as one JSON file under ``skills/``.
+
+    Returns ``(rel_path, removed_paths)``. A rename changes the filename
+    (slug embedded in it), so any *other* file already carrying this skill's
+    id is deleted here first — otherwise :func:`scan_skills` rebuilding from
+    a fresh SQLite could pick up the stale pre-rename file instead of (or as
+    well as) the current one. ``removed_paths`` must be staged as deletions
+    by the caller alongside ``rel_path`` so the commit reflects both sides of
+    the rename atomically.
     """
     rel_path = skill_file_relpath(record)
     root = Path(repo_root)
-    (root / _SKILLS_SUBDIR).mkdir(parents=True, exist_ok=True)
+    skills_dir = root / _SKILLS_SUBDIR
+    skills_dir.mkdir(parents=True, exist_ok=True)
+
+    keep_name = Path(rel_path).name
+    removed_paths: list[str] = []
+    for path in skills_dir.glob("*.json"):
+        if path.name == keep_name:
+            continue
+        payload = _read_skill_payload(path)
+        if payload is not None and payload.get("id") == record.id:
+            path.unlink()
+            removed_paths.append(f"{_SKILLS_SUBDIR}/{path.name}")
+
     payload = {
         "id": record.id,
         "name": record.name,
@@ -297,7 +322,7 @@ def materialize_skill(repo_root: str | Path, record: SkillRecord) -> str:
         json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
         encoding="utf-8",
     )
-    return rel_path
+    return rel_path, removed_paths
 
 
 def _insert_skill_row(db: Database, payload: dict) -> None:
@@ -320,24 +345,34 @@ def _insert_skill_row(db: Database, payload: dict) -> None:
 def scan_skills(db: Database, repo_root: str | Path) -> dict[str, int]:
     """Rebuild missing ``skill`` rows from ``skills/*.json`` (ADR-0022).
 
-    Only *adds* rows for files whose id is not already in the index — an
-    existing row may hold draft edits made after the last commit, which must
-    not be clobbered by re-scanning the last-committed file. This is what
-    lets a fresh/rebuilt SQLite database recover the committed skill list from
-    the repo alone.
+    Only *adds* rows for ids not already in the index — an existing row may
+    hold draft edits made after the last commit, which must not be clobbered
+    by re-scanning the last-committed file. This is what lets a fresh/rebuilt
+    SQLite database recover the committed skill list from the repo alone.
+
+    If more than one file claims the same id (a stray leftover from a rename
+    that predates the :func:`materialize_skill` cleanup, a manual copy, a git
+    merge, ...), the file with the newest ``updated_at`` wins rather than
+    whichever sorts first alphabetically — picking the wrong one would
+    silently resurrect an older skill config.
     """
     root = Path(repo_root) / _SKILLS_SUBDIR
     if not root.is_dir():
         return {"loaded": 0}
     existing_ids = {r["id"] for r in list_skills(db)}
-    loaded = 0
+    best_by_id: dict[str, dict] = {}
     for path in sorted(root.glob("*.json")):
-        try:
-            payload = json.loads(path.read_text(encoding="utf-8"))
-        except (json.JSONDecodeError, OSError):
+        payload = _read_skill_payload(path)
+        skill_id = payload.get("id") if payload else None
+        if not skill_id or skill_id in existing_ids:
             continue
-        if not isinstance(payload, dict) or payload.get("id") in existing_ids:
-            continue
+        current = best_by_id.get(skill_id)
+        if current is None or (payload.get("updated_at") or "") > (
+            current.get("updated_at") or ""
+        ):
+            best_by_id[skill_id] = payload
+    loaded = 0
+    for payload in best_by_id.values():
         try:
             _insert_skill_row(db, payload)
         except (sqlite3.IntegrityError, KeyError):

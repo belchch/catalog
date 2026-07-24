@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 
@@ -17,12 +19,25 @@ class KBConnectRequest(BaseModel):
 
     ``path`` is init'd or opened as a git repo (idempotent either way).
     ``remote``/``push_enabled`` configure the optional backup push — off by
-    default, never required for the app to function offline.
+    default, never required for the app to function offline. ``force`` bypasses
+    the empty-repo-vs-nonempty-index safety guard (see ``DangerousEmptyScanError``)
+    for a deliberate switch to a genuinely empty repo.
     """
 
     path: str
     remote: str | None = None
     push_enabled: bool = False
+    force: bool = False
+
+    @field_validator("path")
+    @classmethod
+    def _valid_path(cls, v: str) -> str:
+        v = v.strip()
+        if not v:
+            raise ValueError("path must not be empty")
+        if not Path(v).expanduser().is_absolute():
+            raise ValueError("path must be absolute")
+        return v
 
 
 class KBScanSummary(BaseModel):

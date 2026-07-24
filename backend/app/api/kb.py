@@ -6,6 +6,11 @@ index, commit changes from the UI". ``app.state.repo_root``/``workspace`` and
 ``app.state.tools`` are updated in place on connect so the rest of the app
 (``read_document`` et al., which closed over ``workspace`` at lifespan
 startup) immediately targets the newly connected repo without a restart.
+
+Every handler offloads its (synchronous, disk/dulwich-bound) work to the
+default threadpool via ``run_in_threadpool`` — ``os.walk`` and dulwich
+porcelain calls are blocking and would otherwise stall the event loop (and
+any concurrently streaming run/WS) for the duration of a large scan/commit.
 """
 
 from __future__ import annotations
@@ -13,6 +18,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi.concurrency import run_in_threadpool
 
 from app.api.deps import get_db, get_repo_root
 from app.api.schemas import (
@@ -24,11 +30,11 @@ from app.api.schemas import (
     KBScanSummary,
     KBStatusOut,
 )
-from app.documents.scan import scan_repo
+from app.documents.scan import DangerousEmptyScanError, guard_repo_not_missing, scan_repo
 from app.documents.tools import build_document_tools
 from app.skills.repo_skill import list_skills, scan_skills
 from app.storage.db import Database
-from app.storage.git import PathEscapesRepoError, ensure_repo
+from app.storage.git import ensure_gitignore, ensure_repo
 from app.storage.git import commit as git_commit
 from app.storage.git import push as git_push
 from app.storage.git import stage_all, status as git_status
@@ -50,16 +56,35 @@ def _read_remote_config(db: Database) -> tuple[str | None, bool]:
     return remote, push_enabled
 
 
+def _scan_summary(scan) -> KBScanSummary:
+    return KBScanSummary(
+        added=scan.added, updated=scan.updated, removed=scan.removed, skipped=scan.skipped
+    )
+
+
 @router.post("/connect", response_model=KBConnectOut)
 async def connect_kb_endpoint(
     req: KBConnectRequest,
     request: Request,
     db: Database = Depends(get_db),
 ) -> KBConnectOut:
+    # req.path is validated non-empty/absolute by KBConnectRequest — resolve()
+    # here only normalizes (symlinks, `..`), it can no longer collapse to CWD.
     repo_root = Path(req.path).expanduser().resolve()
-    ensure_repo(repo_root)
-    for subdir in _KB_REPO_SUBDIRS:
-        (repo_root / subdir).mkdir(parents=True, exist_ok=True)
+
+    # Checked BEFORE ensure_repo — see guard_repo_not_missing's docstring.
+    try:
+        guard_repo_not_missing(repo_root, db, force=req.force)
+    except DangerousEmptyScanError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    def _connect_fs() -> None:
+        ensure_repo(repo_root)
+        for subdir in _KB_REPO_SUBDIRS:
+            (repo_root / subdir).mkdir(parents=True, exist_ok=True)
+        ensure_gitignore(repo_root)
+
+    await run_in_threadpool(_connect_fs)
 
     set_setting(db, _REPO_PATH_KEY, str(repo_root))
     if req.remote is not None:
@@ -70,19 +95,14 @@ async def connect_kb_endpoint(
     request.app.state.workspace = str(repo_root)
     request.app.state.tools = build_document_tools(db, str(repo_root))
 
-    scan_summary = scan_repo(db, repo_root)
-    skills_summary = scan_skills(db, repo_root)
+    scan_summary = await run_in_threadpool(scan_repo, db, repo_root)
+    skills_summary = await run_in_threadpool(scan_skills, db, repo_root)
     remote, push_enabled = _read_remote_config(db)
     return KBConnectOut(
         repo_root=str(repo_root),
         remote=remote,
         push_enabled=push_enabled,
-        scan=KBScanSummary(
-            added=scan_summary.added,
-            updated=scan_summary.updated,
-            removed=scan_summary.removed,
-            skipped=scan_summary.skipped,
-        ),
+        scan=_scan_summary(scan_summary),
         skills_loaded=skills_summary["loaded"],
     )
 
@@ -93,7 +113,7 @@ async def kb_status_endpoint(
     repo_root: str = Depends(get_repo_root),
 ) -> KBStatusOut:
     remote, push_enabled = _read_remote_config(db)
-    st = git_status(repo_root)
+    st = await run_in_threadpool(git_status, repo_root)
     return KBStatusOut(
         repo_root=repo_root,
         remote=remote,
@@ -111,18 +131,20 @@ async def kb_status_endpoint(
 
 @router.post("/rescan", response_model=KBRescanOut)
 async def kb_rescan_endpoint(
+    force: bool = False,
     db: Database = Depends(get_db),
     repo_root: str = Depends(get_repo_root),
 ) -> KBRescanOut:
-    scan_summary = scan_repo(db, repo_root)
-    skills_summary = scan_skills(db, repo_root)
+    # repo_root normally still exists here (created at connect/startup) — this
+    # only trips if it vanished since (unmount, external rm/rename).
+    try:
+        guard_repo_not_missing(repo_root, db, force=force)
+    except DangerousEmptyScanError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    scan_summary = await run_in_threadpool(scan_repo, db, repo_root)
+    skills_summary = await run_in_threadpool(scan_skills, db, repo_root)
     return KBRescanOut(
-        scan=KBScanSummary(
-            added=scan_summary.added,
-            updated=scan_summary.updated,
-            removed=scan_summary.removed,
-            skipped=scan_summary.skipped,
-        ),
+        scan=_scan_summary(scan_summary),
         skills_loaded=skills_summary["loaded"],
     )
 
@@ -133,16 +155,13 @@ async def kb_commit_endpoint(
     db: Database = Depends(get_db),
     repo_root: str = Depends(get_repo_root),
 ) -> KBCommitOut:
-    try:
-        stage_all(repo_root)
-    except PathEscapesRepoError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-    sha = git_commit(repo_root, req.message)
+    await run_in_threadpool(stage_all, repo_root)
+    sha = await run_in_threadpool(git_commit, repo_root, req.message)
     if sha is None:
         return KBCommitOut(sha=None, pushed=False)
 
     remote, push_enabled = _read_remote_config(db)
     if not push_enabled or not remote:
         return KBCommitOut(sha=sha, pushed=False)
-    result = git_push(repo_root, remote)
+    result = await run_in_threadpool(git_push, repo_root, remote)
     return KBCommitOut(sha=sha, pushed=result.ok, push_warning=result.warning)

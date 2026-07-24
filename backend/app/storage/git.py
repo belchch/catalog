@@ -9,6 +9,7 @@ turn "files changed in the working tree" into real git history.
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -40,6 +41,38 @@ def ensure_repo(path: str | Path) -> Repo:
 # read as intent ("connect to a fresh repo" vs "reopen a configured one").
 init_repo = ensure_repo
 open_repo = ensure_repo
+
+_GITIGNORE_ENTRIES = ("prompt_logs/", ".DS_Store", ".obsidian/")
+
+
+def ensure_gitignore(repo_root: str | Path) -> None:
+    """Make sure prompt logs and OS/editor cruft can never land in a commit.
+
+    Defense in depth: the default ``prompt_log_dir`` no longer lives inside
+    the KB repo (ADR-0022 review), but a misconfigured ``PROMPT_LOG_DIR`` —
+    or Finder/Obsidian metadata — must still not get swept into a commit by
+    :func:`stage_all` (``git add -A``). Idempotent: only appends entries not
+    already present, and only touches disk/git when something changed.
+
+    Commits the change immediately rather than leaving it as a dangling
+    untracked/staged file: this is app bootstrap plumbing, not user content,
+    so it doesn't fall under ADR-0022 decision #5 ("commits are an explicit
+    UI button") — and leaving it dangling would make it look like an
+    unrelated pending change to every status/commit call afterwards
+    (including the point-commit isolation check on ``POST
+    /skills/{id}/commit``).
+    """
+    path = Path(repo_root) / ".gitignore"
+    existing = path.read_text(encoding="utf-8").splitlines() if path.exists() else []
+    missing = [e for e in _GITIGNORE_ENTRIES if e not in existing]
+    if not missing:
+        return
+    with path.open("a", encoding="utf-8") as f:
+        if existing and existing[-1] != "":
+            f.write("\n")
+        f.write("\n".join(missing) + "\n")
+    stage_paths(repo_root, [".gitignore"])
+    commit(repo_root, "chore: ignore prompt logs and OS/editor cruft")
 
 
 def _guarded_abs_paths(repo_root: str | Path, paths: list[str]) -> list[str]:
@@ -121,6 +154,37 @@ def status(repo_root: str | Path) -> RepoStatus:
         unstaged=_decode(st.unstaged),
         untracked=_decode(st.untracked),
     )
+
+
+def pending_paths(repo_root: str | Path) -> set[str]:
+    """Every file path with a pending (staged/unstaged/untracked) change.
+
+    Like :func:`status`, but flattened to individual file paths: dulwich
+    collapses a wholly-untracked directory to one entry ending in ``/``
+    (e.g. ``"skills/"`` when nothing under it is tracked yet) — useful for a
+    human-readable status panel, but wrong for anything that needs to check
+    "is this pending change exactly the one file I expect", such as the
+    point-commit isolation check on ``POST /skills/{id}/commit``. Expands
+    any such directory entry to its actual files.
+    """
+    root = Path(repo_root)
+    st = status(root)
+    raw = (
+        set(st.staged_add)
+        | set(st.staged_delete)
+        | set(st.staged_modify)
+        | set(st.unstaged)
+        | set(st.untracked)
+    )
+    expanded: set[str] = set()
+    for item in raw:
+        if not item.endswith("/"):
+            expanded.add(item)
+            continue
+        for dirpath, _dirnames, filenames in os.walk(root / item):
+            for filename in filenames:
+                expanded.add((Path(dirpath) / filename).relative_to(root).as_posix())
+    return expanded
 
 
 def commit(repo_root: str | Path, message: str) -> str | None:
