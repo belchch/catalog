@@ -9,12 +9,15 @@ row). ``get_skill`` returns a dataclass carrying both the persisted metadata
 
 from __future__ import annotations
 
+import json
 import sqlite3
 import uuid
 from dataclasses import dataclass, replace
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import cast
 
+from app.documents.ingest import slugify
 from app.skills.config import SkillConfig, compute_tags
 from app.skills.repo_run import delete_runs_for_skill
 from app.storage.db import Database
@@ -252,3 +255,92 @@ def update_skill_config(
                 (config.to_json(), now, skill_id),
             )
     return replace(record, name=new_name, config=config, updated_at=now)
+
+
+# --- ADR-0022: skill materialization in the connected KB repo -------------
+#
+# ``commit_skill`` used to only flip ``skill.status`` in SQLite (the ADR-0018
+# debt this closes). A committed skill is now also written to ``skills/`` as
+# one self-contained JSON file, staged and git-committed — the file (not the
+# SQLite row) is the source of truth; the row remains a rebuildable cache
+# (see :func:`scan_skills`, the counterpart of :func:`app.documents.scan.
+# scan_repo` for the skills subtree).
+
+_SKILLS_SUBDIR = "skills"
+
+
+def skill_file_relpath(record: SkillRecord) -> str:
+    slug = slugify(record.name)
+    stem = f"{slug}-{record.id[:8]}" if slug else record.id
+    return f"{_SKILLS_SUBDIR}/{stem}.json"
+
+
+def materialize_skill(repo_root: str | Path, record: SkillRecord) -> str:
+    """Write ``record`` as one JSON file under ``skills/``; return its rel path.
+
+    Overwrites any previous file for this skill wholesale (including a stale
+    file left over from a rename, since the slug in the filename may change).
+    """
+    rel_path = skill_file_relpath(record)
+    root = Path(repo_root)
+    (root / _SKILLS_SUBDIR).mkdir(parents=True, exist_ok=True)
+    payload = {
+        "id": record.id,
+        "name": record.name,
+        "description": record.description,
+        "status": record.status,
+        "created_at": record.created_at,
+        "updated_at": record.updated_at,
+        "config": json.loads(record.config.to_json()),
+    }
+    (root / rel_path).write_text(
+        json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    return rel_path
+
+
+def _insert_skill_row(db: Database, payload: dict) -> None:
+    with db.connect() as conn:
+        conn.execute(
+            "INSERT INTO skill(id, name, description, config_json, status, "
+            "created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (
+                payload["id"],
+                payload["name"],
+                payload.get("description"),
+                json.dumps(payload["config"], ensure_ascii=False),
+                payload.get("status", "committed"),
+                payload.get("created_at") or _now_iso(),
+                payload.get("updated_at") or _now_iso(),
+            ),
+        )
+
+
+def scan_skills(db: Database, repo_root: str | Path) -> dict[str, int]:
+    """Rebuild missing ``skill`` rows from ``skills/*.json`` (ADR-0022).
+
+    Only *adds* rows for files whose id is not already in the index — an
+    existing row may hold draft edits made after the last commit, which must
+    not be clobbered by re-scanning the last-committed file. This is what
+    lets a fresh/rebuilt SQLite database recover the committed skill list from
+    the repo alone.
+    """
+    root = Path(repo_root) / _SKILLS_SUBDIR
+    if not root.is_dir():
+        return {"loaded": 0}
+    existing_ids = {r["id"] for r in list_skills(db)}
+    loaded = 0
+    for path in sorted(root.glob("*.json")):
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            continue
+        if not isinstance(payload, dict) or payload.get("id") in existing_ids:
+            continue
+        try:
+            _insert_skill_row(db, payload)
+        except (sqlite3.IntegrityError, KeyError):
+            continue
+        loaded += 1
+    return {"loaded": loaded}

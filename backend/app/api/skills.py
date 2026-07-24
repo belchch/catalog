@@ -23,7 +23,7 @@ import json
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import ValidationError
 
-from app.api.deps import get_db, get_provider, get_settings, get_tools
+from app.api.deps import get_db, get_provider, get_repo_root, get_settings, get_tools
 from app.api.schemas import (
     CommitOut,
     EditStarted,
@@ -58,6 +58,7 @@ from app.skills.repo_skill import (
     delete_skill,
     get_skill,
     list_skills,
+    materialize_skill,
     update_skill,
     update_status,
     update_skill_config,
@@ -70,6 +71,8 @@ from app.skills.script_runner import (
 )
 from app.skills.verify import registered_checks
 from app.storage.db import Database
+from app.storage.git import commit as git_commit
+from app.storage.git import stage_paths
 from app.storage.repo_message import add_message, list_messages
 from app.storage.repo_session import create_session, get_session, update_session_status
 from app.storage.repo_session_artifact import (
@@ -965,12 +968,26 @@ async def rename_skill_endpoint(
 
 @router.post("/skills/{skill_id}/commit", response_model=CommitOut)
 async def commit_skill_endpoint(
-    skill_id: str, db: Database = Depends(get_db)
+    skill_id: str,
+    db: Database = Depends(get_db),
+    repo_root: str = Depends(get_repo_root),
 ) -> CommitOut:
+    """Materialize the skill config to ``skills/`` and git-commit it.
+
+    ADR-0018 debt closed: this used to only flip ``skill.status`` in SQLite.
+    A point commit (only this skill's file, not the general ``POST
+    /kb/commit`` flow) keeps the historical "commit skill" button meaning —
+    other pending document/skill changes are left untouched for later.
+    """
     skill = get_skill(db, skill_id)
     if skill is None:
         raise HTTPException(status_code=404, detail="skill not found")
     update_status(db, skill_id, "committed")
+    committed = get_skill(db, skill_id)
+    assert committed is not None
+    rel_path = materialize_skill(repo_root, committed)
+    stage_paths(repo_root, [rel_path])
+    git_commit(repo_root, f"skill: commit {committed.name}")
     return CommitOut(id=skill_id, status="committed")
 
 

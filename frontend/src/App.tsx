@@ -21,6 +21,7 @@ import { ArtifactsPanel } from './components/ArtifactsPanel.tsx'
 import { Chat } from './components/Chat.tsx'
 import { CollapsibleSection } from './components/CollapsibleSection.tsx'
 import { DocumentList } from './components/DocumentList.tsx'
+import { KBPanel } from './components/KBPanel.tsx'
 import { ModelSelector } from './components/ModelSelector.tsx'
 import { RunView } from './components/RunView.tsx'
 import { SessionsPanel } from './components/SessionsPanel.tsx'
@@ -29,6 +30,7 @@ import { SkillSettingsModal } from './components/SkillSettingsModal.tsx'
 import { SkillTrackPicker } from './components/SkillTrackPicker.tsx'
 import { SkillsPanel } from './components/SkillsPanel.tsx'
 import { useDocuments } from './hooks/useDocuments.ts'
+import { useKb } from './hooks/useKb.ts'
 import { usePlannerSession } from './hooks/usePlannerSession.ts'
 import { useRunStream } from './hooks/useRunStream.ts'
 import { useSessions } from './hooks/useSessions.ts'
@@ -81,6 +83,13 @@ function useIsLg(): boolean {
 
 export default function App() {
   const docs = useDocuments()
+  const kb = useKb()
+  // Connect/rescan/commit change what's on disk under the hood — refresh the
+  // plain document list whenever the KB status is refetched so it doesn't
+  // require a separate manual "Обновить" click to notice.
+  useEffect(() => {
+    if (kb.status) void docs.refresh()
+  }, [kb.status, docs, docs.refresh])
   const skillsHook = useSkills()
   const settingsHook = useSettings()
   const sessions = useSessions()
@@ -102,6 +111,7 @@ export default function App() {
   const [savedResultDoc, setSavedResultDoc] = useState<DocumentOut | null>(null)
   const [savingResult, setSavingResult] = useState(false)
   const [openSessions, setOpenSessions] = useState(false)
+  const [openKb, setOpenKb] = useState(false)
   const [openDocs, setOpenDocs] = useState(false)
   const [openSkills, setOpenSkills] = useState(false)
   const [mainPane, setMainPane] = useState<MainPane>('chat')
@@ -473,6 +483,9 @@ export default function App() {
               onSelect={handleSelectSession}
               onDelete={(id) => void handleDeleteSession(id)}
             />
+          </CollapsibleSection>
+          <CollapsibleSection title="База знаний" open={openKb} onToggle={setOpenKb}>
+            <KBPanel kb={kb} />
           </CollapsibleSection>
           <CollapsibleSection
             title="Документы"

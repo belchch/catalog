@@ -31,16 +31,20 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
-from app.api import documents, models, runs, sessions, skills
+from app.api import documents, kb, models, runs, sessions, skills
 from app.config import Settings, get_settings
+from app.documents.scan import scan_repo
 from app.documents.tools import build_document_tools
 from app.llm.factory import build_providers, select_provider
 from app.llm.openrouter import build_debug_hooks
 from app.llm.zai import DEFAULT_ZAI_MODEL
 from app.logging_config import setup_logging
+from app.skills.repo_skill import scan_skills
 from app.storage.db import Database
 from app.storage.git import ensure_repo
-from app.storage.repo_document import reconcile_orphans
+from app.storage.repo_setting import get_setting
+
+_KB_REPO_SUBDIRS = ("documents", "results", "skills")
 
 # Configure stdout logging at import time so every ``app.*`` log line carries
 # the correlation context. Runs once when ``app.main`` is first imported
@@ -51,12 +55,10 @@ setup_logging(level=get_settings().log_level)
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     settings: Settings = get_settings()
-    # ADR-0012: data-root lives outside the source tree and may not exist yet
-    # (fresh install / first run) — create it and the two app-owned git repos
-    # (documents/, skills/) before anything tries to read/write under it.
+    # ADR-0012/0022: data-root lives outside the source tree and may not exist
+    # yet (fresh install / first run) — create it before anything reads/writes
+    # under it.
     Path(settings.db_path).parent.mkdir(parents=True, exist_ok=True)
-    ensure_repo(Path(settings.workspace_dir) / "documents")
-    ensure_repo(Path(settings.workspace_dir) / "skills")
     db = Database(settings.db_path)
     db.init_schema()
     http_client = httpx.AsyncClient(timeout=60.0, event_hooks=build_debug_hooks())
@@ -78,10 +80,20 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     if active_name == "zai" and ("/" in default_model or not default_model):
         default_model = DEFAULT_ZAI_MODEL
     app.state.active_model = default_model
-    app.state.workspace = settings.workspace_dir
-    app.state.tools = build_document_tools(db, settings.workspace_dir)
+
+    # ADR-0022: one connected KB repo with documents/results/skills subfolders,
+    # replacing the two app-owned repos. A prior POST /kb/connect persists its
+    # path in app_setting and wins over the Settings default at every restart.
+    repo_root = Path(get_setting(db, "kb_repo_path") or settings.workspace_dir)
+    ensure_repo(repo_root)
+    for subdir in _KB_REPO_SUBDIRS:
+        (repo_root / subdir).mkdir(parents=True, exist_ok=True)
+    app.state.repo_root = str(repo_root)
+    app.state.workspace = str(repo_root)
+    app.state.tools = build_document_tools(db, str(repo_root))
     app.state.settings = settings
-    reconcile_orphans(db, settings.workspace_dir)
+    scan_repo(db, repo_root)
+    scan_skills(db, repo_root)
     try:
         yield
     finally:
@@ -104,6 +116,7 @@ app.include_router(sessions.router)
 app.include_router(skills.router)
 app.include_router(runs.router)
 app.include_router(models.router)
+app.include_router(kb.router)
 
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]

@@ -53,6 +53,47 @@ export interface SessionOut {
   llm_timeout_seconds: number
 }
 
+/** ADR-0022: the connected knowledge-base git repo. */
+export interface KBScanSummary {
+  added: number
+  updated: number
+  removed: number
+  skipped: number
+}
+
+export interface KBConnectOut {
+  repo_root: string
+  remote: string | null
+  push_enabled: boolean
+  scan: KBScanSummary
+  skills_loaded: number
+}
+
+export interface KBStatusOut {
+  repo_root: string
+  remote: string | null
+  push_enabled: boolean
+  staged_add: string[]
+  staged_delete: string[]
+  staged_modify: string[]
+  unstaged: string[]
+  untracked: string[]
+  is_clean: boolean
+  document_count: number
+  skill_count: number
+}
+
+export interface KBRescanOut {
+  scan: KBScanSummary
+  skills_loaded: number
+}
+
+export interface KBCommitOut {
+  sha: string | null
+  pushed: boolean
+  push_warning?: string | null
+}
+
 export class ApiError extends Error {
   status: number
   detail: string
@@ -211,6 +252,34 @@ export function uploadDocument(file: File): Promise<DocumentOut> {
   const form = new FormData()
   form.append('file', file)
   return jsonFetch<DocumentOut>('/documents', { method: 'POST', body: form })
+}
+
+export function connectKB(params: {
+  path: string
+  remote?: string
+  push_enabled?: boolean
+}): Promise<KBConnectOut> {
+  return jsonFetch<KBConnectOut>('/kb/connect', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(params),
+  })
+}
+
+export function getKBStatus(): Promise<KBStatusOut> {
+  return jsonFetch<KBStatusOut>('/kb/status')
+}
+
+export function rescanKB(): Promise<KBRescanOut> {
+  return jsonFetch<KBRescanOut>('/kb/rescan', { method: 'POST' })
+}
+
+export function commitKB(message: string): Promise<KBCommitOut> {
+  return jsonFetch<KBCommitOut>('/kb/commit', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ message }),
+  })
 }
 
 export function createSession(): Promise<SessionCreated> {
