@@ -291,7 +291,13 @@ def test_delete_document(client, db) -> None:
     assert missing.status_code == 404
 
 
-def test_list_documents_reconciles_orphans(client, db) -> None:
+def test_list_documents_no_longer_auto_reconciles(client, db) -> None:
+    """ADR-0022: orphan reconcile moved off the implicit GET /documents path.
+
+    It now runs at lifespan startup and via the explicit ``POST /kb/rescan``
+    button (see ``test_kb_rescan_removes_orphans`` in test_kb_api.py) — a
+    stale row lingers in a plain listing until one of those runs.
+    """
     from pathlib import Path
 
     from app.storage.repo_document import get_document
@@ -306,24 +312,7 @@ def test_list_documents_reconciles_orphans(client, db) -> None:
     assert listing.status_code == 200
     ids = [d["id"] for d in listing.json()]
     assert kept_id in ids
-    assert orphan_id not in ids
-    assert get_document(db, orphan_id) is None
-
-
-def test_reconcile_documents_endpoint(client, db) -> None:
-    from pathlib import Path
-
-    from app.storage.repo_document import get_document
-
-    orphan_id = _upload(client, "gone.md", b"gone")
-    orphan = get_document(db, orphan_id)
-    assert orphan is not None
-    (Path(client.app.state.workspace) / orphan.path).unlink()
-
-    resp = client.post("/documents/reconcile")
-    assert resp.status_code == 200
-    assert resp.json()["removed"] == [orphan_id]
-    assert get_document(db, orphan_id) is None
+    assert orphan_id in ids
 
 
 # --------------------------------------------------------------------------- #
@@ -1273,6 +1262,10 @@ def test_build_agent_skill_with_non_determinism_reason(client, provider, db) -> 
 
 
 def test_commit_skill(client, db) -> None:
+    from pathlib import Path
+
+    from app.storage.git import status as git_status
+
     skill_id = _seed_committed_skill(db, name="Committed")
     # Seed as draft to exercise the draft -> committed transition.
     update_status(db, skill_id, "draft")
@@ -1284,6 +1277,32 @@ def test_commit_skill(client, db) -> None:
     skill = get_skill(db, skill_id)
     assert skill is not None
     assert skill.status == "committed"
+
+    repo_root = Path(client.app.state.repo_root)
+    matches = list((repo_root / "skills").glob(f"*-{skill_id[:8]}.json"))
+    assert len(matches) == 1
+    assert git_status(repo_root).is_clean  # committed, nothing left pending
+
+
+def test_commit_skill_refuses_when_other_kb_changes_are_pending(client, db) -> None:
+    """ADR-0022 review: commit_skill must not silently fold in unrelated
+    pending document/skill changes — that breaks the "point commit" promise
+    the historical separate button makes."""
+    from pathlib import Path
+
+    repo_root = Path(client.app.state.repo_root)
+    (repo_root / "documents").mkdir(parents=True, exist_ok=True)
+    (repo_root / "documents" / "unrelated.md").write_text("wip", encoding="utf-8")
+
+    skill_id = _seed_committed_skill(db, name="Committed")
+    update_status(db, skill_id, "draft")
+
+    resp = client.post(f"/skills/{skill_id}/commit")
+
+    assert resp.status_code == 409
+    skill = get_skill(db, skill_id)
+    assert skill is not None
+    assert skill.status == "draft"  # not flipped — commit never happened
 
 
 def test_delete_draft_skill(client, db) -> None:

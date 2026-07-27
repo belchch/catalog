@@ -19,11 +19,13 @@ skill drops back to ``draft``.
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 
 from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi.concurrency import run_in_threadpool
 from pydantic import ValidationError
 
-from app.api.deps import get_db, get_provider, get_settings, get_tools
+from app.api.deps import get_db, get_provider, get_repo_root, get_settings, get_tools
 from app.api.schemas import (
     CommitOut,
     EditStarted,
@@ -58,6 +60,7 @@ from app.skills.repo_skill import (
     delete_skill,
     get_skill,
     list_skills,
+    materialize_skill,
     update_skill,
     update_status,
     update_skill_config,
@@ -70,6 +73,8 @@ from app.skills.script_runner import (
 )
 from app.skills.verify import registered_checks
 from app.storage.db import Database
+from app.storage.git import commit as git_commit
+from app.storage.git import pending_paths, stage_paths, stage_removal
 from app.storage.repo_message import add_message, list_messages
 from app.storage.repo_session import create_session, get_session, update_session_status
 from app.storage.repo_session_artifact import (
@@ -965,11 +970,57 @@ async def rename_skill_endpoint(
 
 @router.post("/skills/{skill_id}/commit", response_model=CommitOut)
 async def commit_skill_endpoint(
-    skill_id: str, db: Database = Depends(get_db)
+    skill_id: str,
+    db: Database = Depends(get_db),
+    repo_root: str = Depends(get_repo_root),
 ) -> CommitOut:
+    """Materialize the skill config to ``skills/`` and git-commit it.
+
+    ADR-0018 debt closed: this used to only flip ``skill.status`` in SQLite.
+    A point commit (only this skill's file — plus any stale file a rename
+    left behind — not the general ``POST /kb/commit`` flow) keeps the
+    historical "commit skill" button meaning: other pending document/skill
+    changes are left untouched for later. To actually guarantee that (rather
+    than just fold in whatever else happens to already be staged), this
+    refuses with 409 if anything besides this skill's own file is pending —
+    resolve or commit that first via the KB panel.
+
+    ``skill.status`` only flips to ``committed`` *after* the git commit
+    succeeds — flipping it first would leave a skill marked committed with
+    no corresponding file/commit if materialization or the commit failed.
+
+    ``materialize_skill``/``pending_paths``/dulwich stage+commit are all
+    blocking disk/git work, offloaded to the threadpool so they don't stall
+    the event loop (and any concurrently streaming run/WS) for their
+    duration.
+    """
     skill = get_skill(db, skill_id)
     if skill is None:
         raise HTTPException(status_code=404, detail="skill not found")
+
+    to_commit = replace(skill, status="committed")
+    rel_path, removed_paths = await run_in_threadpool(materialize_skill, repo_root, to_commit)
+    touched = {rel_path, *removed_paths}
+
+    other_pending = await run_in_threadpool(pending_paths, repo_root) - touched
+    if other_pending:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "other pending KB changes exist outside this skill: "
+                f"{sorted(other_pending)[:5]}. Commit or discard them first "
+                "(see the KB panel), or use POST /kb/commit to include "
+                "everything together."
+            ),
+        )
+
+    def _stage_and_commit() -> None:
+        stage_paths(repo_root, [rel_path])
+        if removed_paths:
+            stage_removal(repo_root, removed_paths)
+        git_commit(repo_root, f"skill: commit {skill.name}")
+
+    await run_in_threadpool(_stage_and_commit)
     update_status(db, skill_id, "committed")
     return CommitOut(id=skill_id, status="committed")
 

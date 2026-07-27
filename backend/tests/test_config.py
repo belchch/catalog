@@ -17,7 +17,13 @@ import pytest
 from app.config import get_settings
 from app.storage.paths import os_default_data_dir, resolve_data_dir
 
-_DATA_ROOT_ENV_VARS = ("APP_DATA_DIR", "APP_WORKSPACE", "APP_DB_PATH", "PROMPT_LOG_DIR")
+_DATA_ROOT_ENV_VARS = (
+    "APP_DATA_DIR",
+    "APP_KB_REPO",
+    "APP_WORKSPACE",
+    "APP_DB_PATH",
+    "PROMPT_LOG_DIR",
+)
 
 
 @pytest.fixture(autouse=True)
@@ -48,9 +54,16 @@ def test_get_settings_defaults_are_absolute_under_data_root() -> None:
         value = Path(getattr(settings, attr))
         assert value.is_absolute(), f"{attr} must be absolute, got {value}"
 
-    assert Path(settings.workspace_dir) == data_dir / "workspace"
+    # ADR-0022: fresh installs default the KB repo under data-root/kb (not
+    # the pre-ADR-0022 workspace/ name) — the app.state seed only; an actual
+    # POST /kb/connect persists its own path in app_setting and wins at
+    # startup (see test_kb_api.py).
+    assert Path(settings.workspace_dir) == data_dir / "kb"
     assert Path(settings.db_path) == data_dir / "catalog.db"
-    assert Path(settings.prompt_log_dir) == Path(settings.workspace_dir) / "prompt_logs"
+    # ADR-0022 review: prompt logs live under the data-root, deliberately
+    # *not* under the KB repo — nesting them there would let `POST /kb/commit`
+    # (git add -A) sweep full LLM request/response text into a commit/push.
+    assert Path(settings.prompt_log_dir) == data_dir / "prompt_logs"
 
     # Nothing lands in the source tree / process CWD by default.
     assert not str(settings.workspace_dir).startswith(str(Path.cwd()))
@@ -62,14 +75,14 @@ def test_app_data_dir_overrides_root(monkeypatch: pytest.MonkeyPatch, tmp_path: 
 
     settings = get_settings()
 
-    assert Path(settings.workspace_dir) == tmp_path / "workspace"
+    assert Path(settings.workspace_dir) == tmp_path / "kb"
     assert Path(settings.db_path) == tmp_path / "catalog.db"
-    assert Path(settings.prompt_log_dir) == tmp_path / "workspace" / "prompt_logs"
+    assert Path(settings.prompt_log_dir) == tmp_path / "prompt_logs"
 
 
 def test_point_overrides_still_win(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     monkeypatch.setenv("APP_DATA_DIR", str(tmp_path / "unused-root"))
-    monkeypatch.setenv("APP_WORKSPACE", str(tmp_path / "custom-ws"))
+    monkeypatch.setenv("APP_KB_REPO", str(tmp_path / "custom-ws"))
     monkeypatch.setenv("APP_DB_PATH", str(tmp_path / "custom.db"))
     monkeypatch.setenv("PROMPT_LOG_DIR", str(tmp_path / "custom-logs"))
 
@@ -78,6 +91,18 @@ def test_point_overrides_still_win(monkeypatch: pytest.MonkeyPatch, tmp_path: Pa
     assert Path(settings.workspace_dir) == tmp_path / "custom-ws"
     assert Path(settings.db_path) == tmp_path / "custom.db"
     assert Path(settings.prompt_log_dir) == tmp_path / "custom-logs"
+
+
+def test_legacy_app_workspace_still_honored(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Pre-ADR-0022 ``APP_WORKSPACE`` (no ``APP_KB_REPO`` set) keeps resolving."""
+    monkeypatch.setenv("APP_DATA_DIR", str(tmp_path / "unused-root"))
+    monkeypatch.setenv("APP_WORKSPACE", str(tmp_path / "legacy-ws"))
+
+    settings = get_settings()
+
+    assert Path(settings.workspace_dir) == tmp_path / "legacy-ws"
 
 
 def test_app_data_dir_expands_user(monkeypatch: pytest.MonkeyPatch) -> None:

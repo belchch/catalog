@@ -22,13 +22,32 @@ ZAI_BASE_URL = os.getenv("ZAI_BASE_URL", "https://api.z.ai/api/paas/v4")
 APP_PROVIDER = os.getenv("APP_PROVIDER", "").strip().lower()
 
 # Data-root (ADR-0012): one absolute directory outside the source tree that
-# holds every app-owned artifact (workspace/, catalog.db, prompt_logs/).
-# Env override: APP_DATA_DIR. OS default otherwise (see app.storage.paths).
-# APP_WORKSPACE / APP_DB_PATH / PROMPT_LOG_DIR remain point-overrides for
-# backward compat (e.g. tests pointing at tmp_path); when unset they resolve
-# under the data-root instead of the process CWD.
+# holds every app-owned artifact (catalog.db, prompt_logs/) plus, by default,
+# the connected KB repo (see ADR-0022). Env override: APP_DATA_DIR. OS default
+# otherwise (see app.storage.paths). APP_DB_PATH / PROMPT_LOG_DIR remain
+# point-overrides for backward compat (e.g. tests pointing at tmp_path); when
+# unset they resolve under the data-root instead of the process CWD.
 _DATA_DIR = resolve_data_dir()
-APP_WORKSPACE = str(resolve_override("APP_WORKSPACE", _DATA_DIR / "workspace"))
+
+
+def _default_kb_repo_dir(data_dir: Path) -> Path:
+    """Default KB-repo path when nothing is configured yet (ADR-0022).
+
+    ``APP_WORKSPACE`` is the pre-ADR-0022 point-override (two app-owned repos
+    under ``workspace/documents`` and ``workspace/skills``); if an operator
+    already has it set, honor it so existing on-prem/local setups keep
+    resolving to the same directory. Otherwise default to a fresh ``kb/``
+    directory under the data-root — this app.state.workspace/repo_root value
+    is itself only a *default*: a real connection made via ``POST /kb/connect``
+    is persisted in ``app_setting`` and takes precedence at lifespan startup.
+    """
+    legacy = os.getenv("APP_WORKSPACE")
+    if legacy:
+        return Path(legacy).expanduser().resolve()
+    return data_dir / "kb"
+
+
+APP_WORKSPACE = str(resolve_override("APP_KB_REPO", _default_kb_repo_dir(_DATA_DIR)))
 APP_DB_PATH = str(resolve_override("APP_DB_PATH", _DATA_DIR / "catalog.db"))
 
 # Logging — root level for the ``app`` logger hierarchy (default INFO).
@@ -37,9 +56,13 @@ LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
 
 # Prompt logging — raw request/response capture for quality analysis.
 # Disabled by default; opt-in via PROMPT_LOG_ENABLED=1.
+# Lives under the data-root, deliberately *not* under the KB repo (ADR-0022
+# review): prompt logs hold full LLM request/response text, and the KB repo's
+# "Commit" button does a `git add -A` — nesting logs inside it would sweep
+# them into a commit (and an optional push) by default.
 _TRUTHY = {"1", "true", "yes", "on"}
 PROMPT_LOG_ENABLED = os.getenv("PROMPT_LOG_ENABLED", "").strip().lower() in _TRUTHY
-PROMPT_LOG_DIR = str(resolve_override("PROMPT_LOG_DIR", Path(APP_WORKSPACE) / "prompt_logs"))
+PROMPT_LOG_DIR = str(resolve_override("PROMPT_LOG_DIR", _DATA_DIR / "prompt_logs"))
 
 
 @dataclass(frozen=True)
@@ -72,9 +95,9 @@ def get_settings() -> Settings:
     the effect without re-importing :mod:`app.config`.
     """
     data_dir = resolve_data_dir()
-    workspace_dir = resolve_override("APP_WORKSPACE", data_dir / "workspace")
+    workspace_dir = resolve_override("APP_KB_REPO", _default_kb_repo_dir(data_dir))
     db_path = resolve_override("APP_DB_PATH", data_dir / "catalog.db")
-    prompt_log_dir = resolve_override("PROMPT_LOG_DIR", workspace_dir / "prompt_logs")
+    prompt_log_dir = resolve_override("PROMPT_LOG_DIR", data_dir / "prompt_logs")
     return Settings(
         db_path=str(db_path),
         workspace_dir=str(workspace_dir),

@@ -1,4 +1,13 @@
-"""``POST/GET/DELETE /documents`` — upload, list, delete; orphan reconcile."""
+"""``POST/GET/DELETE /documents`` — upload, list, delete.
+
+ADR-0022: the KB repo (not single-file upload) is the primary way documents
+enter the index — see ``POST /kb/connect`` / ``POST /kb/rescan`` in
+:mod:`app.api.kb`. Drag-and-drop upload is kept as a convenience path (O1):
+it writes straight into the connected repo's ``documents/`` and indexes
+immediately, exactly as if the file had been dropped there and rescanned.
+Orphan reconcile is no longer implicit on every list — it runs at lifespan
+startup and via the explicit ``POST /kb/rescan`` button.
+"""
 
 from __future__ import annotations
 
@@ -8,7 +17,7 @@ from app.api.deps import get_db, get_workspace
 from app.api.schemas import DocumentOut
 from app.documents.ingest import ingest_file, kind_for_filename
 from app.storage.db import Database
-from app.storage.repo_document import delete_document, list_documents, reconcile_orphans
+from app.storage.repo_document import delete_document, list_documents
 
 router = APIRouter()
 
@@ -32,11 +41,7 @@ async def upload_document(
 
 
 @router.get("/documents", response_model=list[DocumentOut])
-async def list_documents_endpoint(
-    db: Database = Depends(get_db),
-    workspace: str = Depends(get_workspace),
-) -> list[DocumentOut]:
-    reconcile_orphans(db, workspace)
+async def list_documents_endpoint(db: Database = Depends(get_db)) -> list[DocumentOut]:
     return [
         DocumentOut(
             id=r.id, title=r.title, kind=r.kind, created_at=r.created_at
@@ -54,12 +59,3 @@ async def delete_document_endpoint(
     deleted = delete_document(db, workspace, doc_id)
     if deleted is None:
         raise HTTPException(status_code=404, detail="document not found")
-
-
-@router.post("/documents/reconcile")
-async def reconcile_documents_endpoint(
-    db: Database = Depends(get_db),
-    workspace: str = Depends(get_workspace),
-) -> dict[str, list[str]]:
-    removed = reconcile_orphans(db, workspace)
-    return {"removed": removed}

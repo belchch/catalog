@@ -41,6 +41,15 @@ def get_workspace(request: Request) -> str:
     return request.app.state.workspace
 
 
+def get_repo_root(request: Request) -> str:
+    """The connected KB repo root (ADR-0022) — same value as ``get_workspace``.
+
+    Distinct dependency name so KB-repo code (git/scan/skill materialization)
+    reads its intent from the call site rather than the pre-ADR-0022 name.
+    """
+    return request.app.state.repo_root
+
+
 def get_tools(request: Request) -> ToolRegistry:
     return request.app.state.tools
 

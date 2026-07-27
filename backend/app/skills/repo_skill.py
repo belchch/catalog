@@ -9,12 +9,15 @@ row). ``get_skill`` returns a dataclass carrying both the persisted metadata
 
 from __future__ import annotations
 
+import json
 import sqlite3
 import uuid
 from dataclasses import dataclass, replace
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import cast
 
+from app.documents.ingest import slugify
 from app.skills.config import SkillConfig, compute_tags
 from app.skills.repo_run import delete_runs_for_skill
 from app.storage.db import Database
@@ -252,3 +255,127 @@ def update_skill_config(
                 (config.to_json(), now, skill_id),
             )
     return replace(record, name=new_name, config=config, updated_at=now)
+
+
+# --- ADR-0022: skill materialization in the connected KB repo -------------
+#
+# ``commit_skill`` used to only flip ``skill.status`` in SQLite (the ADR-0018
+# debt this closes). A committed skill is now also written to ``skills/`` as
+# one self-contained JSON file, staged and git-committed — the file (not the
+# SQLite row) is the source of truth; the row remains a rebuildable cache
+# (see :func:`scan_skills`, the counterpart of :func:`app.documents.scan.
+# scan_repo` for the skills subtree).
+
+_SKILLS_SUBDIR = "skills"
+
+
+def skill_file_relpath(record: SkillRecord) -> str:
+    slug = slugify(record.name)
+    stem = f"{slug}-{record.id[:8]}" if slug else record.id
+    return f"{_SKILLS_SUBDIR}/{stem}.json"
+
+
+def _read_skill_payload(path: Path) -> dict | None:
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return None
+    return payload if isinstance(payload, dict) else None
+
+
+def materialize_skill(repo_root: str | Path, record: SkillRecord) -> tuple[str, list[str]]:
+    """Write ``record`` as one JSON file under ``skills/``.
+
+    Returns ``(rel_path, removed_paths)``. A rename changes the filename
+    (slug embedded in it), so any *other* file already carrying this skill's
+    id is deleted here first — otherwise :func:`scan_skills` rebuilding from
+    a fresh SQLite could pick up the stale pre-rename file instead of (or as
+    well as) the current one. ``removed_paths`` must be staged as deletions
+    by the caller alongside ``rel_path`` so the commit reflects both sides of
+    the rename atomically.
+    """
+    rel_path = skill_file_relpath(record)
+    root = Path(repo_root)
+    skills_dir = root / _SKILLS_SUBDIR
+    skills_dir.mkdir(parents=True, exist_ok=True)
+
+    keep_name = Path(rel_path).name
+    removed_paths: list[str] = []
+    for path in skills_dir.glob("*.json"):
+        if path.name == keep_name:
+            continue
+        payload = _read_skill_payload(path)
+        if payload is not None and payload.get("id") == record.id:
+            path.unlink()
+            removed_paths.append(f"{_SKILLS_SUBDIR}/{path.name}")
+
+    payload = {
+        "id": record.id,
+        "name": record.name,
+        "description": record.description,
+        "status": record.status,
+        "created_at": record.created_at,
+        "updated_at": record.updated_at,
+        "config": json.loads(record.config.to_json()),
+    }
+    (root / rel_path).write_text(
+        json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    return rel_path, removed_paths
+
+
+def _insert_skill_row(db: Database, payload: dict) -> None:
+    with db.connect() as conn:
+        conn.execute(
+            "INSERT INTO skill(id, name, description, config_json, status, "
+            "created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (
+                payload["id"],
+                payload["name"],
+                payload.get("description"),
+                json.dumps(payload["config"], ensure_ascii=False),
+                payload.get("status", "committed"),
+                payload.get("created_at") or _now_iso(),
+                payload.get("updated_at") or _now_iso(),
+            ),
+        )
+
+
+def scan_skills(db: Database, repo_root: str | Path) -> dict[str, int]:
+    """Rebuild missing ``skill`` rows from ``skills/*.json`` (ADR-0022).
+
+    Only *adds* rows for ids not already in the index — an existing row may
+    hold draft edits made after the last commit, which must not be clobbered
+    by re-scanning the last-committed file. This is what lets a fresh/rebuilt
+    SQLite database recover the committed skill list from the repo alone.
+
+    If more than one file claims the same id (a stray leftover from a rename
+    that predates the :func:`materialize_skill` cleanup, a manual copy, a git
+    merge, ...), the file with the newest ``updated_at`` wins rather than
+    whichever sorts first alphabetically — picking the wrong one would
+    silently resurrect an older skill config.
+    """
+    root = Path(repo_root) / _SKILLS_SUBDIR
+    if not root.is_dir():
+        return {"loaded": 0}
+    existing_ids = {r["id"] for r in list_skills(db)}
+    best_by_id: dict[str, dict] = {}
+    for path in sorted(root.glob("*.json")):
+        payload = _read_skill_payload(path)
+        skill_id = payload.get("id") if payload else None
+        if not skill_id or skill_id in existing_ids:
+            continue
+        current = best_by_id.get(skill_id)
+        if current is None or (payload.get("updated_at") or "") > (
+            current.get("updated_at") or ""
+        ):
+            best_by_id[skill_id] = payload
+    loaded = 0
+    for payload in best_by_id.values():
+        try:
+            _insert_skill_row(db, payload)
+        except (sqlite3.IntegrityError, KeyError):
+            continue
+        loaded += 1
+    return {"loaded": loaded}

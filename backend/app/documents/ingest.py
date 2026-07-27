@@ -77,6 +77,16 @@ def ingest_file(
     workspace = Path(workspace_dir)
     docs_dir = workspace / "documents"
     docs_dir.mkdir(parents=True, exist_ok=True)
-    (workspace / rel_path).write_bytes(content)
+    target = workspace / rel_path
+    target.write_bytes(content)
+    stat = target.stat()
 
-    return create_document(db, title=title, path=rel_path, kind=kind, doc_id=doc_id)
+    return create_document(
+        db,
+        title=title,
+        path=rel_path,
+        kind=kind,
+        doc_id=doc_id,
+        mtime=stat.st_mtime,
+        size=stat.st_size,
+    )

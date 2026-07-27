@@ -17,6 +17,8 @@ class DocumentRow:
     path: str
     kind: str
     created_at: str
+    mtime: float | None = None
+    size: int | None = None
 
 
 def _now_iso() -> str:
@@ -24,16 +26,19 @@ def _now_iso() -> str:
 
 
 def _row_to_document(row: sqlite3.Row) -> DocumentRow:
+    keys = row.keys()
     return DocumentRow(
         id=row["id"],
         title=row["title"],
         path=row["path"],
         kind=row["kind"],
         created_at=row["created_at"],
+        mtime=row["mtime"] if "mtime" in keys else None,
+        size=row["size"] if "size" in keys else None,
     )
 
 
-_SELECT_COLS = "id, title, path, kind, created_at"
+_SELECT_COLS = "id, title, path, kind, created_at, mtime, size"
 
 
 def create_document(
@@ -43,24 +48,44 @@ def create_document(
     path: str,
     kind: str,
     doc_id: str | None = None,
+    mtime: float | None = None,
+    size: int | None = None,
 ) -> DocumentRow:
     """Insert a document row and return it.
 
     ``doc_id`` is generated (uuid4 hex) when not supplied. ``ingest_file`` passes
     an explicit id so the stored ``path`` (which embeds the id) and the row id
     stay in sync; standalone callers (e.g. skill results in step 05) rely on the
-    generated id.
+    generated id. ``mtime``/``size`` (ADR-0022) are set by :func:`app.documents.
+    scan.scan_repo` when a row is created from a file already on disk.
     """
     if doc_id is None:
         doc_id = uuid.uuid4().hex
     created_at = _now_iso()
     with db.connect() as conn:
         conn.execute(
-            "INSERT INTO document(id, title, path, kind, created_at) "
-            "VALUES (?, ?, ?, ?, ?)",
-            (doc_id, title, path, kind, created_at),
+            "INSERT INTO document(id, title, path, kind, created_at, mtime, size) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (doc_id, title, path, kind, created_at, mtime, size),
         )
-    return DocumentRow(id=doc_id, title=title, path=path, kind=kind, created_at=created_at)
+    return DocumentRow(
+        id=doc_id, title=title, path=path, kind=kind, created_at=created_at,
+        mtime=mtime, size=size,
+    )
+
+
+def update_document_stat(db: Database, doc_id: str, *, mtime: float, size: int) -> None:
+    """Refresh the scan fingerprint of an existing row (id/path untouched).
+
+    Called when a rescan finds a file whose content changed since the last
+    scan — the row id must stay stable (ADR-0016: session_document/skill_run
+    FKs point at it), so only the fingerprint columns are updated.
+    """
+    with db.connect() as conn:
+        conn.execute(
+            "UPDATE document SET mtime = ?, size = ? WHERE id = ?",
+            (mtime, size, doc_id),
+        )
 
 
 def get_document(db: Database, doc_id: str) -> DocumentRow | None:

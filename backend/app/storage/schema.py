@@ -11,10 +11,16 @@ SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS document(
   id TEXT PRIMARY KEY,            -- uuid4 hex
   title TEXT NOT NULL,
-  path TEXT NOT NULL,             -- relative path inside workspace/
-  kind TEXT NOT NULL,             -- "md" | "docx" | "result_md"
-  created_at TEXT NOT NULL        -- ISO-8601 UTC
+  path TEXT NOT NULL,             -- relative path inside the connected KB repo
+  kind TEXT NOT NULL,             -- "md" | "docx" | "pdf" | "csv" | "xlsx" | "result_md"
+  created_at TEXT NOT NULL,       -- ISO-8601 UTC
+  mtime REAL,                     -- file mtime at last scan (ADR-0022 scan-index)
+  size INTEGER                    -- file size at last scan
 );
+CREATE TABLE IF NOT EXISTS app_setting(
+  key TEXT PRIMARY KEY,
+  value TEXT NOT NULL
+);                                -- ADR-0022: persisted KB-repo connection (path/remote/push)
 CREATE TABLE IF NOT EXISTS session(
   id TEXT PRIMARY KEY, status TEXT NOT NULL, created_at TEXT NOT NULL,
   skill_id TEXT,                   -- nullable; set when editing an existing skill (CATALOG-17)
@@ -86,4 +92,6 @@ ADDITIVE_MIGRATIONS: list[tuple[str, str, str]] = [
         "llm_timeout_seconds",
         "ALTER TABLE session ADD COLUMN llm_timeout_seconds INTEGER NOT NULL DEFAULT 60",
     ),
+    ("document", "mtime", "ALTER TABLE document ADD COLUMN mtime REAL"),
+    ("document", "size", "ALTER TABLE document ADD COLUMN size INTEGER"),
 ]

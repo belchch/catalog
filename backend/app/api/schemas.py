@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 
@@ -10,6 +12,84 @@ class DocumentOut(BaseModel):
     title: str
     kind: str
     created_at: str
+
+
+class KBConnectRequest(BaseModel):
+    """``POST /kb/connect`` body (ADR-0022).
+
+    ``path`` is init'd or opened as a git repo (idempotent either way).
+    ``remote``/``push_enabled`` configure the optional backup push — off by
+    default, never required for the app to function offline. ``force`` bypasses
+    the empty-repo-vs-nonempty-index safety guard (see ``DangerousEmptyScanError``)
+    for a deliberate switch to a genuinely empty repo.
+    """
+
+    path: str
+    remote: str | None = None
+    push_enabled: bool = False
+    force: bool = False
+
+    @field_validator("path")
+    @classmethod
+    def _valid_path(cls, v: str) -> str:
+        v = v.strip()
+        if not v:
+            raise ValueError("path must not be empty")
+        if not Path(v).expanduser().is_absolute():
+            raise ValueError("path must be absolute")
+        return v
+
+
+class KBScanSummary(BaseModel):
+    added: int
+    updated: int
+    removed: int
+    skipped: int
+
+
+class KBConnectOut(BaseModel):
+    repo_root: str
+    remote: str | None
+    push_enabled: bool
+    scan: KBScanSummary
+    skills_loaded: int
+
+
+class KBStatusOut(BaseModel):
+    repo_root: str
+    remote: str | None
+    push_enabled: bool
+    staged_add: list[str]
+    staged_delete: list[str]
+    staged_modify: list[str]
+    unstaged: list[str]
+    untracked: list[str]
+    is_clean: bool
+    document_count: int
+    skill_count: int
+
+
+class KBRescanOut(BaseModel):
+    scan: KBScanSummary
+    skills_loaded: int
+
+
+class KBCommitRequest(BaseModel):
+    message: str
+
+    @field_validator("message")
+    @classmethod
+    def _non_empty(cls, v: str) -> str:
+        v = v.strip()
+        if not v:
+            raise ValueError("commit message must not be empty")
+        return v
+
+
+class KBCommitOut(BaseModel):
+    sha: str | None
+    pushed: bool
+    push_warning: str | None = None
 
 
 class SkillOut(BaseModel):
