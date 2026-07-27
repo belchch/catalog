@@ -28,19 +28,39 @@ _SCANNED_SUBDIRS = ("documents", "results")
 
 
 class DangerousEmptyScanError(RuntimeError):
-    """Refused: about to auto-create a repo at a path that doesn't exist yet.
+    """Refused: the scan that would follow is about to empty a live index.
 
-    Raised by :func:`guard_repo_not_missing`, not by ``scan_repo`` itself —
-    an *existing* repo tree legitimately going down to zero files (the user
-    deleted the last document) must still reconcile normally. The dangerous
-    case is different: the configured path doesn't exist *at all* while the
-    index already holds documents from a previous connection — most likely
-    an unmounted network drive, a renamed/moved KB directory, or a typo'd
-    persisted path. ``ensure_repo``'s ``mkdir(parents=True)`` would otherwise
-    silently manifest a brand-new, empty repo there, and the scan that
-    follows would then read that as "every file disappeared" and wipe the
-    whole index plus every ``session_document``/``skill_run`` link.
+    Raised by the guards below, never by ``scan_repo`` itself — an *existing*
+    repo tree legitimately going down to zero files (the user deleted the
+    last document) must still reconcile normally. Two shapes are dangerous,
+    and both end the same way: ``scan_repo`` reads "every file disappeared"
+    and drops the whole document index plus every ``session_document`` /
+    ``skill_run`` link, irreversibly, while the files themselves sit safe in
+    a directory nobody is looking at any more.
+
+    * :func:`guard_repo_not_missing` — the configured path does not exist at
+      all (unmounted network drive, renamed/moved KB folder, typo'd persisted
+      path). ``ensure_repo``'s ``mkdir(parents=True)`` would otherwise
+      silently manifest a brand-new, empty repo right there.
+    * :func:`guard_not_switching_to_empty_repo` — the path *does* exist but
+      holds nothing indexable, and it is not the repo we are already on. A
+      typo that happens to land on a real directory, or a folder just created
+      in Finder, looks like an ordinary connect and is the likelier accident
+      of the two.
     """
+
+
+def _indexable_file_count(repo_root: str | Path) -> int:
+    """How many files :func:`scan_repo` would index under this root."""
+    root = Path(repo_root)
+    count = 0
+    for subdir in _SCANNED_SUBDIRS:
+        base = root / subdir
+        if not base.is_dir():
+            continue
+        for _dirpath, _dirnames, filenames in os.walk(base):
+            count += sum(1 for name in filenames if _kind_for(subdir, name) is not None)
+    return count
 
 
 def guard_repo_not_missing(repo_root: str | Path, db: Database, *, force: bool = False) -> None:
@@ -61,6 +81,48 @@ def guard_repo_not_missing(repo_root: str | Path, db: Database, *, force: bool =
             "unmounted drive, a renamed/moved KB folder, or a typo. Pass "
             "force=True if this is an intentional switch to a new, empty repo."
         )
+
+
+def guard_not_switching_to_empty_repo(
+    repo_root: str | Path,
+    db: Database,
+    *,
+    current_root: str | Path | None = None,
+    force: bool = False,
+) -> None:
+    """Call on ``POST /kb/connect`` before scanning a *different* repo path.
+
+    Complements :func:`guard_repo_not_missing`, which only catches a path
+    that is missing outright. Connecting is a *switch*, so "the target holds
+    no documents" carries a meaning it does not carry on startup or rescan:
+    every row in the index is about to be reconciled away against a tree that
+    was never the source of those rows.
+
+    Deliberately narrow, so it cannot fire on legitimate work:
+
+    * reconnecting to the same path is never guarded — that is exactly the
+      "user deleted the last document" case, and it belongs to
+      :func:`scan_repo` as usual;
+    * a target that holds even one indexable file is a real KB, and switching
+      to it is taken at face value;
+    * an empty index has nothing to lose.
+    """
+    if force:
+        return
+    root = Path(repo_root)
+    if current_root is not None and Path(current_root).resolve() == root.resolve():
+        return
+    existing_count = len(list_documents(db))
+    if not existing_count or _indexable_file_count(root):
+        return
+    raise DangerousEmptyScanError(
+        f"refusing to switch the knowledge base to {root}: it contains no "
+        f"documents, while the index still holds {existing_count} document(s) "
+        "from the repo you are connected to now. Scanning would drop all of "
+        "them along with their session/run links (the files themselves stay "
+        "on disk in the old repo). Check the path for a typo, or pass "
+        "force=True if you really mean to start from an empty knowledge base."
+    )
 
 
 @dataclass

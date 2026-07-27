@@ -9,6 +9,7 @@ turn "files changed in the working tree" into real git history.
 
 from __future__ import annotations
 
+import logging
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -17,6 +18,8 @@ from dulwich import porcelain
 from dulwich.repo import Repo
 
 _APP_AUTHOR = b"Catalog <catalog@localhost>"
+
+logger = logging.getLogger(__name__)
 
 
 class PathEscapesRepoError(ValueError):
@@ -61,6 +64,14 @@ def ensure_gitignore(repo_root: str | Path) -> None:
     unrelated pending change to every status/commit call afterwards
     (including the point-commit isolation check on ``POST
     /skills/{id}/commit``).
+
+    That autonomy is bounded by one rule: :func:`commit` writes the whole
+    index, so if anything *else* is already staged (an interrupted ``POST
+    /kb/commit`` between its stage and its commit, or the user's own ``git
+    add``), that content would ride along into a commit they never asked
+    for. In that case the file is written and left unstaged for the next
+    explicit commit to pick up — bootstrap plumbing may commit itself, never
+    somebody else's work.
     """
     path = Path(repo_root) / ".gitignore"
     existing = path.read_text(encoding="utf-8").splitlines() if path.exists() else []
@@ -71,6 +82,18 @@ def ensure_gitignore(repo_root: str | Path) -> None:
         if existing and existing[-1] != "":
             f.write("\n")
         f.write("\n".join(missing) + "\n")
+
+    st = status(repo_root)
+    already_staged = set(st.staged_add) | set(st.staged_delete) | set(st.staged_modify)
+    if already_staged - {".gitignore"}:
+        logger.warning(
+            "wrote .gitignore in %s but left it unstaged: %d unrelated path(s) "
+            "are already staged and committing now would sweep them in; the "
+            "next explicit commit will include it",
+            repo_root,
+            len(already_staged - {".gitignore"}),
+        )
+        return
     stage_paths(repo_root, [".gitignore"])
     commit(repo_root, "chore: ignore prompt logs and OS/editor cruft")
 

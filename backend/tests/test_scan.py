@@ -8,7 +8,12 @@ from pathlib import Path
 
 import pytest
 
-from app.documents.scan import DangerousEmptyScanError, guard_repo_not_missing, scan_repo
+from app.documents.scan import (
+    DangerousEmptyScanError,
+    guard_not_switching_to_empty_repo,
+    guard_repo_not_missing,
+    scan_repo,
+)
 from app.storage.db import Database
 from app.storage.repo_document import create_document, list_documents
 
@@ -150,3 +155,74 @@ def test_guard_allows_missing_path_when_index_is_already_empty(tmp_path: Path) -
     missing_path = tmp_path / "does-not-exist-yet"
 
     guard_repo_not_missing(missing_path, db)  # nothing to lose — must not raise
+
+
+# --- switching to an existing but empty repo (review follow-up) ------------
+
+
+def _seed_indexed_repo(tmp_path: Path, name: str) -> tuple[Database, Path]:
+    db = _db(tmp_path)
+    root = tmp_path / name
+    (root / "documents").mkdir(parents=True)
+    (root / "documents" / "note.md").write_text("hello", encoding="utf-8")
+    scan_repo(db, root)
+    assert len(list_documents(db)) == 1
+    return db, root
+
+
+def test_guard_refuses_switch_to_an_existing_but_empty_directory(tmp_path: Path) -> None:
+    """The path exists, so guard_repo_not_missing sees nothing wrong — but
+    scanning it would still reconcile the entire index away."""
+    db, _current = _seed_indexed_repo(tmp_path, "kb1")
+    empty = tmp_path / "kb2"
+    empty.mkdir()
+
+    guard_repo_not_missing(empty, db)  # existing path — the old guard passes
+    with pytest.raises(DangerousEmptyScanError):
+        guard_not_switching_to_empty_repo(empty, db)
+
+
+def test_guard_refuses_switch_to_a_repo_holding_only_unindexable_files(
+    tmp_path: Path,
+) -> None:
+    db, _current = _seed_indexed_repo(tmp_path, "kb1")
+    empty = tmp_path / "kb2"
+    (empty / "documents").mkdir(parents=True)
+    (empty / "documents" / "notes.txt").write_text("not an indexed kind", encoding="utf-8")
+
+    with pytest.raises(DangerousEmptyScanError):
+        guard_not_switching_to_empty_repo(empty, db)
+
+
+def test_guard_allows_switch_to_a_repo_that_holds_documents(tmp_path: Path) -> None:
+    db, _current = _seed_indexed_repo(tmp_path, "kb1")
+    other = tmp_path / "kb2"
+    (other / "documents").mkdir(parents=True)
+    (other / "documents" / "other.md").write_text("real content", encoding="utf-8")
+
+    guard_not_switching_to_empty_repo(other, db)  # a real KB — must not raise
+
+
+def test_guard_allows_reconnecting_to_the_same_now_empty_repo(tmp_path: Path) -> None:
+    """Same path, last document deleted — routine reconcile, not a switch."""
+    db, current = _seed_indexed_repo(tmp_path, "kb1")
+    (current / "documents" / "note.md").unlink()
+
+    guard_not_switching_to_empty_repo(current, db, current_root=str(current))
+    assert scan_repo(db, current).removed == 1
+
+
+def test_guard_allows_switch_to_empty_repo_when_index_is_empty(tmp_path: Path) -> None:
+    db = _db(tmp_path)
+    empty = tmp_path / "kb2"
+    empty.mkdir()
+
+    guard_not_switching_to_empty_repo(empty, db)  # nothing to lose
+
+
+def test_guard_switch_force_bypasses_the_check(tmp_path: Path) -> None:
+    db, _current = _seed_indexed_repo(tmp_path, "kb1")
+    empty = tmp_path / "kb2"
+    empty.mkdir()
+
+    guard_not_switching_to_empty_repo(empty, db, force=True)  # must not raise

@@ -7,7 +7,12 @@ export interface UseKbResult {
   loading: boolean
   error: string | null
   refresh: () => Promise<void>
-  connect: (params: { path: string; remote?: string; push_enabled?: boolean }) => Promise<void>
+  connect: (params: {
+    path: string
+    remote?: string
+    push_enabled?: boolean
+    force?: boolean
+  }) => Promise<void>
   rescan: () => Promise<void>
   commit: (message: string) => Promise<{ sha: string | null; push_warning?: string | null }>
 }
@@ -30,7 +35,7 @@ export function useKb(): UseKbResult {
   }, [])
 
   const connect = useCallback(
-    async (params: { path: string; remote?: string; push_enabled?: boolean }) => {
+    async (params: { path: string; remote?: string; push_enabled?: boolean; force?: boolean }) => {
       setLoading(true)
       setError(null)
       try {

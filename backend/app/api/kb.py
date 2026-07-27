@@ -30,7 +30,12 @@ from app.api.schemas import (
     KBScanSummary,
     KBStatusOut,
 )
-from app.documents.scan import DangerousEmptyScanError, guard_repo_not_missing, scan_repo
+from app.documents.scan import (
+    DangerousEmptyScanError,
+    guard_not_switching_to_empty_repo,
+    guard_repo_not_missing,
+    scan_repo,
+)
 from app.documents.tools import build_document_tools
 from app.skills.repo_skill import list_skills, scan_skills
 from app.storage.db import Database
@@ -72,9 +77,20 @@ async def connect_kb_endpoint(
     # here only normalizes (symlinks, `..`), it can no longer collapse to CWD.
     repo_root = Path(req.path).expanduser().resolve()
 
-    # Checked BEFORE ensure_repo — see guard_repo_not_missing's docstring.
+    # Both checked BEFORE ensure_repo — see guard_repo_not_missing's docstring
+    # for why the order matters. The second guard covers the case the first
+    # cannot see: a path that exists but holds no documents, which on a
+    # *switch* would reconcile the whole index away.
     try:
         guard_repo_not_missing(repo_root, db, force=req.force)
+        await run_in_threadpool(
+            guard_not_switching_to_empty_repo,
+            repo_root,
+            db,
+            current_root=get_setting(db, _REPO_PATH_KEY)
+            or getattr(request.app.state, "repo_root", None),
+            force=req.force,
+        )
     except DangerousEmptyScanError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
 
@@ -113,6 +129,18 @@ async def kb_status_endpoint(
     repo_root: str = Depends(get_repo_root),
 ) -> KBStatusOut:
     remote, push_enabled = _read_remote_config(db)
+    # The configured repo can be gone (unmounted volume, folder moved) — since
+    # the startup guard now deliberately does not re-create it, say so plainly
+    # instead of letting dulwich fail on a path that isn't there.
+    if not Path(repo_root).is_dir():
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"the configured knowledge-base repo is not on disk: {repo_root}. "
+                "Restore the directory (remount the drive, move the folder back), "
+                "or connect to a different path — the index is intact meanwhile."
+            ),
+        )
     st = await run_in_threadpool(git_status, repo_root)
     return KBStatusOut(
         repo_root=repo_root,

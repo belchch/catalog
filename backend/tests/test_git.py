@@ -180,3 +180,38 @@ def test_pending_paths_expands_untracked_directory(tmp_path: Path) -> None:
     # pending_paths must expand it to the actual file.
     assert "skills/" in status(tmp_path).untracked
     assert pending_paths(tmp_path) == {"skills/alpha-abcd1234.json"}
+
+
+def test_ensure_gitignore_does_not_sweep_unrelated_staged_files(tmp_path: Path) -> None:
+    """``commit`` writes the whole index, so the bootstrap commit must stand
+    down when someone else's work is already staged (an interrupted
+    ``POST /kb/commit``, a manual ``git add``) — review follow-up."""
+    ensure_repo(tmp_path).close()
+    (tmp_path / "documents").mkdir()
+    (tmp_path / "documents" / "wip.md").write_text("unrelated pending work", encoding="utf-8")
+    stage_paths(tmp_path, ["documents/wip.md"])
+
+    ensure_gitignore(tmp_path)
+
+    # The file is written (stage_all still needs it as defense in depth)...
+    assert "prompt_logs/" in (tmp_path / ".gitignore").read_text(encoding="utf-8")
+    # ...but no commit happened: the staged file is still merely staged.
+    with pytest.raises(KeyError):
+        Repo(str(tmp_path)).head()
+    st = status(tmp_path)
+    assert "documents/wip.md" in st.staged_add
+    assert ".gitignore" in st.untracked
+
+
+def test_ensure_gitignore_is_picked_up_by_the_next_explicit_commit(tmp_path: Path) -> None:
+    """Standing down is not dropping the file: the user's own commit takes it."""
+    ensure_repo(tmp_path).close()
+    (tmp_path / "documents").mkdir()
+    (tmp_path / "documents" / "wip.md").write_text("pending", encoding="utf-8")
+    stage_paths(tmp_path, ["documents/wip.md"])
+    ensure_gitignore(tmp_path)
+
+    stage_all(tmp_path)
+    assert commit(tmp_path, "user's own commit") is not None
+
+    assert status(tmp_path).is_clean

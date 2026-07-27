@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { ApiError } from '../api.ts'
 import type { UseKbResult } from '../hooks/useKb.ts'
 
 interface KBPanelProps {
@@ -14,19 +15,26 @@ export function KBPanel({ kb }: KBPanelProps) {
   const [connecting, setConnecting] = useState(false)
   const [committing, setCommitting] = useState(false)
   const [commitResult, setCommitResult] = useState<string | null>(null)
+  // Set when the backend refuses a connect that would reconcile the whole
+  // index away (409): the target holds no documents, or has vanished. Holding
+  // the message here turns it into an explicit confirm instead of a dead end.
+  const [needsForce, setNeedsForce] = useState<string | null>(null)
 
-  const onConnect = async () => {
+  const onConnect = async (force = false) => {
     if (!path.trim()) return
     setConnecting(true)
     setCommitResult(null)
+    setNeedsForce(null)
     try {
       await kb.connect({
         path: path.trim(),
         remote: remote.trim() || undefined,
         push_enabled: pushEnabled,
+        force: force || undefined,
       })
-    } catch {
-      // surfaced via kb.error
+    } catch (e) {
+      if (e instanceof ApiError && e.status === 409) setNeedsForce(e.detail)
+      // otherwise surfaced via kb.error
     } finally {
       setConnecting(false)
     }
@@ -92,6 +100,20 @@ export function KBPanel({ kb }: KBPanelProps) {
         </button>
       </div>
 
+      {needsForce && (
+        <div className="flex flex-col gap-1.5 rounded border border-amber-700/60 bg-amber-950/30 p-2">
+          <p className="text-amber-300">{needsForce}</p>
+          <button
+            type="button"
+            className="self-start rounded bg-amber-700 px-2 py-1 text-white disabled:opacity-50"
+            onClick={() => void onConnect(true)}
+            disabled={connecting}
+          >
+            Подключить всё равно
+          </button>
+        </div>
+      )}
+
       {kb.status && (
         <div className="flex flex-col gap-1 rounded border border-slate-800 bg-slate-900/60 p-2">
           <div className="truncate text-slate-400" title={kb.status.repo_root}>
@@ -136,7 +158,9 @@ export function KBPanel({ kb }: KBPanelProps) {
       )}
 
       {commitResult && <p className="text-slate-400">{commitResult}</p>}
-      {kb.error && <p className="text-red-400">{kb.error}</p>}
+      {/* A captured 409 is already rendered above as an actionable confirm —
+          don't repeat it here as a raw "409 Conflict: {...}" dump. */}
+      {kb.error && !needsForce && <p className="text-red-400">{kb.error}</p>}
     </div>
   )
 }

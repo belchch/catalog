@@ -84,12 +84,6 @@ function useIsLg(): boolean {
 export default function App() {
   const docs = useDocuments()
   const kb = useKb()
-  // Connect/rescan/commit change what's on disk under the hood — refresh the
-  // plain document list whenever the KB status is refetched so it doesn't
-  // require a separate manual "Обновить" click to notice.
-  useEffect(() => {
-    if (kb.status) void docs.refresh()
-  }, [kb.status, docs, docs.refresh])
   const skillsHook = useSkills()
   const settingsHook = useSettings()
   const sessions = useSessions()
@@ -130,6 +124,18 @@ export default function App() {
   const run = useRunStream(activeRunId)
   const docsRefresh = docs.refresh
   const sessionsRefresh = sessions.refresh
+
+  // Connect/rescan/commit change what's on disk under the hood — refresh the
+  // plain document list whenever the KB status is refetched so it doesn't
+  // require a separate manual "Обновить" click to notice.
+  //
+  // Depends on the useCallback-stable `docsRefresh`, never on the `docs`
+  // object: that one is a fresh literal every render, so listing it re-fires
+  // this effect on the very re-render its own refresh() causes — an unbounded
+  // GET /documents storm that ends in ERR_INSUFFICIENT_RESOURCES.
+  useEffect(() => {
+    if (kb.status) void docsRefresh()
+  }, [kb.status, docsRefresh])
 
   useEffect(() => {
     writeStoredSessionId(sessionId)

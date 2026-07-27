@@ -258,6 +258,8 @@ export function connectKB(params: {
   path: string
   remote?: string
   push_enabled?: boolean
+  /** Bypass the "this target is empty, you'd lose the index" guard (409). */
+  force?: boolean
 }): Promise<KBConnectOut> {
   return jsonFetch<KBConnectOut>('/kb/connect', {
     method: 'POST',

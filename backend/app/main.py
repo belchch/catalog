@@ -93,26 +93,32 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # notice it was missing (see guard_repo_not_missing's docstring).
     try:
         guard_repo_not_missing(repo_root, db)
-        skip_scan = False
+        repo_missing = False
     except DangerousEmptyScanError as exc:
+        # Touch nothing: creating the directory here is the very thing the
+        # guard exists to prevent. On an unmounted volume it would also leave
+        # a stray tree sitting on the mount point. The app still boots with
+        # this path configured so the KB panel can report it and the user can
+        # reconnect (force=True) or fix the mount.
         logger.error(
-            "startup: %s — creating the path so the app stays usable, but "
-            "skipping the index scan to avoid wiping it; reconnect via POST "
-            "/kb/connect (force=True) once you've confirmed this is intentional",
+            "startup: %s — leaving the path untouched and skipping the index "
+            "scan; restore the directory (or reconnect via POST /kb/connect) "
+            "before using the knowledge base",
             exc,
         )
-        skip_scan = True
-    ensure_repo(repo_root)
-    for subdir in _KB_REPO_SUBDIRS:
-        (repo_root / subdir).mkdir(parents=True, exist_ok=True)
-    ensure_gitignore(repo_root)
+        repo_missing = True
+    if not repo_missing:
+        ensure_repo(repo_root)
+        for subdir in _KB_REPO_SUBDIRS:
+            (repo_root / subdir).mkdir(parents=True, exist_ok=True)
+        ensure_gitignore(repo_root)
     app.state.repo_root = str(repo_root)
     app.state.workspace = str(repo_root)
     app.state.tools = build_document_tools(db, str(repo_root))
     app.state.settings = settings
-    if not skip_scan:
+    if not repo_missing:
         scan_repo(db, repo_root)
-    scan_skills(db, repo_root)
+        scan_skills(db, repo_root)
     try:
         yield
     finally:

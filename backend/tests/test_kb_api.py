@@ -188,3 +188,122 @@ def test_connect_persists_across_lifespan_restart(client, settings, tmp_path: Pa
 
     with TestClient(app) as c2:
         assert c2.app.state.repo_root == str(target)
+
+
+# --- switching to an existing but empty repo (review follow-up) ------------
+
+
+def _connect_seeded_kb(client, tmp_path: Path) -> Path:
+    first = tmp_path / "first-kb"
+    (first / "documents").mkdir(parents=True)
+    (first / "documents" / "note.md").write_text("hi", encoding="utf-8")
+    assert client.post("/kb/connect", json={"path": str(first)}).status_code == 200
+    assert len(client.get("/documents").json()) == 1
+    return first
+
+
+def test_connect_refuses_switch_to_an_existing_empty_directory(
+    client, db, tmp_path: Path
+) -> None:
+    """The dangerous case guard_repo_not_missing cannot see: a typo that lands
+    on a real directory. The whole index — and every session link — would go."""
+    first = _connect_seeded_kb(client, tmp_path)
+    doc_id = client.get("/documents").json()[0]["id"]
+    with db.connect() as conn:
+        conn.execute(
+            "INSERT INTO session(id, status, created_at, updated_at) "
+            "VALUES ('s-kb', 'done', 'now', 'now')"
+        )
+        conn.execute(
+            "INSERT INTO session_document(session_id, document_id, attached_at) "
+            "VALUES ('s-kb', ?, 'now')",
+            (doc_id,),
+        )
+
+    empty = tmp_path / "typo-kb"
+    empty.mkdir()
+    resp = client.post("/kb/connect", json={"path": str(empty)})
+
+    assert resp.status_code == 409
+    assert "no documents" in resp.json()["detail"]
+    # Nothing moved: still on the original repo, index and links intact.
+    assert client.app.state.repo_root == str(first)
+    assert len(client.get("/documents").json()) == 1
+    with db.connect() as conn:
+        assert conn.execute("SELECT COUNT(*) c FROM session_document").fetchone()["c"] == 1
+
+
+def test_connect_force_allows_switch_to_an_existing_empty_directory(
+    client, tmp_path: Path
+) -> None:
+    _connect_seeded_kb(client, tmp_path)
+    empty = tmp_path / "deliberately-empty-kb"
+    empty.mkdir()
+
+    resp = client.post("/kb/connect", json={"path": str(empty), "force": True})
+
+    assert resp.status_code == 200
+    assert client.app.state.repo_root == str(empty)
+    assert client.get("/documents").json() == []
+
+
+def test_connect_allows_switch_to_a_populated_repo(client, tmp_path: Path) -> None:
+    _connect_seeded_kb(client, tmp_path)
+    other = tmp_path / "other-kb"
+    (other / "documents").mkdir(parents=True)
+    (other / "documents" / "elsewhere.md").write_text("real", encoding="utf-8")
+
+    resp = client.post("/kb/connect", json={"path": str(other)})
+
+    assert resp.status_code == 200
+    titles = [d["title"] for d in client.get("/documents").json()]
+    assert titles == ["elsewhere"]
+
+
+def test_reconnecting_to_the_same_emptied_repo_is_allowed(client, tmp_path: Path) -> None:
+    """Deleting the last document then reconnecting is routine, not a switch."""
+    first = _connect_seeded_kb(client, tmp_path)
+    (first / "documents" / "note.md").unlink()
+
+    resp = client.post("/kb/connect", json={"path": str(first)})
+
+    assert resp.status_code == 200
+    assert resp.json()["scan"]["removed"] == 1
+    assert client.get("/documents").json() == []
+
+
+def test_status_reports_a_vanished_repo_instead_of_crashing(
+    client, tmp_path: Path
+) -> None:
+    import shutil
+
+    first = _connect_seeded_kb(client, tmp_path)
+    shutil.rmtree(first)
+
+    resp = client.get("/kb/status")
+
+    assert resp.status_code == 409
+    assert "not on disk" in resp.json()["detail"]
+
+
+def test_startup_does_not_recreate_a_vanished_repo(client, tmp_path: Path) -> None:
+    """The guard's whole point is that the directory must not be manifested —
+    on an unmounted volume that would leave a stray tree on the mount point."""
+    import shutil
+
+    from fastapi.testclient import TestClient
+
+    from app.main import app
+
+    target = tmp_path / "vanishing-kb"
+    (target / "documents").mkdir(parents=True)
+    (target / "documents" / "note.md").write_text("hi", encoding="utf-8")
+    client.post("/kb/connect", json={"path": str(target)})
+    assert len(client.get("/documents").json()) == 1
+
+    shutil.rmtree(target)
+    with TestClient(app) as c2:
+        assert not target.exists()  # not re-created behind the user's back
+        assert c2.app.state.repo_root == str(target)
+        assert len(c2.get("/documents").json()) == 1  # index survived
+        assert c2.get("/kb/status").status_code == 409
