@@ -28,44 +28,40 @@ function writeLocal(s: PersistedSettings) {
   try {
     localStorage.setItem(LS_KEY, JSON.stringify(s))
   } catch {
-    // Ignore storage failures (private mode etc.) — backend is still updated.
   }
 }
 
-/**
- * Runtime model/provider selection (CATALOG-14). The choice is seeded from the
- * backend (env default), persisted to localStorage so it survives a page
- * reload, and synced back to the backend on every change so the planner/apply
- * pick it up.
- */
-export function useSettings() {
+export function useSettings(enabled = true) {
   const [provider, setProvider] = useState('')
   const [model, setModel] = useState('')
   const [providers, setProviders] = useState<ProviderOut[]>([])
   const [models, setModels] = useState<ModelOut[]>([])
-  const [loading, setLoading] = useState(true)
+  const [loading, setLoading] = useState(enabled)
   const [modelsLoading, setModelsLoading] = useState(false)
   const providerChangeSeq = useRef(0)
 
-  // Initial load: prefer localStorage, fall back to the backend's current state.
   useEffect(() => {
+    if (!enabled) {
+      setLoading(false)
+      return
+    }
+    let cancelled = false
     void (async () => {
       setLoading(true)
       try {
         const [ps, remote] = await Promise.all([listProviders(), getSettings()])
+        if (cancelled) return
         setProviders(ps)
         const local = readLocal()
         const initProvider = local?.provider || remote.provider
         const initModel = local?.model || remote.model
         setProvider(initProvider)
         setModel(initModel)
-        // If a local choice differs from the backend, push it up. A stale local
-        // provider (no longer configured) makes updateSettings 404 — fall back
-        // to the remote values in that case rather than leaving the UI empty.
         if (local && (local.provider !== remote.provider || local.model !== remote.model)) {
           try {
             await updateSettings(local)
           } catch {
+            if (cancelled) return
             setProvider(remote.provider)
             setModel(remote.model)
             writeLocal({ provider: remote.provider, model: remote.model })
@@ -73,18 +69,21 @@ export function useSettings() {
         }
         if (initProvider) {
           try {
-            setModels(await getProviderModels(initProvider))
+            const nextModels = await getProviderModels(initProvider)
+            if (!cancelled) setModels(nextModels)
           } catch {
-            setModels([])
+            if (!cancelled) setModels([])
           }
         }
       } catch {
-        // Network/catalog failure: leave providers/models empty; UI stays usable.
       } finally {
-        setLoading(false)
+        if (!cancelled) setLoading(false)
       }
     })()
-  }, [])
+    return () => {
+      cancelled = true
+    }
+  }, [enabled])
 
   const changeProvider = useCallback(async (newProvider: string) => {
     const seq = ++providerChangeSeq.current

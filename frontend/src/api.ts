@@ -478,10 +478,35 @@ export function renameSkill(skillId: string, name: string): Promise<SkillOut> {
 export interface SettingsOut {
   provider: string
   model: string
+  keys_configured?: boolean
+}
+
+export interface SetupOut {
+  keys_configured: boolean
+  provider: string
+  openrouter_configured: boolean
+  zai_configured: boolean
+}
+
+export interface SetupKeysInput {
+  openrouter_api_key?: string
+  zai_api_key?: string
 }
 
 export function getSettings(): Promise<SettingsOut> {
   return jsonFetch<SettingsOut>('/settings')
+}
+
+export function getSetup(): Promise<SetupOut> {
+  return jsonFetch<SetupOut>('/setup')
+}
+
+export function saveProviderKey(input: SetupKeysInput): Promise<SetupOut> {
+  return jsonFetch<SetupOut>('/setup/keys', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(input),
+  })
 }
 
 export function getProviderModels(providerId: string): Promise<ModelOut[]> {

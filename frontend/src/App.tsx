@@ -32,6 +32,7 @@ import { SessionTimeoutModal } from './components/SessionTimeoutModal.tsx'
 import { SkillSettingsModal } from './components/SkillSettingsModal.tsx'
 import { SkillTrackPicker } from './components/SkillTrackPicker.tsx'
 import { SkillsPanel } from './components/SkillsPanel.tsx'
+import { SetupKeyScreen } from './components/SetupKeyScreen.tsx'
 import { WorkspaceBar } from './components/WorkspaceBar.tsx'
 import { WorkspacePicker } from './components/WorkspacePicker.tsx'
 import { useDocuments } from './hooks/useDocuments.ts'
@@ -39,6 +40,7 @@ import { usePlannerSession } from './hooks/usePlannerSession.ts'
 import { useRunStream } from './hooks/useRunStream.ts'
 import { useSessions } from './hooks/useSessions.ts'
 import { useSettings } from './hooks/useSettings.ts'
+import { useSetup } from './hooks/useSetup.ts'
 import { useSkills } from './hooks/useSkills.ts'
 import { useWorkspace } from './hooks/useWorkspace.ts'
 
@@ -88,11 +90,12 @@ function useIsLg(): boolean {
 }
 
 export default function App() {
+  const setup = useSetup()
   const workspace = useWorkspace()
   const hasWorkspace = Boolean(workspace.current)
   const docs = useDocuments(hasWorkspace)
   const skillsHook = useSkills(hasWorkspace)
-  const settingsHook = useSettings()
+  const settingsHook = useSettings(setup.keysConfigured)
   const sessions = useSessions(hasWorkspace)
   const isLg = useIsLg()
 
@@ -501,6 +504,20 @@ export default function App() {
 
   const showChat = isLg || mainPane === 'chat'
   const showDraft = isLg || mainPane === 'draft'
+
+  if (setup.status === 'unknown') {
+    return (
+      <div className="flex h-screen items-center justify-center bg-surface">
+        <p role="status" aria-live="polite" className="text-ink-faint">
+          Загрузка…
+        </p>
+      </div>
+    )
+  }
+
+  if (!setup.keysConfigured) {
+    return <SetupKeyScreen onConfigured={setup.markConfigured} />
+  }
 
   return (
     <div className="catalog-shell flex h-screen flex-col">
