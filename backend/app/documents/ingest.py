@@ -1,7 +1,7 @@
 from __future__ import annotations
 
+import hashlib
 import os
-import re
 import uuid
 from pathlib import Path
 
@@ -16,41 +16,52 @@ _EXT_TO_KIND = {
     ".xlsx": "xlsx",
 }
 
-_CYRILLIC_TO_LATIN = {
-    "а": "a", "б": "b", "в": "v", "г": "g", "д": "d", "е": "e", "ё": "yo",
-    "ж": "zh", "з": "z", "и": "i", "й": "y", "к": "k", "л": "l", "м": "m",
-    "н": "n", "о": "o", "п": "p", "р": "r", "с": "s", "т": "t", "у": "u",
-    "ф": "f", "х": "h", "ц": "ts", "ч": "ch", "ш": "sh", "щ": "sch",
-    "ъ": "", "ы": "y", "ь": "", "э": "e", "ю": "yu", "я": "ya",
-}
 
-_SLUG_MAX_LEN = 60
-
-
-def slugify(name: str) -> str:
-    """Transliterate cyrillic, sanitize to ``[a-z0-9-]`` and cap the length.
-
-    Returns ``""`` for empty/whitespace-only or otherwise unsafe input; callers
-    should fall back to ``doc_id`` in that case.
-    """
-    lowered = name.strip().lower()
-    transliterated = "".join(_CYRILLIC_TO_LATIN.get(ch, ch) for ch in lowered)
-    slug = re.sub(r"[^a-z0-9]+", "-", transliterated).strip("-")
-    return slug[:_SLUG_MAX_LEN].strip("-")
-
-
-def build_doc_path(title: str, doc_id: str, ext: str, subdir: str) -> str:
-    slug = slugify(title)
-    stem = f"{slug}-{doc_id[:8]}" if slug else doc_id
-    return f"{subdir}/{stem}{ext}"
-
-
-def kind_for_filename(filename: str) -> str:
-    """Map a filename extension to a document kind, or raise ``ValueError``."""
+def kind_for_filename(filename: str, *, skip: bool = False) -> str | None:
     ext = os.path.splitext(filename)[1].lower()
     if ext not in _EXT_TO_KIND:
+        if skip:
+            return None
         raise ValueError(f"unsupported format: {ext or '<none>'}")
     return _EXT_TO_KIND[ext]
+
+
+def content_hash_bytes(data: bytes) -> str:
+    return hashlib.sha256(data).hexdigest()
+
+
+def unique_filename(directory: Path, filename: str) -> str:
+    directory.mkdir(parents=True, exist_ok=True)
+    stem, ext = os.path.splitext(filename)
+    if not stem.strip():
+        stem = "document"
+        filename = f"{stem}{ext}"
+    candidate = filename
+    n = 1
+    while (directory / candidate).exists():
+        candidate = f"{stem}-{n}{ext}"
+        n += 1
+    return candidate
+
+
+def safe_filename(name: str, ext: str) -> str:
+    stem = name.strip() or "document"
+    for ch in ("/", "\\", "\0"):
+        stem = stem.replace(ch, "-")
+    if not stem:
+        stem = "document"
+    if not ext.startswith("."):
+        ext = f".{ext}" if ext else ""
+    return f"{stem}{ext}"
+
+
+def allocate_rel_path(workspace: Path, filename: str, *, subdir: str | None = None) -> str:
+    if subdir:
+        directory = workspace / subdir
+        name = unique_filename(directory, filename)
+        return f"{subdir}/{name}"
+    name = unique_filename(workspace, filename)
+    return name
 
 
 def ingest_file(
@@ -60,23 +71,23 @@ def ingest_file(
     filename: str,
     content: bytes,
 ) -> DocumentRow:
-    """Persist a document's bytes under ``workspace/documents/`` and record it.
-
-    The original bytes are stored verbatim (for ``.docx`` the text is extracted
-    lazily by :func:`read_document`, not at ingest time). The on-disk filename
-    is a readable slug of the original name plus a short id suffix
-    (``{slug}-{doc_id[:8]}{ext}``, or ``{doc_id}{ext}`` when the slug is empty)
-    so the row id and the file always agree while staying human-readable.
-    """
     kind = kind_for_filename(filename)
-    ext = os.path.splitext(filename)[1].lower()
-    doc_id = uuid.uuid4().hex
+    if kind is None:
+        raise ValueError(f"unsupported format: {os.path.splitext(filename)[1] or '<none>'}")
     title = os.path.splitext(filename)[0]
-    rel_path = build_doc_path(title, doc_id, ext, "documents")
-
     workspace = Path(workspace_dir)
-    docs_dir = workspace / "documents"
-    docs_dir.mkdir(parents=True, exist_ok=True)
-    (workspace / rel_path).write_bytes(content)
-
-    return create_document(db, title=title, path=rel_path, kind=kind, doc_id=doc_id)
+    base_name = Path(filename).name or f"document{os.path.splitext(filename)[1]}"
+    rel_path = allocate_rel_path(workspace, base_name)
+    dest = workspace / rel_path
+    dest.write_bytes(content)
+    st = dest.stat()
+    return create_document(
+        db,
+        title=title,
+        path=rel_path,
+        kind=kind,
+        doc_id=uuid.uuid4().hex,
+        mtime=st.st_mtime,
+        size=st.st_size,
+        content_hash=content_hash_bytes(content),
+    )

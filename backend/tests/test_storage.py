@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 
 from app.documents.extract import extract_text
-from app.documents.ingest import build_doc_path, ingest_file, slugify
+from app.documents.ingest import ingest_file
 from app.documents.tools import build_document_tools
 from app.storage.db import Database
 from app.agent.trace import Trace
@@ -141,10 +141,10 @@ def test_ingest_md_and_read(db: Database, tmp_path: Path) -> None:
     row = ingest_file(db, tmp_path, filename="note.md", content=b"# Hello\nworld")
     assert row.kind == "md"
     assert row.title == "note"
-    # On-disk filename is a readable slug plus the id's short suffix.
-    assert row.path == f"documents/note-{row.id[:8]}.md"
-    # File written verbatim.
+    assert row.path == "note.md"
     assert (tmp_path / row.path).read_bytes() == b"# Hello\nworld"
+    assert row.content_hash is not None
+    assert row.size == len(b"# Hello\nworld")
 
     text = extract_text(str(tmp_path / row.path), row.kind)
     assert "Hello" in text
@@ -164,7 +164,7 @@ def test_ingest_docx_and_read(db: Database, tmp_path: Path) -> None:
     row = ingest_file(db, tmp_path, filename="report.docx", content=content)
     assert row.kind == "docx"
     assert row.title == "report"
-    assert row.path == f"documents/report-{row.id[:8]}.docx"
+    assert row.path == "report.docx"
 
     text = extract_text(str(tmp_path / row.path), row.kind)
     assert text == "First paragraph\nSecond paragraph"
@@ -175,91 +175,28 @@ def test_unsupported_format_raises(db: Database, tmp_path: Path) -> None:
         ingest_file(db, tmp_path, filename="file.exe", content=b"MZ\x90\x00")
 
 
-def test_slugify_transliterates_cyrillic() -> None:
-    assert slugify("Пример Документ") == "primer-dokument"
-
-
-def test_slugify_sanitizes_spaces_and_special_chars() -> None:
-    assert slugify("  My File!! (v2).final  ") == "my-file-v2-final"
-
-
-def test_slugify_empty_or_blank_returns_empty() -> None:
-    assert slugify("") == ""
-    assert slugify("   ") == ""
-    assert slugify("---") == ""
-
-
-def test_slugify_caps_length() -> None:
-    long_name = "a" * 100
-    slug = slugify(long_name)
-    assert len(slug) <= 60
-
-
-def test_build_doc_path_cyrillic_title() -> None:
-    doc_id = "abcdef0123456789abcdef0123456789"
-    assert (
-        build_doc_path("Перевод — Cover Letter", doc_id, ".md", "results")
-        == f"results/perevod-cover-letter-{doc_id[:8]}.md"
-    )
-
-
-def test_build_doc_path_empty_slug_falls_back_to_doc_id() -> None:
-    doc_id = "abcdef0123456789abcdef0123456789"
-    assert build_doc_path("@@@!!!", doc_id, ".md", "results") == f"results/{doc_id}.md"
-    assert build_doc_path("   ", doc_id, ".md", "documents") == f"documents/{doc_id}.md"
-
-
-def test_build_doc_path_long_title_is_capped() -> None:
-    doc_id = "abcdef0123456789abcdef0123456789"
-    path = build_doc_path("a" * 100, doc_id, ".md", "results")
-    stem = path.removeprefix("results/").removesuffix(".md")
-    slug, suffix = stem.rsplit("-", 1)
-    assert len(slug) <= 60
-    assert suffix == doc_id[:8]
-
-
-def test_build_doc_path_with_documents_subdir() -> None:
-    doc_id = "abcdef0123456789abcdef0123456789"
-    assert (
-        build_doc_path("note", doc_id, ".md", "documents")
-        == f"documents/note-{doc_id[:8]}.md"
-    )
-
-
-def test_ingest_cyrillic_filename_uses_readable_slug(db: Database, tmp_path: Path) -> None:
+def test_ingest_keeps_original_filename(db: Database, tmp_path: Path) -> None:
     row = ingest_file(
         db, tmp_path, filename="Пример Документ.md", content=b"content"
     )
     assert row.title == "Пример Документ"
-    assert row.path == f"documents/primer-dokument-{row.id[:8]}.md"
+    assert row.path == "Пример Документ.md"
     assert (tmp_path / row.path).read_bytes() == b"content"
 
 
-def test_ingest_blank_filename_falls_back_to_doc_id(db: Database, tmp_path: Path) -> None:
-    row = ingest_file(db, tmp_path, filename="   .md", content=b"content")
-    assert row.path == f"documents/{row.id}.md"
-    assert (tmp_path / row.path).read_bytes() == b"content"
+def test_ingest_collision_adds_suffix(db: Database, tmp_path: Path) -> None:
+    first = ingest_file(db, tmp_path, filename="note.md", content=b"a")
+    second = ingest_file(db, tmp_path, filename="note.md", content=b"b")
+    assert first.path == "note.md"
+    assert second.path == "note-1.md"
+    assert (tmp_path / second.path).read_bytes() == b"b"
 
 
-def test_ingest_garbage_filename_falls_back_to_doc_id(db: Database, tmp_path: Path) -> None:
+def test_ingest_garbage_filename_kept(db: Database, tmp_path: Path) -> None:
     row = ingest_file(db, tmp_path, filename="@@@!!!.md", content=b"content")
     assert row.title == "@@@!!!"
-    assert row.path == f"documents/{row.id}.md"
+    assert row.path == "@@@!!!.md"
     assert (tmp_path / row.path).read_bytes() == b"content"
-
-
-def test_ingest_primer_md_keeps_original_title(db: Database, tmp_path: Path) -> None:
-    row = ingest_file(db, tmp_path, filename="Пример.md", content=b"# hi")
-    assert row.title == "Пример"
-    assert row.path == f"documents/primer-{row.id[:8]}.md"
-    assert not row.path.endswith(f"/{row.id}.md")
-
-
-def test_ingest_path_id_prefix_matches_row_id(db: Database, tmp_path: Path) -> None:
-    row = ingest_file(db, tmp_path, filename="Отчёт по продажам.md", content=b"x")
-    stem = row.path.removeprefix("documents/").removesuffix(".md")
-    assert stem.endswith(row.id[:8])
-    assert row.id.startswith(row.id[:8])
 
 
 def test_ingest_docx_extension_still_validated(db: Database, tmp_path: Path) -> None:
@@ -274,7 +211,7 @@ def test_ingest_docx_extension_still_validated(db: Database, tmp_path: Path) -> 
         db, tmp_path, filename="Годовой отчёт.docx", content=src.read_bytes()
     )
     assert row.kind == "docx"
-    assert row.path == f"documents/godovoy-otchyot-{row.id[:8]}.docx"
+    assert row.path == "Годовой отчёт.docx"
 
 
 def test_read_unknown_doc_error(db: Database, tmp_path: Path) -> None:
@@ -361,6 +298,19 @@ def test_reconcile_orphans_removes_missing_files(db: Database, tmp_path: Path) -
     assert get_document(db, orphan.id) is None
     assert get_document(db, kept.id) is not None
     assert (tmp_path / kept.path).is_file()
+
+
+def test_document_schema_has_extracted_text_column(db: Database) -> None:
+    with db.connect() as conn:
+        cols = {row["name"] for row in conn.execute("PRAGMA table_info(document)")}
+        fts = conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name LIKE 'fts%'"
+        ).fetchall()
+    assert "extracted_text" in cols
+    assert "mtime" in cols
+    assert "size" in cols
+    assert "content_hash" in cols
+    assert fts == []
 
 
 def test_delete_document_nullifies_skill_run_refs(db: Database, tmp_path: Path) -> None:

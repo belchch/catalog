@@ -1,5 +1,3 @@
-"""``POST/GET/DELETE /documents`` — upload, list, delete; orphan reconcile."""
-
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, UploadFile
@@ -7,8 +5,9 @@ from fastapi import APIRouter, Depends, HTTPException, UploadFile
 from app.api.deps import get_workspace_db, get_workspace
 from app.api.schemas import DocumentOut
 from app.documents.ingest import ingest_file, kind_for_filename
+from app.documents.scan import scan_workspace
 from app.storage.db import Database
-from app.storage.repo_document import delete_document, list_documents, reconcile_orphans
+from app.storage.repo_document import delete_document, list_documents
 
 router = APIRouter()
 
@@ -34,9 +33,7 @@ async def upload_document(
 @router.get("/documents", response_model=list[DocumentOut])
 async def list_documents_endpoint(
     db: Database = Depends(get_workspace_db),
-    workspace: str = Depends(get_workspace),
 ) -> list[DocumentOut]:
-    reconcile_orphans(db, workspace)
     return [
         DocumentOut(
             id=r.id, title=r.title, kind=r.kind, created_at=r.created_at
@@ -56,10 +53,18 @@ async def delete_document_endpoint(
         raise HTTPException(status_code=404, detail="document not found")
 
 
+@router.post("/documents/scan")
+async def scan_documents_endpoint(
+    db: Database = Depends(get_workspace_db),
+    workspace: str = Depends(get_workspace),
+) -> dict[str, list[str]]:
+    return scan_workspace(db, workspace).as_dict()
+
+
 @router.post("/documents/reconcile")
 async def reconcile_documents_endpoint(
     db: Database = Depends(get_workspace_db),
     workspace: str = Depends(get_workspace),
 ) -> dict[str, list[str]]:
-    removed = reconcile_orphans(db, workspace)
-    return {"removed": removed}
+    report = scan_workspace(db, workspace)
+    return {"removed": report.removed}

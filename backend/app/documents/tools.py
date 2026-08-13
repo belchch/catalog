@@ -8,7 +8,8 @@ from app.agent.registry import ToolRegistry
 from app.documents.extract import extract_text
 from app.llm.base import ToolSpec
 from app.storage.db import Database
-from app.storage.repo_document import get_document, list_documents, reconcile_orphans
+from app.documents.scan import scan_workspace
+from app.storage.repo_document import get_document, list_documents
 from app.storage.repo_session_document import list_session_documents
 
 
@@ -21,7 +22,7 @@ def build_document_tools(
     reg = ToolRegistry()
 
     async def _list_documents() -> list[dict[str, str]]:
-        reconcile_orphans(db, workspace)
+        scan_workspace(db, workspace)
         if session_id is not None:
             rows = list_session_documents(db, session_id)
         else:

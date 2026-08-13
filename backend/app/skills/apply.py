@@ -34,7 +34,11 @@ from app.agent.registry import ToolRegistry
 from app.agent.runner import _run_agent_core
 from app.agent.trace import Trace, TraceEntry
 from app.documents.extract import extract_text
-from app.documents.ingest import build_doc_path
+from app.documents.ingest import (
+    allocate_rel_path,
+    content_hash_bytes,
+    safe_filename,
+)
 from app.documents.obsidian import (
     build_title_to_stem_map,
     ensure_parent_wikilinks,
@@ -352,16 +356,12 @@ async def _apply_core(
             else:
                 result_title = f"{skill.name} — {docs[0].title} (+{len(docs) - 1})"
             out_id = uuid.uuid4().hex
-            rel_path = build_doc_path(result_title, out_id, ".md", "results")
-            create_document(
-                db,
-                title=result_title,
-                path=rel_path,
-                kind="result_md",
-                doc_id=out_id,
+            workspace_path = Path(workspace_dir)
+            rel_path = allocate_rel_path(
+                workspace_path,
+                safe_filename(result_title, ".md"),
+                subdir="results",
             )
-            results_dir = Path(workspace_dir) / "results"
-            results_dir.mkdir(parents=True, exist_ok=True)
             last_text = rewrite_wiki_links(
                 last_text or "", build_title_to_stem_map(db)
             )
@@ -369,8 +369,20 @@ async def _apply_core(
                 last_text,
                 [Path(d.path).stem for d in docs],
             )
-            (Path(workspace_dir) / rel_path).write_text(
-                last_text, encoding="utf-8"
+            dest = workspace_path / rel_path
+            dest.write_text(last_text, encoding="utf-8")
+            st = dest.stat()
+            create_document(
+                db,
+                title=result_title,
+                path=rel_path,
+                kind="result_md",
+                doc_id=out_id,
+                mtime=st.st_mtime,
+                size=st.st_size,
+                content_hash=content_hash_bytes(
+                    last_text.encode("utf-8")
+                ),
             )
             output_doc_id = out_id
             if session_id is not None:

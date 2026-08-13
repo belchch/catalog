@@ -61,10 +61,11 @@ class WorkspaceManager:
         check = db.quick_check()
         if check != "ok":
             raise WorkspaceValidationError(f"workspace database failed quick_check: {check}")
-        self._hook_rescan(root)
 
-    def _hook_rescan(self, _root: Path) -> None:
-        return None
+    def _hook_rescan(self, root: Path, db: Database) -> None:
+        from app.documents.scan import scan_workspace
+
+        scan_workspace(db, root)
 
     def open(self, path: str | Path, *, confirm_init: bool = False) -> Database:
         root = Path(path).expanduser().resolve()
@@ -94,6 +95,7 @@ class WorkspaceManager:
         db.init_schema(WORKSPACE_SCHEMA, WORKSPACE_USER_VERSION, ADDITIVE_MIGRATIONS)
         self.current = db
         self.root = root
+        self._hook_rescan(root, db)
         self._touch_registry(root)
         self._sync_app_state()
         return db

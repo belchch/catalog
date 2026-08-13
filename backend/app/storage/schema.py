@@ -27,7 +27,11 @@ CREATE TABLE IF NOT EXISTS document(
   title TEXT NOT NULL,
   path TEXT NOT NULL,             -- relative path inside workspace/
   kind TEXT NOT NULL,             -- "md" | "docx" | "result_md"
-  created_at TEXT NOT NULL        -- ISO-8601 UTC
+  created_at TEXT NOT NULL,       -- ISO-8601 UTC
+  mtime REAL,
+  size INTEGER,
+  content_hash TEXT,
+  extracted_text TEXT
 );
 CREATE TABLE IF NOT EXISTS session(
   id TEXT PRIMARY KEY, status TEXT NOT NULL, created_at TEXT NOT NULL,
@@ -96,5 +100,13 @@ ADDITIVE_MIGRATIONS: list[tuple[str, str, str]] = [
         "session",
         "llm_timeout_seconds",
         "ALTER TABLE session ADD COLUMN llm_timeout_seconds INTEGER NOT NULL DEFAULT 60",
+    ),
+    ("document", "mtime", "ALTER TABLE document ADD COLUMN mtime REAL"),
+    ("document", "size", "ALTER TABLE document ADD COLUMN size INTEGER"),
+    ("document", "content_hash", "ALTER TABLE document ADD COLUMN content_hash TEXT"),
+    (
+        "document",
+        "extracted_text",
+        "ALTER TABLE document ADD COLUMN extracted_text TEXT",
     ),
 ]

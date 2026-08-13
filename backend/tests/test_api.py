@@ -11,7 +11,6 @@ import asyncio
 import json
 from pathlib import Path
 
-from app.documents.ingest import build_doc_path
 from app.documents.tools import build_document_tools
 from app.llm.base import CompletionResult, ToolCall
 
@@ -309,7 +308,7 @@ def test_delete_document(client, db) -> None:
     assert missing.status_code == 404
 
 
-def test_list_documents_reconciles_orphans(client, db) -> None:
+def test_list_documents_does_not_auto_scan(client, db) -> None:
     from pathlib import Path
 
     from app.storage.repo_document import get_document
@@ -324,8 +323,8 @@ def test_list_documents_reconciles_orphans(client, db) -> None:
     assert listing.status_code == 200
     ids = [d["id"] for d in listing.json()]
     assert kept_id in ids
-    assert orphan_id not in ids
-    assert get_document(db, orphan_id) is None
+    assert orphan_id in ids
+    assert get_document(db, orphan_id) is not None
 
 
 def test_reconcile_documents_endpoint(client, db) -> None:
@@ -342,6 +341,33 @@ def test_reconcile_documents_endpoint(client, db) -> None:
     assert resp.status_code == 200
     assert resp.json()["removed"] == [orphan_id]
     assert get_document(db, orphan_id) is None
+
+
+def test_scan_documents_endpoint(client, db) -> None:
+    from pathlib import Path
+
+    from app.storage.repo_document import get_document
+
+    workspace = Path(client.app.state.workspace)
+    (workspace / "nested").mkdir()
+    (workspace / "nested" / "a.md").write_text("hello", encoding="utf-8")
+    (workspace / "skip.exe").write_bytes(b"MZ")
+    (workspace / ".hidden.md").write_text("x", encoding="utf-8")
+
+    resp = client.post("/documents/scan")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert len(body["added"]) >= 1
+    assert any(p.endswith("skip.exe") or p == "skip.exe" for p in body["skipped"])
+    docs = {d["id"]: d for d in client.get("/documents").json()}
+    for doc_id in body["added"]:
+        assert doc_id in docs
+    again = client.post("/documents/scan").json()
+    assert again["added"] == []
+    assert again["updated"] == []
+    assert again["renamed"] == []
+    assert again["removed"] == []
+    assert get_document(db, body["added"][0]) is not None
 
 
 # --------------------------------------------------------------------------- #
@@ -1693,9 +1719,9 @@ def test_save_run_result_materializes_preview_into_document(
 
     out_doc = get_document(db, saved["id"])
     assert out_doc is not None
-    expected_path = build_doc_path(saved["title"], saved["id"], ".md", "results")
-    assert out_doc.path == expected_path
-    assert out_doc.path != f"results/{saved['id']}.md"
+    assert out_doc.path == f"results/{saved['title']}.md"
+    assert out_doc.path.startswith("results/")
+    assert not out_doc.path.endswith(f"{saved['id']}.md")
     assert (Path(client.app.state.workspace) / out_doc.path).is_file()
 
     # Saving a second time is rejected (no duplicate document).

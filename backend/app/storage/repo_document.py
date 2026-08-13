@@ -17,6 +17,10 @@ class DocumentRow:
     path: str
     kind: str
     created_at: str
+    mtime: float | None = None
+    size: int | None = None
+    content_hash: str | None = None
+    extracted_text: str | None = None
 
 
 def _now_iso() -> str:
@@ -24,16 +28,23 @@ def _now_iso() -> str:
 
 
 def _row_to_document(row: sqlite3.Row) -> DocumentRow:
+    keys = set(row.keys())
     return DocumentRow(
         id=row["id"],
         title=row["title"],
         path=row["path"],
         kind=row["kind"],
         created_at=row["created_at"],
+        mtime=row["mtime"] if "mtime" in keys else None,
+        size=row["size"] if "size" in keys else None,
+        content_hash=row["content_hash"] if "content_hash" in keys else None,
+        extracted_text=row["extracted_text"] if "extracted_text" in keys else None,
     )
 
 
-_SELECT_COLS = "id, title, path, kind, created_at"
+_SELECT_COLS = (
+    "id, title, path, kind, created_at, mtime, size, content_hash, extracted_text"
+)
 
 
 def create_document(
@@ -43,24 +54,92 @@ def create_document(
     path: str,
     kind: str,
     doc_id: str | None = None,
+    mtime: float | None = None,
+    size: int | None = None,
+    content_hash: str | None = None,
+    extracted_text: str | None = None,
 ) -> DocumentRow:
-    """Insert a document row and return it.
-
-    ``doc_id`` is generated (uuid4 hex) when not supplied. ``ingest_file`` passes
-    an explicit id so the stored ``path`` (which embeds the id) and the row id
-    stay in sync; standalone callers (e.g. skill results in step 05) rely on the
-    generated id.
-    """
     if doc_id is None:
         doc_id = uuid.uuid4().hex
     created_at = _now_iso()
     with db.connect() as conn:
         conn.execute(
-            "INSERT INTO document(id, title, path, kind, created_at) "
-            "VALUES (?, ?, ?, ?, ?)",
-            (doc_id, title, path, kind, created_at),
+            "INSERT INTO document("
+            "id, title, path, kind, created_at, mtime, size, content_hash, extracted_text"
+            ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                doc_id,
+                title,
+                path,
+                kind,
+                created_at,
+                mtime,
+                size,
+                content_hash,
+                extracted_text,
+            ),
         )
-    return DocumentRow(id=doc_id, title=title, path=path, kind=kind, created_at=created_at)
+    return DocumentRow(
+        id=doc_id,
+        title=title,
+        path=path,
+        kind=kind,
+        created_at=created_at,
+        mtime=mtime,
+        size=size,
+        content_hash=content_hash,
+        extracted_text=extracted_text,
+    )
+
+
+def update_document(
+    db: Database,
+    doc_id: str,
+    *,
+    path: str | None = None,
+    title: str | None = None,
+    kind: str | None = None,
+    mtime: float | None = None,
+    size: int | None = None,
+    content_hash: str | None = None,
+    extracted_text: str | None = None,
+) -> DocumentRow | None:
+    current = get_document(db, doc_id)
+    if current is None:
+        return None
+    new_path = current.path if path is None else path
+    new_title = current.title if title is None else title
+    new_kind = current.kind if kind is None else kind
+    new_mtime = current.mtime if mtime is None else mtime
+    new_size = current.size if size is None else size
+    new_hash = current.content_hash if content_hash is None else content_hash
+    new_text = current.extracted_text if extracted_text is None else extracted_text
+    with db.connect() as conn:
+        conn.execute(
+            "UPDATE document SET path = ?, title = ?, kind = ?, mtime = ?, "
+            "size = ?, content_hash = ?, extracted_text = ? WHERE id = ?",
+            (
+                new_path,
+                new_title,
+                new_kind,
+                new_mtime,
+                new_size,
+                new_hash,
+                new_text,
+                doc_id,
+            ),
+        )
+    return DocumentRow(
+        id=doc_id,
+        title=new_title,
+        path=new_path,
+        kind=new_kind,
+        created_at=current.created_at,
+        mtime=new_mtime,
+        size=new_size,
+        content_hash=new_hash,
+        extracted_text=new_text,
+    )
 
 
 def get_document(db: Database, doc_id: str) -> DocumentRow | None:
@@ -148,11 +227,6 @@ def delete_document(
 
 
 def reconcile_orphans(db: Database, workspace_dir: str | Path) -> list[str]:
-    workspace = Path(workspace_dir)
-    removed: list[str] = []
-    for doc in list_documents(db):
-        if not (workspace / doc.path).is_file():
-            deleted = delete_document(db, workspace, doc.id)
-            if deleted is not None:
-                removed.append(deleted.id)
-    return removed
+    from app.documents.scan import scan_workspace
+
+    return scan_workspace(db, workspace_dir).removed

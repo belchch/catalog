@@ -15,7 +15,7 @@ from app.agent.events import (
     VerifyEvent,
 )
 from app.agent.registry import ToolRegistry
-from app.documents.ingest import build_doc_path, ingest_file
+from app.documents.ingest import ingest_file
 from app.documents.tools import build_document_tools
 from app.storage.repo_document import get_document
 from app.llm.base import (
@@ -159,11 +159,8 @@ def test_apply_success_first_try(db: Database, workspace: Path) -> None:
 
     out_doc = get_document(db, result.output_doc_id)
     assert out_doc is not None
-    expected_path = build_doc_path(
-        f"{skill.name} — input", result.output_doc_id, ".md", "results"
-    )
-    assert out_doc.path == expected_path
-    assert out_doc.path != f"results/{result.output_doc_id}.md"
+    assert out_doc.path == f"results/{skill.name} — input.md"
+    assert out_doc.path.startswith("results/")
     out_path = workspace / out_doc.path
     assert out_path.exists()
     file_text = out_path.read_text(encoding="utf-8")
@@ -525,9 +522,7 @@ def test_apply_script_skill(db: Database, workspace: Path) -> None:
 
     out_doc = get_document(db, result.output_doc_id)
     assert out_doc is not None
-    assert out_doc.path == build_doc_path(
-        f"{skill.name} — input", result.output_doc_id, ".md", "results"
-    )
+    assert out_doc.path == f"results/{skill.name} — input.md"
     out_path = workspace / out_doc.path
     assert out_path.exists()
     file_text = out_path.read_text(encoding="utf-8")
@@ -970,7 +965,8 @@ def test_apply_skill_streams_inner_events(db: Database, workspace: Path) -> None
     out_path = workspace / out_doc.path
     assert out_path.exists()
     assert out_doc.path.startswith("results/")
-    assert out_doc.path.endswith(f"-{row['output_doc_id'][:8]}.md")
+    assert out_doc.path.endswith(".md")
+    assert row["output_doc_id"][:8] not in out_doc.path
 
 
 async def _noop_tool(**kwargs: Any) -> dict:

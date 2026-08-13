@@ -30,7 +30,11 @@ from app.agent.registry import ToolRegistry
 from app.api.deps import agent_event_to_frame, get_workspace_db, get_workspace
 from app.api.schemas import ApplyRequest, DocumentOut, RunCreated, RunOut
 from app.api.sessions import _is_cancel_frame
-from app.documents.ingest import build_doc_path
+from app.documents.ingest import (
+    allocate_rel_path,
+    content_hash_bytes,
+    safe_filename,
+)
 from app.documents.obsidian import (
     build_title_to_stem_map,
     ensure_parent_wikilinks,
@@ -142,12 +146,10 @@ async def save_run_result_endpoint(
     skill = get_skill(db, run["skill_id"])
     title = f"{skill.name} — результат" if skill is not None else "Результат прогона"
     out_id = uuid.uuid4().hex
-    rel_path = build_doc_path(title, out_id, ".md", "results")
-    doc = create_document(
-        db, title=title, path=rel_path, kind="result_md", doc_id=out_id
+    workspace_path = Path(workspace)
+    rel_path = allocate_rel_path(
+        workspace_path, safe_filename(title, ".md"), subdir="results"
     )
-    results_dir = Path(workspace) / "results"
-    results_dir.mkdir(parents=True, exist_ok=True)
     file_text = rewrite_wiki_links(
         run["result_text"], build_title_to_stem_map(db)
     )
@@ -157,7 +159,19 @@ async def save_run_result_endpoint(
         if parent is not None and parent.path:
             parent_stems.append(Path(parent.path).stem)
     file_text = ensure_parent_wikilinks(file_text, parent_stems)
-    (Path(workspace) / rel_path).write_text(file_text, encoding="utf-8")
+    dest = workspace_path / rel_path
+    dest.write_text(file_text, encoding="utf-8")
+    st = dest.stat()
+    doc = create_document(
+        db,
+        title=title,
+        path=rel_path,
+        kind="result_md",
+        doc_id=out_id,
+        mtime=st.st_mtime,
+        size=st.st_size,
+        content_hash=content_hash_bytes(file_text.encode("utf-8")),
+    )
     set_output_doc_id(db, run_id, out_id)
     if run["session_id"] is not None:
         attach_documents(db, run["session_id"], [out_id])
