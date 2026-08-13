@@ -51,7 +51,7 @@ const EMPTY_META: MetaDraft = {
   verifyChecks: '',
 }
 
-const fieldCls = 'w-full rounded bg-slate-800 px-2 py-1 text-xs text-slate-100'
+const fieldCls = 'field'
 
 function findArtifact(
   artifacts: SessionArtifact[],
@@ -333,9 +333,9 @@ export function ArtifactsPanel({
       <div
         ref={type === 'meta' ? metaRef : undefined}
         className={
-          'rounded-md border bg-slate-900/50 p-3 ' +
-          (invalid ? 'border-red-500/50 ' : 'border-slate-800 ') +
-          (highlighted ? 'ring-1 ring-red-400/60 ' : '') +
+          'rounded-md border bg-surface p-3 ' +
+          (invalid ? 'border-danger-line ' : 'border-line ') +
+          (highlighted ? 'ring-2 ring-danger-line ' : '') +
           (type === 'prompt' && hasMeta && kind === 'script' ? 'opacity-70 ' : '') +
           (type === 'script' && hasMeta && kind === 'agent' ? 'opacity-70 ' : '')
         }
@@ -346,7 +346,7 @@ export function ArtifactsPanel({
   }
 
   const statusRow = (art: SessionArtifact | undefined) => (
-    <span className="text-[10px] text-slate-500">
+    <span className="text-[10px] text-ink-faint">
       {art ? `${art.source} · ${formatUpdatedAt(art.updated_at)}` : '—'}
     </span>
   )
@@ -360,11 +360,11 @@ export function ArtifactsPanel({
     <div className="mt-2">
       <div className="flex items-center justify-end gap-2">
         {savedFlash[type] && (
-          <span className="text-[10px] text-emerald-400">Сохранено</span>
+          <span className="text-[10px] text-success-ink">Сохранено</span>
         )}
         <button
           type="button"
-          className="rounded bg-indigo-600 px-3 py-1 text-xs text-white disabled:opacity-50"
+          className="btn-primary"
           disabled={disabled || inputsDisabled || saving === type}
           onClick={() => void onClick()}
         >
@@ -372,7 +372,7 @@ export function ArtifactsPanel({
         </button>
       </div>
       {saveErrors[type] && (
-        <p id={`${type}-save-error`} className="mt-1 text-xs text-red-400">
+        <p id={`${type}-save-error`} className="mt-1 text-xs text-danger-ink">
           {saveErrors[type]}
         </p>
       )}
@@ -384,9 +384,9 @@ export function ArtifactsPanel({
       <div
         role="region"
         aria-label="Черновик скилла"
-        className="flex h-full flex-col border-l border-slate-800 bg-slate-950"
+        className="flex h-full flex-col border-l border-line bg-surface"
       >
-        <div className="flex flex-1 items-center justify-center p-4 text-center text-sm text-slate-500">
+        <div className="flex flex-1 items-center justify-center p-4 text-center text-sm text-ink-faint">
           Выберите сессию или начните новый чат — здесь появится черновик скилла.
         </div>
       </div>
@@ -397,26 +397,26 @@ export function ArtifactsPanel({
     <div
       role="region"
       aria-label="Черновик скилла"
-      className="flex h-full flex-col border-l border-slate-800 bg-slate-950"
+      className="flex h-full flex-col border-l border-line bg-surface"
     >
       <div className="flex h-full flex-col gap-3 overflow-y-auto p-3">
         <div className="flex items-center justify-between gap-2">
-          <h2 className="text-sm font-semibold text-slate-200">Черновик скилла</h2>
+          <h2 className="text-sm font-semibold text-ink">Черновик скилла</h2>
           {streaming && (
-            <span className="text-[10px] text-amber-400">планировщик пишет…</span>
+            <span className="text-[10px] text-warning-ink">планировщик пишет…</span>
           )}
         </div>
 
         {error && (
-          <p className="text-xs text-red-400">{error}</p>
+          <p className="text-xs text-danger-ink">{error}</p>
         )}
 
         {loading && (
-          <p className="text-xs text-slate-500">Загружаю артефакты…</p>
+          <p className="text-xs text-ink-faint">Загружаю артефакты…</p>
         )}
 
         {emptyArtifacts && !loading && (
-          <p className="text-[11px] text-slate-500">
+          <p className="text-[11px] text-ink-faint">
             Планировщик сохранит черновик инструментами, или заполните вручную.
           </p>
         )}
@@ -424,15 +424,15 @@ export function ArtifactsPanel({
         {sectionShell('meta', metaArt?.is_valid === false || nameClientError, (
           <>
             <div className="mb-2 flex items-center justify-between gap-2">
-              <h3 className="text-[11px] uppercase tracking-wide text-slate-500">Meta</h3>
+              <h3 className="text-[11px] uppercase tracking-wide text-ink-faint">Meta</h3>
               {statusRow(metaArt)}
             </div>
-            <label className="mb-2 block text-[11px] text-slate-400">
+            <label className="mb-2 block text-[11px] text-ink-faint">
               Имя
               <input
                 ref={nameRef}
                 type="text"
-                className={`mt-1 ${fieldCls} disabled:opacity-50`}
+                className={`mt-1 ${fieldCls}`}
                 value={metaDraft.name}
                 aria-invalid={nameClientError || metaArt?.is_valid === false}
                 aria-describedby={
@@ -451,10 +451,10 @@ export function ArtifactsPanel({
                 }}
               />
             </label>
-            <label className="mb-2 block text-[11px] text-slate-400">
+            <label className="mb-2 block text-[11px] text-ink-faint">
               Описание
               <textarea
-                className={`mt-1 min-h-[3.5rem] ${fieldCls} disabled:opacity-50`}
+                className={`mt-1 min-h-[3.5rem] ${fieldCls}`}
                 rows={3}
                 value={metaDraft.description}
                 disabled={inputsDisabled}
@@ -465,11 +465,11 @@ export function ArtifactsPanel({
               />
             </label>
             <div className="mb-2">
-              <div className="mb-1 text-[11px] text-slate-400">Kind</div>
+              <div className="mb-1 text-[11px] text-ink-faint">Kind</div>
               <div
                 role="radiogroup"
                 aria-label="Kind"
-                className={`flex flex-wrap gap-1 ${inputsDisabled ? 'opacity-50' : ''}`}
+                className={`flex flex-wrap gap-1 ${inputsDisabled ? 'pointer-events-none text-ink-faint' : ''}`}
                 onKeyDown={(e) => {
                   if (inputsDisabled) return
                   if (e.key === 'ArrowRight' || e.key === 'ArrowDown') {
@@ -500,10 +500,10 @@ export function ArtifactsPanel({
                       tabIndex={inputsDisabled ? -1 : active ? 0 : -1}
                       disabled={inputsDisabled}
                       className={
-                        'rounded px-2 py-1 text-[11px] disabled:opacity-50 ' +
+                        'rounded px-2 py-1 text-[11px] disabled:cursor-not-allowed disabled:bg-surface-muted disabled:text-ink-faint ' +
                         (active
-                          ? 'bg-indigo-600 text-white'
-                          : 'bg-slate-800 text-slate-300 hover:bg-slate-700')
+                          ? 'bg-brand text-white'
+                          : 'bg-surface-muted text-ink-muted hover:bg-surface-hover')
                       }
                       onClick={() => {
                         setMetaDraft((d) => ({ ...d, kind: opt.value }))
@@ -517,11 +517,11 @@ export function ArtifactsPanel({
               </div>
             </div>
             <div className="mb-2">
-              <div className="mb-1 text-[11px] text-slate-400">Вход</div>
+              <div className="mb-1 text-[11px] text-ink-faint">Вход</div>
               <div
                 role="radiogroup"
                 aria-label="Вход"
-                className={`flex flex-wrap gap-1 ${inputsDisabled ? 'opacity-50' : ''}`}
+                className={`flex flex-wrap gap-1 ${inputsDisabled ? 'pointer-events-none text-ink-faint' : ''}`}
                 onKeyDown={(e) => {
                   if (inputsDisabled) return
                   if (e.key === 'ArrowRight' || e.key === 'ArrowDown') {
@@ -552,10 +552,10 @@ export function ArtifactsPanel({
                       tabIndex={inputsDisabled ? -1 : active ? 0 : -1}
                       disabled={inputsDisabled}
                       className={
-                        'rounded px-2 py-1 text-[11px] disabled:opacity-50 ' +
+                        'rounded px-2 py-1 text-[11px] disabled:cursor-not-allowed disabled:bg-surface-muted disabled:text-ink-faint ' +
                         (active
-                          ? 'bg-indigo-600 text-white'
-                          : 'bg-slate-800 text-slate-300 hover:bg-slate-700')
+                          ? 'bg-brand text-white'
+                          : 'bg-surface-muted text-ink-muted hover:bg-surface-hover')
                       }
                       onClick={() => {
                         setMetaDraft((d) => ({ ...d, inputArity: opt.value }))
@@ -568,11 +568,11 @@ export function ArtifactsPanel({
                 })}
               </div>
             </div>
-            <label className="mb-2 block text-[11px] text-slate-400">
+            <label className="mb-2 block text-[11px] text-ink-faint">
               allowed_tools
               <input
                 type="text"
-                className={`mt-1 ${fieldCls} disabled:opacity-50`}
+                className={`mt-1 ${fieldCls}`}
                 value={metaDraft.allowedTools}
                 disabled={inputsDisabled || metaDraft.kind === 'script'}
                 placeholder="tool1, tool2"
@@ -582,16 +582,16 @@ export function ArtifactsPanel({
                 }}
               />
               {metaDraft.kind === 'script' && (
-                <span className="mt-1 block text-[10px] text-slate-500">
+                <span className="mt-1 block text-[10px] text-ink-faint">
                   не используется для script
                 </span>
               )}
             </label>
-            <label className="mb-1 block text-[11px] text-slate-400">
+            <label className="mb-1 block text-[11px] text-ink-faint">
               verify_checks
               <input
                 type="text"
-                className={`mt-1 ${fieldCls} disabled:opacity-50`}
+                className={`mt-1 ${fieldCls}`}
                 value={metaDraft.verifyChecks}
                 disabled={inputsDisabled}
                 placeholder="non_empty, markdown_well_formed"
@@ -602,7 +602,7 @@ export function ArtifactsPanel({
               />
             </label>
             {(nameClientError || metaArt?.error) && (
-              <p id="meta-error" className="mt-1 text-[11px] text-red-400">
+              <p id="meta-error" className="mt-1 text-[11px] text-danger-ink">
                 {nameClientError ? 'Имя не может быть пустым' : metaArt?.error}
               </p>
             )}
@@ -618,17 +618,17 @@ export function ArtifactsPanel({
         {sectionShell('prompt', promptArt?.is_valid === false, (
           <>
             <div className="mb-2 flex items-center justify-between gap-2">
-              <h3 className="text-[11px] uppercase tracking-wide text-slate-500">Prompt</h3>
+              <h3 className="text-[11px] uppercase tracking-wide text-ink-faint">Prompt</h3>
               {statusRow(promptArt)}
             </div>
             {hasMeta && kind === 'script' && (
-              <p className="mb-1 text-[10px] text-slate-500">
+              <p className="mb-1 text-[10px] text-ink-faint">
                 нужен только для kind=agent
               </p>
             )}
             <textarea
               ref={promptRef}
-              className={`min-h-[8rem] ${fieldCls} disabled:opacity-50`}
+              className={`min-h-[8rem] ${fieldCls}`}
               placeholder="System prompt скилла…"
               value={promptDraft}
               disabled={inputsDisabled}
@@ -647,7 +647,7 @@ export function ArtifactsPanel({
               }}
             />
             {promptArt?.error && (
-              <p id="prompt-error" className="mt-1 text-[11px] text-red-400">
+              <p id="prompt-error" className="mt-1 text-[11px] text-danger-ink">
                 {promptArt.error}
               </p>
             )}
@@ -663,17 +663,17 @@ export function ArtifactsPanel({
         {sectionShell('script', scriptArt?.is_valid === false, (
           <>
             <div className="mb-2 flex items-center justify-between gap-2">
-              <h3 className="text-[11px] uppercase tracking-wide text-slate-500">Script</h3>
+              <h3 className="text-[11px] uppercase tracking-wide text-ink-faint">Script</h3>
               {statusRow(scriptArt)}
             </div>
             {hasMeta && kind === 'agent' && (
-              <p className="mb-1 text-[10px] text-slate-500">
+              <p className="mb-1 text-[10px] text-ink-faint">
                 нужен только для kind=script
               </p>
             )}
             <textarea
               ref={scriptRef}
-              className={`min-h-[10rem] font-mono text-xs leading-relaxed ${fieldCls} disabled:opacity-50`}
+              className={`min-h-[10rem] font-mono text-xs leading-relaxed ${fieldCls}`}
               placeholder="Python-скрипт скилла…"
               value={scriptDraft}
               disabled={inputsDisabled}
@@ -692,7 +692,7 @@ export function ArtifactsPanel({
               }}
             />
             {scriptArt?.error && (
-              <p id="script-error" className="mt-1 text-[11px] text-red-400">
+              <p id="script-error" className="mt-1 text-[11px] text-danger-ink">
                 {scriptArt.error}
               </p>
             )}

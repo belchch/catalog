@@ -28,10 +28,10 @@ export function MarkdownView({
           type="button"
           aria-pressed={mode === 'md'}
           className={
-            'rounded px-1.5 py-0.5 text-[10px] focus:outline-none focus:ring-1 focus:ring-indigo-500 ' +
+            'rounded px-1.5 py-0.5 text-[10px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand ' +
             (mode === 'md'
-              ? 'bg-indigo-600 text-white'
-              : 'bg-slate-800 text-slate-300')
+              ? 'bg-brand text-white'
+              : 'bg-surface-muted text-ink-muted')
           }
           onClick={() => setMode('md')}
         >
@@ -41,10 +41,10 @@ export function MarkdownView({
           type="button"
           aria-pressed={mode === 'text'}
           className={
-            'rounded px-1.5 py-0.5 text-[10px] focus:outline-none focus:ring-1 focus:ring-indigo-500 ' +
+            'rounded px-1.5 py-0.5 text-[10px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand ' +
             (mode === 'text'
-              ? 'bg-indigo-600 text-white'
-              : 'bg-slate-800 text-slate-300')
+              ? 'bg-brand text-white'
+              : 'bg-surface-muted text-ink-muted')
           }
           onClick={() => setMode('text')}
         >

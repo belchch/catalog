@@ -19,15 +19,15 @@ export function CollapsibleSection({
 
   return (
     <div className="flex flex-col gap-2">
-      <div className="flex items-center justify-between gap-2">
+      <div className="catalog-section-header">
         <button
           type="button"
           aria-expanded={open}
           aria-controls={panelId}
-          className="flex flex-1 items-center gap-1.5 text-sm font-semibold text-slate-200 hover:text-white"
+          className="catalog-section-header__title focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand"
           onClick={() => onToggle(!open)}
         >
-          <span className="text-xs text-slate-400" aria-hidden="true">
+          <span className="catalog-section-header__chevron" aria-hidden="true">
             {open ? '▾' : '▸'}
           </span>
           <span>{title}</span>

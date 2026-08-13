@@ -20,7 +20,7 @@ interface MessageCommandsProps {
  *  - «Копировать» — copies `content` to the clipboard with a brief
  *    «Скопировано» confirmation and a legacy fallback for non-secure contexts.
  *
- * Buttons are always visible but muted (text-xs / slate-400) to stay
+ * Buttons are always visible but muted (text-xs / ink-faint) to stay
  * unobtrusive; they align to the right to match the user-bubble side.
  */
 export function MessageCommands({
@@ -69,10 +69,10 @@ export function MessageCommands({
   }
 
   return (
-    <div className="mt-1 flex justify-end gap-3 text-xs text-slate-400">
+    <div className="mt-1 flex justify-end gap-3 text-xs text-ink-faint">
       <button
         type="button"
-        className="transition-colors hover:text-indigo-300 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:text-slate-400"
+        className="transition-colors hover:text-brand-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand disabled:cursor-not-allowed disabled:text-ink-faint disabled:hover:text-ink-faint"
         onClick={handleRepeat}
         disabled={repeatDisabled}
         title={repeatDisabled ? 'Недоступно во время ответа' : 'Переотправить это сообщение'}
@@ -81,7 +81,7 @@ export function MessageCommands({
       </button>
       <button
         type="button"
-        className="transition-colors hover:text-indigo-300 disabled:opacity-40"
+        className="transition-colors hover:text-brand-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand"
         onClick={handleCopy}
       >
         {copied ? 'Скопировано' : 'Копировать'}

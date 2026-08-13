@@ -54,20 +54,20 @@ export function SkillTrackPicker({
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
+    <div className="modal-overlay">
       <div
         role="dialog"
         aria-modal="true"
         aria-labelledby={titleId}
-        className="w-full max-w-md rounded-lg border border-slate-700 bg-slate-900 p-4 shadow-xl"
+        className="modal-card max-w-md"
       >
         <div className="mb-2 flex items-center justify-between">
-          <h2 id={titleId} className="text-sm font-semibold text-slate-100">
+          <h2 id={titleId} className="text-sm font-semibold text-ink">
             Выбор операции
           </h2>
           <button
             type="button"
-            className="text-xs text-slate-400 hover:text-slate-200 disabled:opacity-50"
+            className="btn-ghost px-1"
             onClick={onCancel}
             disabled={submitting}
             aria-label="Закрыть"
@@ -75,7 +75,7 @@ export function SkillTrackPicker({
             ✕
           </button>
         </div>
-        <p className="mb-3 text-xs text-slate-400">
+        <p className="mb-3 text-xs text-ink-faint">
           Уточните, что делаем с документами — от этого зависит скилл.
         </p>
         <div
@@ -110,21 +110,19 @@ export function SkillTrackPicker({
                 tabIndex={active ? 0 : -1}
                 disabled={submitting}
                 className={
-                  'flex w-full items-start gap-2 rounded border px-3 py-2 text-left disabled:opacity-50 ' +
+                  'flex w-full items-start gap-2 rounded border px-3 py-2 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand disabled:cursor-not-allowed disabled:bg-surface-muted disabled:text-ink-faint ' +
                   (active
-                    ? 'border-indigo-500 bg-indigo-600/15'
-                    : 'border-slate-700 bg-slate-800/60 hover:border-indigo-500 hover:bg-slate-800')
+                    ? 'border-line-brand bg-brand-soft'
+                    : 'border-line bg-surface-muted hover:border-line-brand hover:bg-surface-hover')
                 }
                 onClick={() => setSelectedIndex(index)}
               >
                 <div className="min-w-0 flex-1">
-                  <div className="text-xs font-medium text-slate-100">{track.name}</div>
-                  <div className="mt-0.5 text-[11px] text-slate-300">{track.operation}</div>
-                  <div className="mt-0.5 text-[11px] text-slate-400">{track.rationale}</div>
+                  <div className="text-xs font-medium text-ink">{track.name}</div>
+                  <div className="mt-0.5 text-[11px] text-ink-muted">{track.operation}</div>
+                  <div className="mt-0.5 text-[11px] text-ink-faint">{track.rationale}</div>
                 </div>
-                <span className="shrink-0 rounded bg-slate-700/60 px-1 text-[10px] uppercase text-slate-400">
-                  {arityLabel(track.input_arity)}
-                </span>
+                <span className="badge-neutral shrink-0">{arityLabel(track.input_arity)}</span>
               </button>
             )
           })}
@@ -132,7 +130,7 @@ export function SkillTrackPicker({
         <div className="flex justify-end gap-2">
           <button
             type="button"
-            className="rounded bg-slate-700 px-3 py-1 text-xs text-slate-200 disabled:opacity-50"
+            className="btn-secondary"
             onClick={onCancel}
             disabled={submitting}
           >
@@ -140,7 +138,7 @@ export function SkillTrackPicker({
           </button>
           <button
             type="button"
-            className="rounded bg-indigo-600 px-3 py-1 text-xs text-white disabled:opacity-50"
+            className="btn-primary"
             onClick={() => void confirm()}
             disabled={submitting || tracks.length === 0}
           >

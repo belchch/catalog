@@ -5,30 +5,30 @@ function ScriptStep({ s }: { s: RunStep }) {
   const isDone = s.stage === 'done'
   const dur = s.duration != null ? `${s.duration.toFixed(3)}s` : null
   return (
-    <li className="font-mono text-[11px] text-sky-300">
-      <span className="mr-1 text-slate-600">›</span>
+    <li className="font-mono text-[11px] text-info-ink">
+      <span className="mr-1 text-ink-faint">›</span>
       {s.text}
-      {dur && <span className="ml-1 text-slate-500">· {dur}</span>}
+      {dur && <span className="ml-1 text-ink-faint">· {dur}</span>}
       {isError && <span className="ml-1">✗</span>}
-      {isDone && <span className="ml-1 text-emerald-400">✓</span>}
+      {isDone && <span className="ml-1 text-success-ink">✓</span>}
       {s.snippet && (
         <details className="mt-0.5 pl-3">
-          <summary className="cursor-pointer text-slate-500">код</summary>
-          <pre className="mt-1 overflow-x-auto whitespace-pre-wrap break-words rounded bg-slate-950/60 p-1.5 text-slate-300">
+          <summary className="cursor-pointer text-ink-faint">код</summary>
+          <pre className="mt-1 overflow-x-auto whitespace-pre-wrap break-words rounded bg-surface-muted p-1.5 text-ink-muted">
             {s.snippet}
           </pre>
         </details>
       )}
       {s.returnValue && (
         <details className="mt-0.5 pl-3">
-          <summary className="cursor-pointer text-slate-500">результат</summary>
-          <pre className="mt-1 overflow-x-auto whitespace-pre-wrap break-words rounded bg-slate-950/60 p-1.5 text-emerald-200/90">
+          <summary className="cursor-pointer text-ink-faint">результат</summary>
+          <pre className="mt-1 overflow-x-auto whitespace-pre-wrap break-words rounded bg-surface-muted p-1.5 text-success-ink">
             {s.returnValue}
           </pre>
         </details>
       )}
       {s.error && (
-        <pre className="mt-0.5 ml-3 overflow-x-auto whitespace-pre-wrap break-words rounded bg-red-950/40 p-1.5 text-red-300">
+        <pre className="mt-0.5 ml-3 overflow-x-auto whitespace-pre-wrap break-words rounded bg-danger-soft p-1.5 text-danger-ink">
           {s.error}
         </pre>
       )}
@@ -38,7 +38,7 @@ function ScriptStep({ s }: { s: RunStep }) {
 
 export function TraceSteps({ steps }: { steps: RunStep[] }) {
   if (steps.length === 0) {
-    return <p className="text-xs text-slate-500">Шаги появятся здесь…</p>
+    return <p className="text-xs text-ink-faint">Шаги появятся здесь…</p>
   }
   return (
     <ol className="flex flex-col gap-1.5">
@@ -46,14 +46,13 @@ export function TraceSteps({ steps }: { steps: RunStep[] }) {
         if (s.kind === 'script') return <ScriptStep key={s.id} s={s} />
 
         if (s.kind === 'reasoning') {
-          // Reasoning is rendered muted — it is context, not the main output.
           return (
-            <li key={s.id} className="font-mono text-[11px] italic text-slate-500">
+            <li key={s.id} className="font-mono text-[11px] italic text-ink-faint">
               <details open>
-                <summary className="cursor-pointer not-italic text-slate-600">
+                <summary className="cursor-pointer not-italic text-ink-faint">
                   💭 рассуждения модели
                 </summary>
-                <pre className="mt-1 overflow-x-auto whitespace-pre-wrap break-words pl-3 text-slate-500">
+                <pre className="mt-1 overflow-x-auto whitespace-pre-wrap break-words pl-3 text-ink-faint">
                   {s.text}
                 </pre>
               </details>
@@ -64,29 +63,28 @@ export function TraceSteps({ steps }: { steps: RunStep[] }) {
         const color =
           s.kind === 'tool_result'
             ? s.ok
-              ? 'text-emerald-300'
-              : 'text-red-300'
+              ? 'text-success-ink'
+              : 'text-danger-ink'
             : s.kind === 'verify'
               ? s.passed
-                ? 'text-emerald-300'
-                : 'text-red-300'
-              : 'text-slate-300'
+                ? 'text-success-ink'
+                : 'text-danger-ink'
+              : 'text-ink-muted'
         return (
           <li key={s.id} className={'font-mono text-[11px] ' + color}>
-            <span className="mr-1 text-slate-600">›</span>
+            <span className="mr-1 text-ink-faint">›</span>
             {s.text}
             {s.kind === 'tool_result' && (s.ok ? ' ✓' : ' ✗')}
-            {/* CATALOG-16: show the tool's actual return value (collapsible). */}
             {s.kind === 'tool_result' && s.result && (
               <details className="mt-0.5 pl-3">
-                <summary className="cursor-pointer text-slate-500">результат</summary>
-                <pre className="mt-1 overflow-x-auto whitespace-pre-wrap break-words rounded bg-slate-950/60 p-1.5 text-slate-400">
+                <summary className="cursor-pointer text-ink-faint">результат</summary>
+                <pre className="mt-1 overflow-x-auto whitespace-pre-wrap break-words rounded bg-surface-muted p-1.5 text-ink-faint">
                   {s.result}
                 </pre>
               </details>
             )}
             {s.kind === 'verify' && !s.passed && s.failures && s.failures.length > 0 && (
-              <span className="ml-1 block pl-3 text-red-400/80">
+              <span className="ml-1 block pl-3 text-danger-ink">
                 {s.failures.join('; ')}
               </span>
             )}

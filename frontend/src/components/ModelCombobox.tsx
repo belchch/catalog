@@ -75,7 +75,7 @@ export function ModelCombobox({
         disabled={disabled}
         className={
           triggerClassName ??
-          'flex w-full items-center justify-between rounded bg-slate-800 px-2 py-1 text-left text-xs text-slate-100 disabled:opacity-50'
+          'field flex w-full items-center justify-between text-left'
         }
         onClick={() => {
           if (disabled) return
@@ -91,16 +91,16 @@ export function ModelCombobox({
         <span className="flex min-w-0 items-center gap-1.5">
           <span className="truncate">{triggerLabel}</span>
           {selectedModel?.supports_reasoning && (
-            <span className="shrink-0 text-slate-400">🧠</span>
+            <span className="shrink-0 text-ink-faint">🧠</span>
           )}
         </span>
-        <span className="ml-1 shrink-0 text-slate-400">▾</span>
+        <span className="ml-1 shrink-0 text-ink-faint">▾</span>
       </button>
       {open && (
         <div
           id={listId}
           role="listbox"
-          className="absolute z-10 mt-1 max-h-48 w-full overflow-y-auto rounded border border-slate-700 bg-slate-900 shadow-xl"
+          className="absolute z-10 mt-1 max-h-48 w-full overflow-y-auto rounded border border-line bg-surface shadow-card"
           onKeyDown={(e) => {
             if (e.key === 'Escape') {
               e.preventDefault()
@@ -109,18 +109,18 @@ export function ModelCombobox({
             }
           }}
         >
-          <div className="sticky top-0 border-b border-slate-800 bg-slate-900 p-1">
+          <div className="sticky top-0 border-b border-line bg-surface p-1">
             <input
               type="search"
               value={filter}
               onChange={(e) => setFilter(e.target.value)}
               placeholder="Поиск…"
-              className="w-full rounded bg-slate-800 px-2 py-1 text-xs text-slate-100 placeholder:text-slate-500"
+              className="field"
               autoFocus
             />
           </div>
           {options.length === 0 && (
-            <div className="px-2 py-1 text-xs text-slate-500">нет совпадений</div>
+            <div className="px-2 py-1 text-xs text-ink-faint">нет совпадений</div>
           )}
           {options.map((m) => {
             const selected = m.id === value
@@ -132,8 +132,8 @@ export function ModelCombobox({
                 className={
                   'flex cursor-pointer items-center gap-1.5 px-2 py-1 text-xs ' +
                   (selected
-                    ? 'bg-indigo-600/20 text-white'
-                    : 'text-slate-300 hover:bg-slate-800')
+                    ? 'bg-brand-soft text-ink'
+                    : 'text-ink-muted hover:bg-surface-hover')
                 }
                 onMouseDown={(e) => e.preventDefault()}
                 onClick={() => {
@@ -143,7 +143,7 @@ export function ModelCombobox({
               >
                 <span className="truncate">{m.name}</span>
                 {m.supports_reasoning && (
-                  <span className="shrink-0 text-slate-400">🧠</span>
+                  <span className="shrink-0 text-ink-faint">🧠</span>
                 )}
               </div>
             )

@@ -110,14 +110,14 @@ export function Chat({
   return (
     <div className="catalog-chat flex h-full flex-col">
       {editingSkillName && (
-        <div className="bg-indigo-900/40 px-4 py-1.5 text-xs text-indigo-200">
+        <div className="bg-brand-soft px-4 py-1.5 text-xs text-brand-ink">
           Редактирование: {editingSkillName}
         </div>
       )}
       <div className="catalog-chat__scroll flex-1 overflow-y-auto px-5 py-6">
         <div className="catalog-chat__content">
         {messages.length === 0 && (
-          <p className="catalog-chat__empty mt-16 text-center text-sm text-slate-500">
+          <p className="catalog-chat__empty mt-16 text-center text-sm text-ink-faint">
             Опишите задачу для документа — планировщик изучит документы и предложит скилл.
           </p>
         )}
@@ -131,7 +131,7 @@ export function Chat({
           />
         ))}
         {streaming && (
-          <div className="my-2 text-xs text-slate-400">●●● планировщик думает…</div>
+          <div className="my-2 text-xs text-ink-faint">●●● планировщик думает…</div>
         )}
         {(closed || reconnecting) && (
           <div
@@ -140,12 +140,12 @@ export function Chat({
             aria-live="polite"
             aria-busy={reconnecting}
           >
-            <span className="text-amber-400">
+            <span className="text-warning-ink">
               {reconnecting ? 'Переподключаю…' : 'Соединение закрыто'}
             </span>
             <button
               type="button"
-              className="rounded-md border border-slate-700 px-2 py-1 text-xs text-slate-300 transition-colors hover:border-indigo-500 hover:bg-slate-800 disabled:opacity-50"
+              className="btn-secondary"
               onClick={onReconnect}
               disabled={reconnecting}
               aria-busy={reconnecting}
@@ -154,7 +154,7 @@ export function Chat({
             </button>
           </div>
         )}
-        {error && <div className="my-2 text-xs text-red-400">Ошибка: {error}</div>}
+        {error && <div className="my-2 text-xs text-danger-ink">Ошибка: {error}</div>}
         <div ref={bottomRef} />
         </div>
       </div>
@@ -162,26 +162,20 @@ export function Chat({
         <div className="catalog-composer">
         {sessionDocuments.length > 0 && (
           <section className="mb-2" aria-label="Документы в сессии">
-            <h2 className="mb-1 text-[11px] uppercase tracking-wide text-slate-500">
+            <h2 className="mb-1 text-[11px] uppercase tracking-wide text-ink-faint">
               Документы в сессии
             </h2>
-            <p className="mb-1 text-[11px] text-slate-600">
+            <p className="mb-1 text-[11px] text-ink-faint">
               Агент видит только эти документы
             </p>
             <ul className="flex flex-wrap gap-1.5" role="list">
               {sessionDocuments.map((d) => (
-                <li
-                  key={d.id}
-                  role="listitem"
-                  className="inline-flex items-center gap-1 rounded-full border border-slate-700 bg-slate-800/60 px-2.5 py-1 text-xs text-slate-300"
-                >
-                  <span className="rounded bg-slate-700/60 px-1 text-[10px] uppercase text-slate-400">
-                    {d.kind}
-                  </span>
+                <li key={d.id} role="listitem" className="chip">
+                  <span className="badge-neutral">{d.kind}</span>
                   <span className="truncate">{d.title}</span>
                   <button
                     type="button"
-                    className="ml-0.5 text-slate-400 hover:text-slate-100 disabled:opacity-50"
+                    className="ml-0.5 text-ink-faint hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand disabled:cursor-not-allowed disabled:text-ink-faint"
                     aria-label={`Убрать ${d.title} из сессии`}
                     disabled={streaming}
                     onClick={() => onRemoveDocument?.(d.id)}
@@ -195,17 +189,12 @@ export function Chat({
         )}
         <div className="mb-2 flex flex-wrap items-center gap-1.5">
           {selectedDocs.map((d) => (
-            <span
-              key={d.id}
-              className="inline-flex items-center gap-1 rounded-full border border-indigo-500/40 bg-indigo-600/15 px-2.5 py-1 text-xs text-indigo-100"
-            >
-              <span className="rounded bg-slate-700/60 px-1 text-[10px] uppercase text-slate-400">
-                {d.kind}
-              </span>
+            <span key={d.id} className="chip-brand">
+              <span className="badge-neutral">{d.kind}</span>
               <span className="truncate">{d.title}</span>
               <button
                 type="button"
-                className="ml-0.5 text-slate-400 hover:text-slate-100 disabled:opacity-50"
+                className="ml-0.5 text-ink-faint hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand disabled:cursor-not-allowed disabled:text-ink-faint"
                 aria-label={`Убрать ${d.title}`}
                 disabled={streaming}
                 onClick={() => removeSelected(d.id)}
@@ -224,7 +213,7 @@ export function Chat({
               placeholder="+ документ"
               disabled={streaming}
               placement="top"
-              triggerClassName="flex w-full items-center justify-between rounded-full border border-slate-700 bg-slate-800/60 px-3 py-1 text-left text-xs text-slate-200 hover:border-indigo-500 hover:bg-slate-800 disabled:opacity-50"
+              triggerClassName="chip flex w-full justify-between text-left hover:border-line-brand focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand disabled:cursor-not-allowed disabled:bg-surface-muted disabled:text-ink-faint"
             />
           </div>
         </div>
@@ -237,7 +226,8 @@ export function Chat({
             {visibleSuggestions.map((s) => (
               <button
                 key={s}
-                className="rounded-full border border-slate-700 bg-slate-800/60 px-3 py-1 text-xs text-slate-200 transition-colors hover:border-indigo-500 hover:bg-slate-800 disabled:opacity-50"
+                type="button"
+                className="chip transition-colors hover:border-line-brand hover:bg-surface-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand disabled:cursor-not-allowed disabled:bg-surface-muted disabled:text-ink-faint"
                 onClick={() => onSend(s)}
                 disabled={streaming}
               >
@@ -250,7 +240,7 @@ export function Chat({
           <textarea
             ref={textareaRef}
             rows={1}
-            className="max-h-40 flex-1 resize-none overflow-y-auto rounded-md bg-slate-800 px-3 py-2 text-sm text-slate-100 outline-none placeholder:text-slate-500 disabled:opacity-50"
+            className="field max-h-40 flex-1 resize-none overflow-y-auto rounded-md px-3 py-2 text-sm"
             placeholder="Сообщение планировщику…"
             value={input}
             onChange={(e) => setInput(e.target.value)}
@@ -265,24 +255,31 @@ export function Chat({
           />
           {streaming ? (
             <button
-              className="rounded-md bg-red-600 px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
+              type="button"
+              className="btn-icon-danger"
               onClick={onCancel}
               disabled={cancelling}
+              aria-label="Остановить генерацию"
+              title={cancelling ? 'Останавливаю…' : 'Остановить генерацию'}
             >
-              {cancelling ? 'Останавливаю…' : 'Стоп'}
+              <span aria-hidden="true">■</span>
             </button>
           ) : (
             <button
-              className="rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
+              type="button"
+              className="btn-icon-brand"
               onClick={submit}
               disabled={!canSubmit}
+              aria-label="Отправить"
+              title="Отправить"
             >
-              Отправить
+              <span aria-hidden="true">↑</span>
             </button>
           )}
         </div>
         <button
-          className="mt-2 rounded-md border border-slate-700 px-3 py-1.5 text-xs text-slate-300 disabled:opacity-50"
+          type="button"
+          className="btn-secondary mt-2"
           onClick={onCreateSkill}
           disabled={buildingSkill || proposingTracks || messages.length === 0}
           aria-busy={buildingSkill || proposingTracks}
@@ -296,12 +293,12 @@ export function Chat({
                 : 'Создать скилл из сессии'}
         </button>
         {sessionId && (
-          <div className="mt-1.5 text-[11px] text-slate-500">
+          <div className="mt-1.5 text-[11px] text-ink-faint">
             Timeout: {sessionTimeoutSeconds}s
             {' · '}
             <button
               type="button"
-              className="text-slate-500 underline-offset-2 hover:text-slate-300 hover:underline"
+              className="text-ink-faint underline-offset-2 hover:text-ink-muted hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand"
               onClick={onOpenTimeoutModal}
               aria-label={`Изменить таймаут LLM сессии, сейчас ${sessionTimeoutSeconds} секунд`}
             >
@@ -313,13 +310,13 @@ export function Chat({
           <div
             role="alert"
             aria-live="assertive"
-            className="mt-2 rounded-md border border-red-500/40 bg-red-950/40 px-3 py-2 text-xs text-red-300"
+            className="mt-2 rounded-md border border-danger-line bg-danger-soft px-3 py-2 text-xs text-danger-ink"
           >
             <div className="flex items-start justify-between gap-2">
               <p className="min-w-0 flex-1 whitespace-pre-wrap break-words">{buildError}</p>
               <button
                 type="button"
-                className="shrink-0 text-slate-400 hover:text-slate-200"
+                className="shrink-0 text-ink-faint hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand"
                 onClick={onDismissBuildError}
                 aria-label="Скрыть ошибку"
               >
@@ -329,7 +326,7 @@ export function Chat({
             {buildErrorIsTimeout && (
               <button
                 type="button"
-                className="mt-1.5 text-xs text-indigo-300 underline underline-offset-2 hover:text-indigo-200"
+                className="mt-1.5 text-xs text-brand-ink underline underline-offset-2 hover:text-[color:var(--brand-link-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand"
                 onClick={onOpenTimeoutModal}
               >
                 Увеличить таймаут…

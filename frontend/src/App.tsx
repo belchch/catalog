@@ -427,7 +427,7 @@ export default function App() {
           <span className="catalog-header__folder" aria-hidden="true">▱</span>
           <h1 className="truncate text-base font-semibold">Catalog — планировщик скиллов</h1>
           {gitSha ? (
-            <span className="shrink-0 font-mono text-xs text-slate-500" title="git sha">
+            <span className="shrink-0 font-mono text-xs text-ink-faint" title="git sha">
               {gitSha}
             </span>
           ) : null}
@@ -473,7 +473,7 @@ export default function App() {
               <>
                 <button
                   type="button"
-                  className="rounded bg-slate-800 px-2 py-1 text-xs text-slate-300 hover:bg-slate-700 disabled:opacity-50"
+                  className="btn-secondary"
                   onClick={handleNewChat}
                   disabled={sessions.loading}
                 >
@@ -481,7 +481,7 @@ export default function App() {
                 </button>
                 <button
                   type="button"
-                  className="rounded bg-slate-800 px-2 py-1 text-xs text-slate-300 hover:bg-slate-700 disabled:opacity-50"
+                  className="btn-secondary"
                   onClick={() => void sessions.refresh()}
                   disabled={sessions.loading}
                 >
@@ -504,7 +504,7 @@ export default function App() {
             actions={
               <button
                 type="button"
-                className="rounded bg-slate-800 px-2 py-1 text-xs text-slate-300 hover:bg-slate-700 disabled:opacity-50"
+                className="btn-secondary"
                 onClick={() => void docs.refresh()}
                 disabled={docs.loading}
               >
@@ -521,7 +521,7 @@ export default function App() {
             actions={
               <button
                 type="button"
-                className="rounded bg-slate-800 px-2 py-1 text-xs text-slate-300 hover:bg-slate-700 disabled:opacity-50"
+                className="btn-secondary"
                 onClick={() => void skillsHook.refresh()}
                 disabled={skillsHook.loading}
               >
@@ -561,17 +561,17 @@ export default function App() {
               <div
                 role="tablist"
                 aria-label="Область main"
-                className="flex shrink-0 gap-1 border-b border-slate-800 px-2 py-1 lg:hidden"
+                className="flex shrink-0 gap-1 border-b border-line px-2 py-1 lg:hidden"
               >
                 <button
                   type="button"
                   role="tab"
                   aria-selected={mainPane === 'chat'}
                   className={
-                    'rounded px-2 py-1 text-[11px] ' +
+                    'rounded px-2 py-1 text-[11px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand ' +
                     (mainPane === 'chat'
-                      ? 'bg-indigo-600 text-white'
-                      : 'bg-slate-800 text-slate-300')
+                      ? 'bg-brand text-white'
+                      : 'bg-surface-muted text-ink-muted')
                   }
                   onClick={() => setMainPane('chat')}
                 >
@@ -582,10 +582,10 @@ export default function App() {
                   role="tab"
                   aria-selected={mainPane === 'draft'}
                   className={
-                    'rounded px-2 py-1 text-[11px] ' +
+                    'rounded px-2 py-1 text-[11px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand ' +
                     (mainPane === 'draft'
-                      ? 'bg-indigo-600 text-white'
-                      : 'bg-slate-800 text-slate-300')
+                      ? 'bg-brand text-white'
+                      : 'bg-surface-muted text-ink-muted')
                   }
                   onClick={() => setMainPane('draft')}
                 >

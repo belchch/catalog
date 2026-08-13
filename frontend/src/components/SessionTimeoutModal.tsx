@@ -56,23 +56,21 @@ export function SessionTimeoutModal({
     }
   }
 
-  const fieldCls = 'w-full rounded bg-slate-800 px-2 py-1 text-xs text-slate-100'
-
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
+    <div className="modal-overlay">
       <div
         role="dialog"
         aria-modal="true"
         aria-labelledby={titleId}
-        className="w-full max-w-sm rounded-lg border border-slate-700 bg-slate-900 p-4 shadow-xl"
+        className="modal-card max-w-sm"
       >
         <div className="mb-3 flex items-center justify-between">
-          <h2 id={titleId} className="text-sm font-semibold text-slate-100">
+          <h2 id={titleId} className="text-sm font-semibold text-ink">
             Таймаут LLM сессии
           </h2>
           <button
             type="button"
-            className="text-xs text-slate-400 hover:text-slate-200"
+            className="btn-ghost px-1"
             onClick={onClose}
             disabled={saving}
             aria-label="Закрыть"
@@ -80,10 +78,10 @@ export function SessionTimeoutModal({
             ✕
           </button>
         </div>
-        <p className="mb-3 text-xs text-slate-400">
+        <p className="mb-3 text-xs text-ink-faint">
           Лимит ожидания ответа модели для этой сессии чата (секунды).
         </p>
-        <label className="mb-1 block text-[11px] text-slate-400">
+        <label className="mb-1 block text-[11px] text-ink-faint">
           Таймаут, секунды
           <input
             ref={inputRef}
@@ -91,24 +89,24 @@ export function SessionTimeoutModal({
             min={MIN_TIMEOUT}
             max={MAX_TIMEOUT}
             step={1}
-            className={`mt-1 ${fieldCls}`}
+            className="field mt-1"
             value={value}
             onChange={(e) => setValue(Number(e.target.value))}
             disabled={saving}
           />
         </label>
-        <p className="mb-2 text-[10px] text-slate-500">
+        <p className="mb-2 text-[10px] text-ink-faint">
           от {MIN_TIMEOUT} до {MAX_TIMEOUT}, по умолчанию {DEFAULT_TIMEOUT}
         </p>
         {(error || outOfRange) && (
-          <p className="mb-2 text-xs text-red-400">
+          <p className="mb-2 text-xs text-danger-ink">
             {error ?? `Укажите целое число от ${MIN_TIMEOUT} до ${MAX_TIMEOUT}`}
           </p>
         )}
         <div className="flex justify-end gap-2">
           <button
             type="button"
-            className="rounded bg-slate-700 px-3 py-1 text-xs text-slate-200"
+            className="btn-secondary"
             onClick={onClose}
             disabled={saving}
           >
@@ -116,7 +114,7 @@ export function SessionTimeoutModal({
           </button>
           <button
             type="button"
-            className="rounded bg-indigo-600 px-3 py-1 text-xs text-white disabled:opacity-50"
+            className="btn-primary"
             onClick={() => void handleSave()}
             disabled={saving || outOfRange}
           >

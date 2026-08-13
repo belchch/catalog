@@ -107,7 +107,7 @@ export function DocumentCombobox(props: DocumentComboboxProps) {
         disabled={disabled}
         className={
           triggerClassName ??
-          'flex w-full items-center justify-between rounded bg-slate-800 px-2 py-1 text-left text-[11px] text-slate-100 disabled:opacity-50'
+          'field flex w-full items-center justify-between text-left text-[11px]'
         }
         onClick={() => {
           if (disabled) return
@@ -120,10 +120,10 @@ export function DocumentCombobox(props: DocumentComboboxProps) {
           }
         }}
       >
-        <span className={`truncate ${selectedIds.length === 0 ? 'text-slate-500' : ''}`}>
+        <span className={`truncate ${selectedIds.length === 0 ? 'text-ink-faint' : ''}`}>
           {triggerLabel}
         </span>
-        <span className="ml-1 text-slate-400">▾</span>
+        <span className="ml-1 text-ink-faint">▾</span>
       </button>
       {open && (
         <div
@@ -131,7 +131,7 @@ export function DocumentCombobox(props: DocumentComboboxProps) {
           role="listbox"
           aria-multiselectable={multiple || undefined}
           className={
-            'absolute z-10 max-h-48 w-full overflow-y-auto rounded border border-slate-700 bg-slate-900 shadow-xl ' +
+            'absolute z-10 max-h-48 w-full overflow-y-auto rounded border border-line bg-surface shadow-card ' +
             (placement === 'top' ? 'bottom-full mb-1' : 'mt-1')
           }
           onKeyDown={(e) => {
@@ -142,18 +142,18 @@ export function DocumentCombobox(props: DocumentComboboxProps) {
             }
           }}
         >
-          <div className="border-b border-slate-800 p-1">
+          <div className="border-b border-line p-1">
             <input
               type="search"
               value={filter}
               onChange={(e) => setFilter(e.target.value)}
               placeholder="Поиск…"
-              className="w-full rounded bg-slate-800 px-2 py-1 text-[11px] text-slate-100 placeholder:text-slate-500"
+              className="field text-[11px]"
               autoFocus
             />
           </div>
           {options.length === 0 && (
-            <div className="px-2 py-1 text-[11px] text-slate-500">нет совпадений</div>
+            <div className="px-2 py-1 text-[11px] text-ink-faint">нет совпадений</div>
           )}
           {options.map((d) => {
             const selected = selectedSet.has(d.id)
@@ -163,12 +163,12 @@ export function DocumentCombobox(props: DocumentComboboxProps) {
                   key={d.id}
                   role="option"
                   aria-selected={selected}
-                  className="flex cursor-pointer items-center gap-1.5 px-2 py-1 text-[11px] text-slate-300 hover:bg-slate-800"
+                  className="flex cursor-pointer items-center gap-1.5 px-2 py-1 text-[11px] text-ink-muted hover:bg-surface-hover"
                   onMouseDown={(e) => e.preventDefault()}
                 >
                   <input
                     type="checkbox"
-                    className="h-3 w-3 accent-indigo-500"
+                    className="h-3 w-3 accent-brand"
                     checked={selected}
                     onChange={() => toggleMulti(d.id)}
                   />
@@ -184,8 +184,8 @@ export function DocumentCombobox(props: DocumentComboboxProps) {
                 className={
                   'flex cursor-pointer items-center gap-1.5 px-2 py-1 text-[11px] ' +
                   (selected
-                    ? 'bg-indigo-600/20 text-white'
-                    : 'text-slate-300 hover:bg-slate-800')
+                    ? 'bg-brand-soft text-ink'
+                    : 'text-ink-muted hover:bg-surface-hover')
                 }
                 onMouseDown={(e) => e.preventDefault()}
                 onClick={() => {

@@ -33,32 +33,25 @@ export function RunView({
   const canSaveResult = run.finished && statusOk && !outputDocId && !!run.resultText
   return (
     <div className="flex h-full flex-col">
-      <div className="flex items-center justify-between border-b border-slate-800 px-4 py-2">
+      <div className="flex items-center justify-between border-b border-line px-4 py-2">
         <div className="flex items-center gap-2">
-          <h2 className="text-sm font-semibold text-slate-200">
+          <h2 className="text-sm font-semibold text-ink">
             Прогон{runId ? ` ${runId.slice(0, 8)}` : ''}
           </h2>
           {run.status && (
-            <span
-              className={
-                'rounded px-1.5 py-0.5 text-[10px] uppercase ' +
-                (statusOk ? 'bg-emerald-600/30 text-emerald-300' : 'bg-red-600/30 text-red-300')
-              }
-            >
+            <span className={statusOk ? 'badge-success' : 'badge-danger'}>
               {run.status}
             </span>
           )}
         </div>
         <div className="flex items-center gap-2">
-          <button
-            className="rounded bg-slate-800 px-2 py-1 text-xs text-slate-300"
-            onClick={onClose}
-          >
+          <button type="button" className="btn-secondary" onClick={onClose}>
             ← К чату
           </button>
           {!run.finished && (
             <button
-              className="rounded bg-red-600 px-2 py-1 text-xs font-medium text-white disabled:opacity-50"
+              type="button"
+              className="btn-danger"
               onClick={run.cancel}
               disabled={run.cancelling}
             >
@@ -68,33 +61,33 @@ export function RunView({
         </div>
       </div>
       <div className="grid flex-1 grid-cols-1 gap-3 overflow-hidden p-3 md:grid-cols-2">
-        <div className="overflow-y-auto rounded-md border border-slate-800 bg-slate-900/40 p-3">
-          <h3 className="mb-2 text-xs font-semibold uppercase text-slate-500">Лента шагов</h3>
+        <div className="overflow-y-auto rounded-md border border-line bg-surface-muted p-3">
+          <h3 className="mb-2 text-xs font-semibold uppercase text-ink-faint">Лента шагов</h3>
           {/* CATALOG-16: run meta header — model/provider/kind/prompt up front. */}
           {run.meta && (
-            <div className="mb-2 rounded border border-slate-800 bg-slate-950/40 p-2 font-mono text-[10px] text-slate-400">
+            <div className="mb-2 rounded border border-line bg-surface-muted p-2 font-mono text-[10px] text-ink-faint">
               <div className="flex flex-wrap gap-x-3 gap-y-0.5">
                 <span>
-                  <span className="text-slate-600">model:</span> {run.meta.model}
+                  <span className="text-ink-faint">model:</span> {run.meta.model}
                 </span>
                 {run.meta.provider && (
                   <span>
-                    <span className="text-slate-600">provider:</span> {run.meta.provider}
+                    <span className="text-ink-faint">provider:</span> {run.meta.provider}
                   </span>
                 )}
                 <span>
-                  <span className="text-slate-600">kind:</span> {run.meta.skillKind}
+                  <span className="text-ink-faint">kind:</span> {run.meta.skillKind}
                 </span>
                 {run.meta.inputDocs.length > 0 && (
                   <span>
-                    <span className="text-slate-600">docs:</span> {run.meta.inputDocs.length}
+                    <span className="text-ink-faint">docs:</span> {run.meta.inputDocs.length}
                   </span>
                 )}
               </div>
               {run.meta.systemPrompt && (
                 <details className="mt-1">
-                  <summary className="cursor-pointer text-slate-600">системный промпт</summary>
-                  <pre className="mt-1 overflow-x-auto whitespace-pre-wrap break-words text-slate-500">
+                  <summary className="cursor-pointer text-ink-faint">системный промпт</summary>
+                  <pre className="mt-1 overflow-x-auto whitespace-pre-wrap break-words text-ink-faint">
                     {run.meta.systemPrompt}
                   </pre>
                 </details>
@@ -102,21 +95,22 @@ export function RunView({
             </div>
           )}
           <TraceSteps steps={run.steps} />
-          {run.error && <p className="mt-2 text-xs text-red-400">Ошибка: {run.error}</p>}
+          {run.error && <p className="mt-2 text-xs text-danger-ink">Ошибка: {run.error}</p>}
           {run.closed && !run.finished && (
-            <p className="mt-2 text-xs text-amber-400">Соединение закрыто</p>
+            <p className="mt-2 text-xs text-warning-ink">Соединение закрыто</p>
           )}
         </div>
-        <div className="overflow-y-auto rounded-md border border-slate-800 bg-slate-900/40 p-3">
-          <h3 className="mb-2 text-xs font-semibold uppercase text-slate-500">Результат</h3>
+        <div className="overflow-y-auto rounded-md border border-line bg-surface-muted p-3">
+          <h3 className="mb-2 text-xs font-semibold uppercase text-ink-faint">Результат</h3>
           {outputDocId && (
-            <p className="mb-2 rounded border border-emerald-800 bg-emerald-950/40 px-2 py-1 text-xs text-emerald-300">
+            <p className="mb-2 rounded border border-success-line bg-success-soft px-2 py-1 text-xs text-success-ink">
               Документ создан{outputDoc ? `: «${outputDoc.title}»` : ` (id ${outputDocId.slice(0, 8)})`}
             </p>
           )}
           {canSaveResult && (
             <button
-              className="mb-2 rounded bg-indigo-600 px-2 py-1 text-xs text-white disabled:opacity-50"
+              type="button"
+              className="btn-primary mb-2"
               disabled={savingResult}
               onClick={() => runId && onSaveResult(runId)}
             >
@@ -127,10 +121,10 @@ export function RunView({
             <MarkdownView
               text={run.resultText}
               defaultMode="md"
-              className="text-sm text-slate-200"
+              className="text-sm text-ink"
             />
           ) : (
-            <p className="text-xs text-slate-500">
+            <p className="text-xs text-ink-faint">
               {run.finished ? 'Нет текстового результата.' : 'Ожидание результата…'}
             </p>
           )}

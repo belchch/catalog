@@ -88,37 +88,36 @@ export function SkillSettingsModal({
     }
   }
 
-  const fieldCls = 'w-full rounded bg-slate-800 px-2 py-1 text-xs text-slate-100'
-
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
-      <div className="w-full max-w-md rounded-lg border border-slate-700 bg-slate-900 p-4 shadow-xl">
+    <div className="modal-overlay">
+      <div className="modal-card max-w-md">
         <div className="mb-3 flex items-center justify-between">
-          <h2 className="text-sm font-semibold text-slate-100">Настройка скила</h2>
+          <h2 className="text-sm font-semibold text-ink">Настройка скила</h2>
           <button
-            className="text-xs text-slate-400 hover:text-slate-200"
+            type="button"
+            className="btn-ghost px-1"
             onClick={onClose}
             disabled={saving}
           >
             ✕
           </button>
         </div>
-        <label className="mb-2 block text-[11px] text-slate-400">
+        <label className="mb-2 block text-[11px] text-ink-faint">
           Имя
           <input
             type="text"
-            className={`mt-1 ${fieldCls}`}
+            className="field mt-1"
             value={name}
             onChange={(e) => setName(e.target.value)}
             disabled={saving}
           />
           {nameInvalid && (
-            <span className="mt-1 block text-[10px] text-red-400">Имя не может быть пустым</span>
+            <span className="mt-1 block text-[10px] text-danger-ink">Имя не может быть пустым</span>
           )}
         </label>
 
         <div className="mb-2">
-          <div className="mb-1 text-[11px] text-slate-400">Вход</div>
+          <div className="mb-1 text-[11px] text-ink-faint">Вход</div>
           <div
             role="radiogroup"
             aria-label="Вход"
@@ -146,10 +145,10 @@ export function SkillSettingsModal({
                   aria-checked={active}
                   tabIndex={active ? 0 : -1}
                   className={
-                    'rounded px-2 py-1 text-[11px] ' +
+                    'rounded px-2 py-1 text-[11px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand ' +
                     (active
-                      ? 'bg-indigo-600 text-white'
-                      : 'bg-slate-800 text-slate-300 hover:bg-slate-700')
+                      ? 'bg-brand text-white'
+                      : 'bg-surface-muted text-ink-muted hover:bg-surface-hover')
                   }
                   onClick={() => setInputArity(opt.value)}
                 >
@@ -160,10 +159,10 @@ export function SkillSettingsModal({
           </div>
         </div>
 
-        <label className="mb-2 block text-[11px] text-slate-400">
+        <label className="mb-2 block text-[11px] text-ink-faint">
           Провайдер
           <select
-            className={`mt-1 ${fieldCls}`}
+            className="field mt-1"
             value={provider}
             onChange={(e) => setProvider(e.target.value)}
           >
@@ -178,7 +177,7 @@ export function SkillSettingsModal({
         </label>
 
         <div className="mb-2">
-          <div className="mb-1 text-[11px] text-slate-400">Модель</div>
+          <div className="mb-1 text-[11px] text-ink-faint">Модель</div>
           <ModelCombobox
             models={models}
             value={model}
@@ -188,14 +187,14 @@ export function SkillSettingsModal({
             }}
             disabled={models.length === 0}
             ariaLabel="Модель"
-            triggerClassName="flex w-full items-center justify-between rounded bg-slate-800 px-2 py-1 text-left text-xs text-slate-100 disabled:opacity-50"
+            triggerClassName="field flex w-full items-center justify-between text-left"
           />
         </div>
 
-        <label className="mb-4 block text-[11px] text-slate-400">
+        <label className="mb-4 block text-[11px] text-ink-faint">
           Режим рассуждений
           <select
-            className={`mt-1 ${fieldCls}`}
+            className="field mt-1"
             value={reasoning}
             onChange={(e) => setReasoning(e.target.value)}
             disabled={reasoningVariants.length === 0}
@@ -208,24 +207,26 @@ export function SkillSettingsModal({
             ))}
           </select>
           {reasoningVariants.length === 0 && (
-            <span className="mt-1 block text-[10px] text-slate-500">
+            <span className="mt-1 block text-[10px] text-ink-faint">
               модель не поддерживает явный режим рассуждений
             </span>
           )}
         </label>
 
-        {error && <p className="mb-2 text-xs text-red-400">{error}</p>}
+        {error && <p className="mb-2 text-xs text-danger-ink">{error}</p>}
 
         <div className="flex justify-end gap-2">
           <button
-            className="rounded bg-slate-700 px-3 py-1 text-xs text-slate-200"
+            type="button"
+            className="btn-secondary"
             onClick={onClose}
             disabled={saving}
           >
             Отмена
           </button>
           <button
-            className="rounded bg-indigo-600 px-3 py-1 text-xs text-white disabled:opacity-50"
+            type="button"
+            className="btn-primary"
             onClick={() => void handleSave()}
             disabled={saving || nameInvalid}
           >

@@ -69,22 +69,22 @@ function SkillModelMeta({ skill }: { skill: SkillOut }) {
     <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[11px]">
       {provider != null && (
         <span className="inline-flex min-w-0 items-center gap-1">
-          <span className="text-slate-500">Провайдер</span>
-          <span className="text-slate-300">{provider}</span>
+          <span className="text-ink-faint">Провайдер</span>
+          <span className="text-ink-muted">{provider}</span>
         </span>
       )}
       {model != null && (
         <span className="inline-flex min-w-0 items-center gap-1">
-          <span className="text-slate-500">Модель</span>
-          <span className="max-w-[12rem] truncate text-slate-300" title={model}>
+          <span className="text-ink-faint">Модель</span>
+          <span className="max-w-[12rem] truncate text-ink-muted" title={model}>
             {model}
           </span>
         </span>
       )}
       {reasoning != null && (
         <span className="inline-flex min-w-0 items-center gap-1">
-          <span className="text-slate-500">Рассуждения</span>
-          <span className="text-slate-300">{reasoning}</span>
+          <span className="text-ink-faint">Рассуждения</span>
+          <span className="text-ink-muted">{reasoning}</span>
         </span>
       )}
     </div>
@@ -135,8 +135,7 @@ function skillMatchesQuery(skill: SkillOut, query: string): boolean {
   return haystack.includes(q)
 }
 
-const btnClass =
-  'rounded px-2 py-1 text-[11px] bg-slate-700 text-slate-200 disabled:opacity-50 disabled:cursor-not-allowed focus:outline-none focus:ring-1 focus:ring-slate-600'
+const btnClass = 'btn-secondary text-[11px]'
 
 export function SkillsPanel({
   skills,
@@ -320,10 +319,10 @@ export function SkillsPanel({
 
   return (
     <div className="flex flex-col gap-2">
-      {skills.error && <p className="text-xs text-red-400">{skills.error}</p>}
+      {skills.error && <p className="text-xs text-danger-ink">{skills.error}</p>}
 
       {!hasSkills && (
-        <p className="text-xs text-slate-500">
+        <p className="text-xs text-ink-faint">
           Скиллов пока нет — создайте из сессии планировщика.
         </p>
       )}
@@ -332,7 +331,7 @@ export function SkillsPanel({
         <>
           <input
             type="search"
-            className="w-full rounded bg-slate-800 px-2 py-1 text-[11px] text-slate-100 placeholder:text-slate-500 outline-none focus:ring-1 focus:ring-slate-600"
+            className="field text-[11px]"
             placeholder="Поиск скиллов…"
             aria-label="Поиск скиллов"
             value={query}
@@ -354,7 +353,7 @@ export function SkillsPanel({
             >
               <input
                 type="text"
-                className="min-w-[8rem] flex-1 rounded bg-slate-800 px-2 py-1 text-xs text-slate-100 disabled:opacity-50 focus:outline-none focus:ring-1 focus:ring-slate-600"
+                className="field min-w-[8rem] flex-1"
                 value={renameValue}
                 aria-label="Имя скила"
                 autoFocus
@@ -376,7 +375,7 @@ export function SkillsPanel({
               />
               <button
                 type="button"
-                className="rounded bg-indigo-600 px-2 py-1 text-[11px] text-white disabled:opacity-50 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                className="btn-primary text-[11px]"
                 disabled={renameSaving || renameEmpty}
                 onClick={() => void saveRename(selected.id, selected.name)}
               >
@@ -449,10 +448,10 @@ export function SkillsPanel({
                     ⋯
                   </button>
                   {overflowOpen && !confirmOpen && selected != null && (
-                    <div className="absolute right-0 z-10 mt-1 min-w-[7rem] rounded border border-slate-700 bg-slate-900 py-1 shadow-lg">
+                    <div className="absolute right-0 z-10 mt-1 min-w-[7rem] rounded border border-line bg-surface py-1 shadow-card">
                       <button
                         type="button"
-                        className="block w-full px-3 py-1.5 text-left text-[11px] text-red-400 hover:bg-slate-800"
+                        className="block w-full px-3 py-1.5 text-left text-[11px] text-danger-ink hover:bg-surface-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand"
                         onClick={() => {
                           clearRename()
                           setOverflowOpen(false)
@@ -467,13 +466,13 @@ export function SkillsPanel({
               </div>
               {confirmOpen && selected != null && (
                 <div className="flex flex-wrap items-center gap-1.5">
-                  <span className="text-[11px] text-slate-300">
+                  <span className="text-[11px] text-ink-muted">
                     Удалить скил &laquo;{selected.name}&raquo;?
                   </span>
                   <button
                     type="button"
                     autoFocus
-                    className="rounded bg-red-600/80 px-2 py-1 text-[11px] text-white focus:outline-none focus:ring-1 focus:ring-red-500"
+                    className="btn-danger text-[11px]"
                     onClick={() => {
                       const id = selected.id
                       setConfirmOpen(false)
@@ -496,7 +495,7 @@ export function SkillsPanel({
 
           {filtered.length === 0 ? (
             <div className="flex flex-wrap items-center gap-2">
-              <p className="text-xs text-slate-500">Ничего не найдено</p>
+              <p className="text-xs text-ink-faint">Ничего не найдено</p>
               <button
                 type="button"
                 className={btnClass}
@@ -510,7 +509,7 @@ export function SkillsPanel({
               role="listbox"
               aria-label="Скиллы"
               tabIndex={0}
-              className="flex flex-col gap-0.5 outline-none focus:ring-1 focus:ring-slate-600 rounded"
+              className="flex flex-col gap-0.5 rounded outline-none focus-visible:ring-2 focus-visible:ring-brand"
               onKeyDown={onListKeyDown}
             >
               {filtered.map((s) => {
@@ -538,23 +537,23 @@ export function SkillsPanel({
                       aria-label={`${s.name}, ${statusTitle}`}
                       title={`${s.name} (${statusTitle})`}
                       className={
-                        'flex h-8 cursor-pointer items-center gap-2 overflow-hidden whitespace-nowrap rounded px-2 py-1.5 text-xs ' +
+                        'flex h-8 cursor-pointer items-center gap-2 overflow-hidden whitespace-nowrap rounded px-2 py-1.5 text-xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand ' +
                         (isSelected
-                          ? 'bg-indigo-600/15 text-slate-200'
-                          : 'text-slate-300 hover:bg-slate-800/70')
+                          ? 'bg-brand-soft text-ink'
+                          : 'text-ink-muted hover:bg-surface-hover')
                       }
                       onClick={() => selectSkill(s.id)}
                     >
                       <span
                         className={
                           'inline-block h-2 w-2 shrink-0 rounded-full ' +
-                          (s.status === 'committed' ? 'bg-emerald-400' : 'bg-amber-400')
+                          (s.status === 'committed' ? 'bg-success' : 'bg-warning')
                         }
                         title={statusTitle}
                         aria-hidden
                       />
                       <span
-                        className="min-w-0 flex-1 truncate text-xs font-medium text-slate-200"
+                        className="min-w-0 flex-1 truncate text-xs font-medium text-ink"
                         title={s.name}
                       >
                         {s.name}
@@ -563,24 +562,17 @@ export function SkillsPanel({
                         {visibleTags.map((tag) => (
                           <span
                             key={tag}
-                            className={
-                              'rounded px-1.5 py-0.5 text-[10px] uppercase ' +
-                              (tag === 'python'
-                                ? 'bg-sky-600/30 text-sky-300'
-                                : 'bg-fuchsia-600/30 text-fuchsia-300')
-                            }
+                            className={tag === 'python' ? 'badge-info' : 'badge-accent'}
                           >
                             {tag}
                           </span>
                         ))}
                         {extraTags > 0 && (
-                          <span className="rounded px-1.5 py-0.5 text-[10px] uppercase text-slate-400">
-                            +{extraTags}
-                          </span>
+                          <span className="badge-neutral">+{extraTags}</span>
                         )}
                       </span>
                       <span
-                        className="shrink-0 rounded px-1.5 py-0.5 text-[10px] text-slate-400"
+                        className="shrink-0 rounded px-1.5 py-0.5 text-[10px] text-ink-faint"
                         title={arityInfo.title}
                       >
                         {arityInfo.symbol}
@@ -588,12 +580,12 @@ export function SkillsPanel({
                     </div>
 
                     {isSelected && (
-                      <div className="mt-1.5 flex flex-col gap-1.5 border-t border-slate-800 pt-1.5 px-2 pb-1">
+                      <div className="mt-1.5 flex flex-col gap-1.5 border-t border-line pt-1.5 px-2 pb-1">
                         {desc && (
                           <div>
                             <p
                               className={
-                                'text-[11px] text-slate-400 ' +
+                                'text-[11px] text-ink-faint ' +
                                 (descExpanded ? '' : 'line-clamp-2')
                               }
                             >
@@ -602,7 +594,7 @@ export function SkillsPanel({
                             {(descNeedsToggle || descExpanded) && (
                               <button
                                 type="button"
-                                className="mt-0.5 text-[11px] text-slate-500 hover:text-slate-300"
+                                className="mt-0.5 text-[11px] text-ink-faint hover:text-ink-muted"
                                 onClick={(e) => {
                                   e.stopPropagation()
                                   setDescExpanded((v) => !v)
@@ -617,11 +609,11 @@ export function SkillsPanel({
                         {s.status === 'committed' && (
                           <div className="relative flex w-full flex-col gap-1.5">
                             {documents.length === 0 && (
-                              <span className="text-[11px] text-slate-500">нет документов</span>
+                              <span className="text-[11px] text-ink-faint">нет документов</span>
                             )}
                             {documents.length > 0 && arity === 1 && (
                               <div>
-                                <div className="mb-0.5 text-[11px] text-slate-400">Документ</div>
+                                <div className="mb-0.5 text-[11px] text-ink-faint">Документ</div>
                                 <DocumentCombobox
                                   documents={documents}
                                   value={slots[0] ?? null}
@@ -635,7 +627,7 @@ export function SkillsPanel({
                             {documents.length > 0 && arity === 2 && (
                               <div className="flex flex-col gap-1.5">
                                 <div>
-                                  <div className="mb-0.5 text-[11px] text-slate-400">Документ 1</div>
+                                  <div className="mb-0.5 text-[11px] text-ink-faint">Документ 1</div>
                                   <DocumentCombobox
                                     documents={documents}
                                     value={slots[0] ?? null}
@@ -648,7 +640,7 @@ export function SkillsPanel({
                                   />
                                 </div>
                                 <div>
-                                  <div className="mb-0.5 text-[11px] text-slate-400">Документ 2</div>
+                                  <div className="mb-0.5 text-[11px] text-ink-faint">Документ 2</div>
                                   <DocumentCombobox
                                     documents={documents}
                                     value={slots[1] ?? null}
@@ -661,13 +653,13 @@ export function SkillsPanel({
                                   />
                                 </div>
                                 {hint && !valid && (
-                                  <p className="text-[10px] text-amber-400">{hint}</p>
+                                  <p className="text-[10px] text-warning-ink">{hint}</p>
                                 )}
                               </div>
                             )}
                             {documents.length > 0 && arity === null && (
                               <div>
-                                <div className="mb-0.5 text-[11px] text-slate-400">Документы</div>
+                                <div className="mb-0.5 text-[11px] text-ink-faint">Документы</div>
                                 <DocumentCombobox
                                   documents={documents}
                                   multiple
@@ -683,7 +675,7 @@ export function SkillsPanel({
                               <div>
                                 <label
                                   htmlFor={`skill-prompt-${s.id}`}
-                                  className="mb-0.5 block text-[11px] text-slate-400"
+                                  className="mb-0.5 block text-[11px] text-ink-faint"
                                 >
                                   Промпт
                                 </label>
@@ -699,14 +691,14 @@ export function SkillsPanel({
                                       [s.id]: e.target.value,
                                     }))
                                   }
-                                  className="max-h-28 w-full resize-y rounded bg-slate-800 px-2 py-1 text-[11px] text-slate-100 placeholder:text-slate-500 outline-none focus:ring-1 focus:ring-slate-600"
+                                  className="field max-h-28 resize-y text-[11px]"
                                 />
                               </div>
                             )}
                             <div className="flex flex-wrap gap-1.5">
                               <button
                                 type="button"
-                                className="rounded bg-indigo-600 px-2 py-1 text-[11px] text-white disabled:opacity-50 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                                className="btn-primary text-[11px]"
                                 disabled={!valid || documents.length === 0}
                                 title="Результат сразу сохраняется в новый документ"
                                 onClick={() =>
@@ -723,7 +715,7 @@ export function SkillsPanel({
                               </button>
                               <button
                                 type="button"
-                                className="rounded bg-slate-700 px-2 py-1 text-[11px] text-slate-200 disabled:opacity-50 focus:outline-none focus:ring-1 focus:ring-slate-600"
+                                className="btn-secondary text-[11px]"
                                 disabled={!valid || documents.length === 0}
                                 title="Результат выводится на экран; документ можно сохранить отдельно"
                                 onClick={() =>

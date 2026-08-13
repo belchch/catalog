@@ -30,7 +30,7 @@ export function ChatMessage({ message, onRepeat, streaming, closed }: ChatMessag
   }
   if (message.role === 'tool') {
     return (
-      <div className="catalog-message catalog-message--tool my-2 text-xs text-slate-400">
+      <div className="catalog-message catalog-message--tool my-2 text-xs text-ink-faint">
         <span className="font-mono">ℹ {message.content}</span>
       </div>
     )
@@ -41,7 +41,7 @@ export function ChatMessage({ message, onRepeat, streaming, closed }: ChatMessag
         <MarkdownView
           text={message.content}
           defaultMode="md"
-          className="text-sm text-slate-100"
+          className="text-sm text-ink"
         />
       </div>
     </div>
