@@ -1,12 +1,16 @@
 from __future__ import annotations
 
+import os
 import shutil
 import uuid
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
+from app.documents.scan import ScanReport, preview_workspace, scan_workspace
 from app.documents.tools import build_document_tools
+from app.skills.repo_run import has_running_runs
 from app.storage.db import Database
 from app.storage.schema import (
     ADDITIVE_MIGRATIONS,
@@ -32,10 +36,38 @@ class WorkspaceBusyError(WorkspaceError):
     pass
 
 
+class WorkspaceNotFoundError(WorkspaceError):
+    pass
+
+
+class WorkspaceAccessError(WorkspaceError):
+    pass
+
+
+@dataclass
+class OpenResult:
+    status: Literal["ok", "needs_init", "needs_confirm"]
+    path: str
+    display_name: str
+    scan: ScanReport | None = None
+
+
+def _has_user_content(root: Path) -> bool:
+    for dirpath, dirnames, filenames in os.walk(root):
+        dirnames[:] = [
+            d for d in dirnames if d != CATALOG_DIR and not d.startswith(".")
+        ]
+        for name in filenames:
+            if not name.startswith("."):
+                return True
+    return False
+
+
 class WorkspaceManager:
     def __init__(self) -> None:
         self.current: Database | None = None
         self.root: Path | None = None
+        self.last_scan: ScanReport | None = None
         self._app_db: Database | None = None
         self._app_state: Any | None = None
 
@@ -62,10 +94,10 @@ class WorkspaceManager:
         if check != "ok":
             raise WorkspaceValidationError(f"workspace database failed quick_check: {check}")
 
-    def _hook_rescan(self, root: Path, db: Database) -> None:
-        from app.documents.scan import scan_workspace
-
-        scan_workspace(db, root)
+    def _hook_rescan(self, root: Path, db: Database) -> ScanReport:
+        report = scan_workspace(db, root)
+        self.last_scan = report
+        return report
 
     def open(self, path: str | Path, *, confirm_init: bool = False) -> Database:
         root = Path(path).expanduser().resolve()
@@ -73,6 +105,7 @@ class WorkspaceManager:
             raise WorkspaceValidationError(f"path is not a directory: {root}")
 
         if self.root is not None and self.root == root and self.current is not None:
+            self._hook_rescan(root, self.current)
             return self.current
 
         if self.current is not None:
@@ -100,6 +133,56 @@ class WorkspaceManager:
         self._sync_app_state()
         return db
 
+    def open_for_api(self, path: str | Path, *, confirm: bool = False) -> OpenResult:
+        try:
+            root = Path(path).expanduser().resolve()
+        except OSError as exc:
+            raise WorkspaceAccessError(str(exc)) from exc
+
+        if not root.exists():
+            raise WorkspaceNotFoundError(f"path not found: {root}")
+        if not root.is_dir():
+            raise WorkspaceValidationError(f"path is not a directory: {root}")
+        try:
+            next(root.iterdir(), None)
+        except PermissionError as exc:
+            raise WorkspaceAccessError(f"path not accessible: {root}") from exc
+
+        index = root / CATALOG_DIR / INDEX_DB_NAME
+        display = root.name
+        path_str = str(root)
+
+        if index.is_file():
+            self.open(root, confirm_init=False)
+            return OpenResult(
+                status="ok",
+                path=path_str,
+                display_name=display,
+                scan=self.last_scan,
+            )
+
+        if not confirm:
+            if not _has_user_content(root):
+                return OpenResult(
+                    status="needs_init",
+                    path=path_str,
+                    display_name=display,
+                )
+            return OpenResult(
+                status="needs_confirm",
+                path=path_str,
+                display_name=display,
+                scan=preview_workspace(root),
+            )
+
+        self.open(root, confirm_init=True)
+        return OpenResult(
+            status="ok",
+            path=path_str,
+            display_name=display,
+            scan=self.last_scan,
+        )
+
     def close(self) -> None:
         if self.current is not None:
             self._assert_no_running()
@@ -109,16 +192,38 @@ class WorkspaceManager:
     def _clear_current(self) -> None:
         self.current = None
         self.root = None
+        self.last_scan = None
+
+    def has_running(self) -> bool:
+        if self.current is None:
+            return False
+        return has_running_runs(self.current)
 
     def _assert_no_running(self) -> None:
-        if self.current is None:
-            return
-        with self.current.connect() as conn:
-            row = conn.execute(
-                "SELECT 1 FROM skill_run WHERE status = 'running' LIMIT 1"
-            ).fetchone()
-        if row is not None:
+        if self.has_running():
             raise WorkspaceBusyError("cannot switch workspace while a skill_run is running")
+
+    def list_registry(self) -> list[dict[str, str | None]]:
+        if self._app_db is None:
+            return []
+        with self._app_db.connect() as conn:
+            rows = conn.execute(
+                "SELECT path, display_name, opened_at FROM workspace_registry "
+                "ORDER BY opened_at DESC"
+            ).fetchall()
+        return [
+            {
+                "path": row["path"],
+                "display_name": row["display_name"],
+                "last_opened": row["opened_at"],
+            }
+            for row in rows
+        ]
+
+    def rescan(self) -> ScanReport:
+        if self.current is None or self.root is None:
+            raise WorkspaceValidationError("workspace not open")
+        return self._hook_rescan(self.root, self.current)
 
     def _backup_index(self, index: Path) -> Path:
         backups = index.parent / BACKUPS_DIR

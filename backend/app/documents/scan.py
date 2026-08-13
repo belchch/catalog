@@ -98,6 +98,17 @@ def _walk_workspace(root: Path) -> tuple[list[_FsEntry], list[str]]:
     return entries, skipped
 
 
+def preview_workspace(workspace_dir: str | Path) -> ScanReport:
+    root = Path(workspace_dir)
+    report = ScanReport()
+    if not root.is_dir():
+        return report
+    entries, skipped = _walk_workspace(root)
+    report.skipped.extend(skipped)
+    report.added.extend(e.rel_path for e in entries)
+    return report
+
+
 def scan_workspace(db: Database, workspace_dir: str | Path) -> ScanReport:
     root = Path(workspace_dir)
     report = ScanReport()

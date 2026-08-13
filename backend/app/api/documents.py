@@ -53,14 +53,6 @@ async def delete_document_endpoint(
         raise HTTPException(status_code=404, detail="document not found")
 
 
-@router.post("/documents/scan")
-async def scan_documents_endpoint(
-    db: Database = Depends(get_workspace_db),
-    workspace: str = Depends(get_workspace),
-) -> dict[str, list[str]]:
-    return scan_workspace(db, workspace).as_dict()
-
-
 @router.post("/documents/reconcile")
 async def reconcile_documents_endpoint(
     db: Database = Depends(get_workspace_db),

@@ -44,6 +44,25 @@ def test_open_without_confirm_rejects_empty_folder(tmp_path: Path, app_db: Datab
         manager.open(root, confirm_init=False)
 
 
+def test_reopen_same_workspace_refreshes_scan(
+    tmp_path: Path, app_db: Database
+) -> None:
+    manager = WorkspaceManager()
+    manager.bind(app_db=app_db, app_state=type("S", (), {})())
+    root = tmp_path / "folder"
+    root.mkdir()
+    manager.open(root, confirm_init=True)
+    assert manager.last_scan is not None
+    assert manager.last_scan.added == []
+    (root / "late.md").write_text("hi", encoding="utf-8")
+    manager.open(root, confirm_init=False)
+    assert manager.last_scan is not None
+    assert len(manager.last_scan.added) == 1
+    with manager.current.connect() as conn:
+        paths = [r["path"] for r in conn.execute("SELECT path FROM document").fetchall()]
+    assert paths == ["late.md"]
+
+
 def test_open_backs_up_existing_index(tmp_path: Path, app_db: Database) -> None:
     manager = WorkspaceManager()
     state = type("S", (), {})()

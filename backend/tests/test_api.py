@@ -343,7 +343,7 @@ def test_reconcile_documents_endpoint(client, db) -> None:
     assert get_document(db, orphan_id) is None
 
 
-def test_scan_documents_endpoint(client, db) -> None:
+def test_workspaces_rescan_endpoint(client, db) -> None:
     from pathlib import Path
 
     from app.storage.repo_document import get_document
@@ -354,7 +354,7 @@ def test_scan_documents_endpoint(client, db) -> None:
     (workspace / "skip.exe").write_bytes(b"MZ")
     (workspace / ".hidden.md").write_text("x", encoding="utf-8")
 
-    resp = client.post("/documents/scan")
+    resp = client.post("/workspaces/rescan")
     assert resp.status_code == 200
     body = resp.json()
     assert len(body["added"]) >= 1
@@ -362,7 +362,7 @@ def test_scan_documents_endpoint(client, db) -> None:
     docs = {d["id"]: d for d in client.get("/documents").json()}
     for doc_id in body["added"]:
         assert doc_id in docs
-    again = client.post("/documents/scan").json()
+    again = client.post("/workspaces/rescan").json()
     assert again["added"] == []
     assert again["updated"] == []
     assert again["renamed"] == []

@@ -104,6 +104,7 @@ def settings(tmp_path: Path) -> Settings:
     return Settings(
         db_path=str(tmp_path / "app.db"),
         workspace_dir=str(tmp_path / "ws"),
+        fs_root=str(tmp_path),
         prompt_log_dir=str(tmp_path / "prompt_logs"),
         default_model="test/model",
         app_provider="",

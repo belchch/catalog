@@ -1,5 +1,6 @@
 import os
 from dataclasses import dataclass
+from pathlib import Path
 
 from dotenv import load_dotenv
 
@@ -29,6 +30,10 @@ APP_PROVIDER = os.getenv("APP_PROVIDER", "").strip().lower()
 _DATA_DIR = resolve_data_dir()
 APP_WORKSPACE = str(resolve_override("APP_WORKSPACE", _DATA_DIR / "workspace"))
 APP_DB_PATH = str(resolve_override("APP_DB_PATH", _DATA_DIR / "app.db"))
+_fs_root_env = os.getenv("APP_FS_ROOT")
+APP_FS_ROOT = str(
+    Path(_fs_root_env).expanduser().resolve() if _fs_root_env else Path.home().resolve()
+)
 
 # Logging — root level for the ``app`` logger hierarchy (default INFO).
 # Read once at import time so Settings carries a stable value.
@@ -51,6 +56,7 @@ class Settings:
 
     db_path: str = APP_DB_PATH
     workspace_dir: str = APP_WORKSPACE
+    fs_root: str = APP_FS_ROOT
     api_key: str = OPENROUTER_API_KEY
     base_url: str = OPENROUTER_BASE_URL
     default_model: str = OPENROUTER_DEFAULT_MODEL
@@ -74,9 +80,16 @@ def get_settings() -> Settings:
     workspace_dir = resolve_override("APP_WORKSPACE", data_dir / "workspace")
     db_path = resolve_override("APP_DB_PATH", data_dir / "app.db")
     prompt_log_dir = resolve_override("PROMPT_LOG_DIR", data_dir / "prompt_logs")
+    fs_root_env = os.getenv("APP_FS_ROOT")
+    fs_root = (
+        Path(fs_root_env).expanduser().resolve()
+        if fs_root_env
+        else Path.home().resolve()
+    )
     return Settings(
         db_path=str(db_path),
         workspace_dir=str(workspace_dir),
+        fs_root=str(fs_root),
         api_key=OPENROUTER_API_KEY,
         base_url=OPENROUTER_BASE_URL,
         default_model=OPENROUTER_DEFAULT_MODEL,

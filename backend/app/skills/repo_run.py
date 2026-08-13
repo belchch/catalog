@@ -120,6 +120,14 @@ def delete_runs_for_skill(db: Database, skill_id: str) -> int:
         return int(cur.rowcount)
 
 
+def has_running_runs(db: Database) -> bool:
+    with db.connect() as conn:
+        row = conn.execute(
+            "SELECT 1 FROM skill_run WHERE status = 'running' LIMIT 1"
+        ).fetchone()
+    return row is not None
+
+
 def get_run(db: Database, run_id: str) -> dict | None:
     """Fetch a skill_run row as a dict, or ``None`` if not found.
 

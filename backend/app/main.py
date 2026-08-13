@@ -31,7 +31,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
-from app.api import documents, models, runs, sessions, skills
+from app.api import documents, models, runs, sessions, skills, workspaces
 from app.config import Settings, get_settings
 from app.llm.factory import build_providers, select_provider
 from app.llm.openrouter import build_debug_hooks
@@ -108,6 +108,7 @@ app.include_router(sessions.router)
 app.include_router(skills.router)
 app.include_router(runs.router)
 app.include_router(models.router)
+app.include_router(workspaces.router)
 
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]

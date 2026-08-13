@@ -2,7 +2,41 @@
 
 from __future__ import annotations
 
+from typing import Literal
+
 from pydantic import BaseModel, Field, field_validator, model_validator
+
+
+class ScanReport(BaseModel):
+    added: list[str] = Field(default_factory=list)
+    updated: list[str] = Field(default_factory=list)
+    renamed: list[str] = Field(default_factory=list)
+    removed: list[str] = Field(default_factory=list)
+    skipped: list[str] = Field(default_factory=list)
+
+
+class WorkspaceOut(BaseModel):
+    path: str
+    display_name: str | None = None
+    last_opened: str | None = None
+
+
+class WorkspaceOpenRequest(BaseModel):
+    path: str
+    confirm: bool = False
+
+
+class WorkspaceOpenResult(BaseModel):
+    status: Literal["ok", "needs_init", "needs_confirm"]
+    path: str | None = None
+    display_name: str | None = None
+    scan: ScanReport | None = None
+
+
+class FsEntry(BaseModel):
+    name: str
+    path: str
+    has_catalog: bool = False
 
 
 class DocumentOut(BaseModel):
