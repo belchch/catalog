@@ -108,15 +108,16 @@ export function Chat({
   }
 
   return (
-    <div className="flex h-full flex-col">
+    <div className="catalog-chat flex h-full flex-col">
       {editingSkillName && (
         <div className="bg-indigo-900/40 px-4 py-1.5 text-xs text-indigo-200">
           Редактирование: {editingSkillName}
         </div>
       )}
-      <div className="flex-1 overflow-y-auto px-4 py-3">
+      <div className="catalog-chat__scroll flex-1 overflow-y-auto px-5 py-6">
+        <div className="catalog-chat__content">
         {messages.length === 0 && (
-          <p className="mt-8 text-center text-sm text-slate-500">
+          <p className="catalog-chat__empty mt-16 text-center text-sm text-slate-500">
             Опишите задачу для документа — планировщик изучит документы и предложит скилл.
           </p>
         )}
@@ -155,8 +156,10 @@ export function Chat({
         )}
         {error && <div className="my-2 text-xs text-red-400">Ошибка: {error}</div>}
         <div ref={bottomRef} />
+        </div>
       </div>
-      <div className="border-t border-slate-800 p-3">
+      <div className="catalog-composer-area p-4">
+        <div className="catalog-composer">
         {sessionDocuments.length > 0 && (
           <section className="mb-2" aria-label="Документы в сессии">
             <h2 className="mb-1 text-[11px] uppercase tracking-wide text-slate-500">
@@ -334,6 +337,7 @@ export function Chat({
             )}
           </div>
         )}
+        </div>
       </div>
     </div>
   )

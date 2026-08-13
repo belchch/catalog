@@ -18,6 +18,7 @@ import {
   type SkillTrack,
 } from './api.ts'
 import { ArtifactsPanel } from './components/ArtifactsPanel.tsx'
+import { ArtifactSummaryCard } from './components/ArtifactSummaryCard.tsx'
 import { Chat } from './components/Chat.tsx'
 import { CollapsibleSection } from './components/CollapsibleSection.tsx'
 import { DocumentList } from './components/DocumentList.tsx'
@@ -38,6 +39,7 @@ import { useSkills } from './hooks/useSkills.ts'
 const SESSION_STORAGE_KEY = 'catalog.sessionId'
 
 type MainPane = 'chat' | 'draft'
+type DraftPane = 'summary' | 'editor'
 
 function readStoredSessionId(): string | null {
   try {
@@ -105,6 +107,7 @@ export default function App() {
   const [openDocs, setOpenDocs] = useState(false)
   const [openSkills, setOpenSkills] = useState(false)
   const [mainPane, setMainPane] = useState<MainPane>('chat')
+  const [draftPane, setDraftPane] = useState<DraftPane>('summary')
   const [artifactHighlight, setArtifactHighlight] = useState<ArtifactType | null>(null)
   const [gitSha, setGitSha] = useState('')
 
@@ -137,6 +140,7 @@ export default function App() {
   useEffect(() => {
     setArtifactHighlight(null)
     setMainPane('chat')
+    setDraftPane('summary')
     setBuildError(null)
     setBuildErrorIsTimeout(false)
     setTimeoutModalOpen(false)
@@ -417,9 +421,10 @@ export default function App() {
   const showDraft = isLg || mainPane === 'draft'
 
   return (
-    <div className="flex h-screen flex-col bg-slate-950 text-slate-100">
-      <header className="flex items-center justify-between border-b border-slate-800 px-4 py-2">
+    <div className="catalog-shell flex h-screen flex-col">
+      <header className="catalog-header flex shrink-0 items-center justify-between px-5">
         <div className="flex min-w-0 items-center gap-3">
+          <span className="catalog-header__folder" aria-hidden="true">▱</span>
           <h1 className="truncate text-base font-semibold">Catalog — планировщик скиллов</h1>
           {gitSha ? (
             <span className="shrink-0 font-mono text-xs text-slate-500" title="git sha">
@@ -438,10 +443,26 @@ export default function App() {
         />
       </header>
       {notice && (
-        <div className="bg-slate-800/60 px-4 py-1 text-xs text-slate-300">{notice}</div>
+        <div className="catalog-notice px-5 py-2 text-xs">{notice}</div>
       )}
-      <div className="grid flex-1 grid-cols-1 overflow-hidden md:grid-cols-[352px_1fr]">
-        <aside className="flex flex-col gap-4 overflow-y-auto border-r border-slate-800 p-3">
+      <div className="catalog-layout grid flex-1 grid-cols-1 overflow-hidden lg:grid-cols-[360px_minmax(0,1fr)]">
+        <aside className="catalog-sidebar flex flex-col overflow-y-auto p-3">
+          <div className="catalog-sidebar__brand">
+            <span className="catalog-mark">C</span>
+            <span>Catalog</span>
+            <span className="catalog-sidebar__chevron">⌄</span>
+          </div>
+          <div className="catalog-search" role="search">
+            <span aria-hidden="true">⌕</span>
+            <span>Поиск</span>
+          </div>
+          <button type="button" className="catalog-new-chat" onClick={handleNewChat} disabled={sessions.loading}>
+            <span aria-hidden="true">✎</span>
+            Новый чат
+          </button>
+          <p className="catalog-sidebar__section-label">Проект</p>
+          <div className="catalog-project-title"><span aria-hidden="true">▱</span> Catalog</div>
+          <div className="catalog-sidebar__sections">
           <CollapsibleSection
             title="Сессии"
             open={openSessions}
@@ -516,8 +537,13 @@ export default function App() {
               onRename={(id, name) => skillsHook.rename(id, name)}
             />
           </CollapsibleSection>
+          </div>
+          <div className="catalog-sidebar__footer">
+            <span className="catalog-avatar">C</span>
+            <span>Catalog workspace</span>
+          </div>
         </aside>
-        <main className="overflow-hidden">
+        <main className="catalog-main overflow-hidden">
           {activeRunId ? (
             <RunView
               run={run}
@@ -609,24 +635,45 @@ export default function App() {
                   role={isLg ? undefined : 'tabpanel'}
                   aria-label={isLg ? undefined : 'Черновик'}
                   className={
-                    'w-full overflow-hidden lg:w-[420px] lg:shrink-0 ' +
+                    'catalog-draft-area w-full overflow-hidden lg:w-[408px] lg:shrink-0 ' +
                     (showDraft ? 'flex' : 'hidden') +
                     ' lg:flex'
                   }
                 >
                   <div className="h-full w-full">
-                    <ArtifactsPanel
-                      sessionId={sessionId}
-                      artifacts={planner.artifacts}
-                      loading={planner.artifactsLoading}
-                      error={planner.artifactsError}
-                      streaming={planner.streaming}
-                      highlightType={artifactHighlight}
-                      onClearHighlight={() => setArtifactHighlight(null)}
-                      onSavePrompt={planner.savePrompt}
-                      onSaveScript={planner.saveScript}
-                      onSaveMeta={planner.saveMeta}
-                    />
+                    {draftPane === 'summary' ? (
+                      <ArtifactSummaryCard
+                        artifacts={planner.artifacts}
+                        loading={planner.artifactsLoading}
+                        error={planner.artifactsError}
+                        streaming={planner.streaming}
+                        onOpen={() => setDraftPane('editor')}
+                      />
+                    ) : (
+                      <div className="artifact-editor h-full">
+                        <div className="artifact-editor__header">
+                          <div>
+                            <p>Черновик</p>
+                            <h2>Редактор артефактов</h2>
+                          </div>
+                          <button type="button" onClick={() => setDraftPane('summary')}>К сводке</button>
+                        </div>
+                        <div className="artifact-editor__body">
+                          <ArtifactsPanel
+                            sessionId={sessionId}
+                            artifacts={planner.artifacts}
+                            loading={planner.artifactsLoading}
+                            error={planner.artifactsError}
+                            streaming={planner.streaming}
+                            highlightType={artifactHighlight}
+                            onClearHighlight={() => setArtifactHighlight(null)}
+                            onSavePrompt={planner.savePrompt}
+                            onSaveScript={planner.saveScript}
+                            onSaveMeta={planner.saveMeta}
+                          />
+                        </div>
+                      </div>
+                    )}
                   </div>
                 </div>
               </div>

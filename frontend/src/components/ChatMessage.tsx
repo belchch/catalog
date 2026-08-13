@@ -15,8 +15,8 @@ interface ChatMessageProps {
 export function ChatMessage({ message, onRepeat, streaming, closed }: ChatMessageProps) {
   if (message.role === 'user') {
     return (
-      <div className="my-2 flex flex-col items-end">
-        <div className="max-w-[80%] whitespace-pre-wrap rounded-lg bg-indigo-600 px-3 py-2 text-sm text-white">
+      <div className="catalog-message catalog-message--user my-4 flex flex-col items-end">
+        <div className="max-w-[80%] whitespace-pre-wrap rounded-2xl px-4 py-2.5 text-sm">
           {message.content}
         </div>
         <MessageCommands
@@ -30,14 +30,14 @@ export function ChatMessage({ message, onRepeat, streaming, closed }: ChatMessag
   }
   if (message.role === 'tool') {
     return (
-      <div className="my-1 text-xs text-slate-400">
+      <div className="catalog-message catalog-message--tool my-2 text-xs text-slate-400">
         <span className="font-mono">ℹ {message.content}</span>
       </div>
     )
   }
   return (
-    <div className="my-2 flex justify-start">
-      <div className="max-w-[80%] rounded-lg bg-slate-800 px-3 py-2">
+    <div className="catalog-message catalog-message--assistant my-4 flex justify-start">
+      <div className="max-w-[88%] px-1 py-1">
         <MarkdownView
           text={message.content}
           defaultMode="md"
