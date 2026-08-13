@@ -7,6 +7,7 @@ interface ModelSelectorProps {
   providers: ProviderOut[]
   models: ModelOut[]
   loading: boolean
+  modelsLoading?: boolean
   onProviderChange: (provider: string) => void
   onModelChange: (model: string) => void
 }
@@ -17,6 +18,7 @@ export function ModelSelector({
   providers,
   models,
   loading,
+  modelsLoading = false,
   onProviderChange,
   onModelChange,
 }: ModelSelectorProps) {
@@ -24,9 +26,14 @@ export function ModelSelector({
     'rounded bg-slate-800 px-2 py-1 text-xs text-slate-100 disabled:opacity-50'
   const modelTriggerCls =
     'flex w-full items-center justify-between rounded bg-slate-800 px-2 py-1 text-left text-xs text-slate-100 disabled:opacity-50'
+  const modelsBusy = loading || modelsLoading
   return (
     <div className="flex items-center gap-2">
-      {loading && <span className="text-[11px] text-slate-500">загрузка…</span>}
+      {loading && (
+        <span role="status" aria-live="polite" className="text-[11px] text-slate-500">
+          загрузка…
+        </span>
+      )}
       <select
         className={selectCls}
         value={provider}
@@ -41,15 +48,23 @@ export function ModelSelector({
           </option>
         ))}
       </select>
-      <div className="min-w-[12rem] max-w-[18rem]">
-        <ModelCombobox
-          models={models}
-          value={model}
-          onChange={onModelChange}
-          disabled={loading || models.length === 0}
-          ariaLabel="Модель"
-          triggerClassName={modelTriggerCls}
-        />
+      <div className="flex min-w-[12rem] max-w-[18rem] items-center gap-2">
+        {modelsLoading && (
+          <span role="status" aria-live="polite" className="shrink-0 text-[11px] text-slate-500">
+            загрузка…
+          </span>
+        )}
+        <div className="min-w-0 flex-1">
+          <ModelCombobox
+            models={models}
+            value={model}
+            onChange={onModelChange}
+            disabled={modelsBusy || models.length === 0}
+            busy={modelsBusy}
+            ariaLabel="Модель"
+            triggerClassName={modelTriggerCls}
+          />
+        </div>
       </div>
     </div>
   )

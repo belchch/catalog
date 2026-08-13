@@ -438,9 +438,11 @@ export default function App() {
           providers={settingsHook.providers}
           models={settingsHook.models}
           loading={settingsHook.loading}
+          modelsLoading={settingsHook.modelsLoading}
           onProviderChange={(p) => void settingsHook.changeProvider(p)}
           onModelChange={(m) => void settingsHook.changeModel(m)}
         />
+
       </header>
       {notice && (
         <div className="catalog-notice px-5 py-2 text-xs">{notice}</div>

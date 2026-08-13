@@ -8,6 +8,7 @@ type ModelComboboxProps = {
   onChange: (modelId: string) => void
   ariaLabel?: string
   disabled?: boolean
+  busy?: boolean
   triggerClassName?: string
 }
 
@@ -17,6 +18,7 @@ export function ModelCombobox({
   onChange,
   ariaLabel = 'Модель',
   disabled = false,
+  busy = false,
   triggerClassName,
 }: ModelComboboxProps) {
   const [open, setOpen] = useState(false)
@@ -69,6 +71,7 @@ export function ModelCombobox({
         aria-controls={listId}
         aria-label={ariaLabel}
         aria-disabled={disabled || undefined}
+        aria-busy={busy || undefined}
         disabled={disabled}
         className={
           triggerClassName ??

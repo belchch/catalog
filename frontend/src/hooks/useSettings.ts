@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   getProviderModels,
   getSettings,
@@ -44,6 +44,8 @@ export function useSettings() {
   const [providers, setProviders] = useState<ProviderOut[]>([])
   const [models, setModels] = useState<ModelOut[]>([])
   const [loading, setLoading] = useState(true)
+  const [modelsLoading, setModelsLoading] = useState(false)
+  const providerChangeSeq = useRef(0)
 
   // Initial load: prefer localStorage, fall back to the backend's current state.
   useEffect(() => {
@@ -85,15 +87,33 @@ export function useSettings() {
   }, [])
 
   const changeProvider = useCallback(async (newProvider: string) => {
+    const seq = ++providerChangeSeq.current
     setProvider(newProvider)
-    const newModels = await getProviderModels(newProvider)
-    setModels(newModels)
-    // Reset model to the first available under the new provider.
-    const newModel = newModels[0]?.id ?? ''
-    setModel(newModel)
-    const next = { provider: newProvider, model: newModel }
-    writeLocal(next)
-    await updateSettings(next)
+    setModelsLoading(true)
+    setModels([])
+    setModel('')
+    try {
+      let newModels: ModelOut[]
+      try {
+        newModels = await getProviderModels(newProvider)
+      } catch {
+        if (seq !== providerChangeSeq.current) return
+        setModels([])
+        setModel('')
+        return
+      }
+      if (seq !== providerChangeSeq.current) return
+      setModels(newModels)
+      const newModel = newModels[0]?.id ?? ''
+      setModel(newModel)
+      const next = { provider: newProvider, model: newModel }
+      writeLocal(next)
+      await updateSettings(next)
+    } finally {
+      if (seq === providerChangeSeq.current) {
+        setModelsLoading(false)
+      }
+    }
   }, [])
 
   const changeModel = useCallback(
@@ -106,5 +126,14 @@ export function useSettings() {
     [provider],
   )
 
-  return { provider, model, providers, models, loading, changeProvider, changeModel }
+  return {
+    provider,
+    model,
+    providers,
+    models,
+    loading,
+    modelsLoading,
+    changeProvider,
+    changeModel,
+  }
 }
