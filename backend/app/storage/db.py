@@ -4,7 +4,11 @@ import sqlite3
 from collections.abc import Iterator
 from contextlib import contextmanager
 
-from app.storage.schema import ADDITIVE_MIGRATIONS, SCHEMA_SQL
+from app.storage.schema import (
+    ADDITIVE_MIGRATIONS,
+    WORKSPACE_SCHEMA,
+    WORKSPACE_USER_VERSION,
+)
 
 
 class Database:
@@ -24,25 +28,34 @@ class Database:
             self._mem_conn = sqlite3.connect(path)
             self._mem_conn.row_factory = sqlite3.Row
 
-    def init_schema(self) -> None:
-        """Create all tables (idempotent) and apply additive migrations.
-
-        ``CREATE TABLE IF NOT EXISTS`` only covers fresh databases; columns
-        added after the initial release are applied via guarded
-        ``ALTER TABLE`` (see ``ADDITIVE_MIGRATIONS``). Each ALTER is wrapped so
-        a "duplicate column" error on an already-migrated database is treated
-        as success.
-        """
+    def init_schema(
+        self,
+        schema: str | None = None,
+        user_version: int | None = None,
+        migrations: list[tuple[str, str, str]] | None = None,
+    ) -> None:
+        sql = WORKSPACE_SCHEMA if schema is None else schema
+        version = WORKSPACE_USER_VERSION if user_version is None else user_version
+        migs = ADDITIVE_MIGRATIONS if migrations is None else migrations
         with self.connect() as conn:
-            conn.executescript(SCHEMA_SQL)
-            for _table, _column, ddl in ADDITIVE_MIGRATIONS:
+            conn.executescript(sql)
+            for _table, _column, ddl in migs:
                 try:
                     conn.execute(ddl)
                 except sqlite3.OperationalError as exc:
-                    # SQLite raises "duplicate column name" when the column
-                    # already exists — that is the idempotent success case.
                     if "duplicate column" not in str(exc).lower():
                         raise
+            conn.execute(f"PRAGMA user_version = {int(version)}")
+
+    def user_version(self) -> int:
+        with self.connect() as conn:
+            row = conn.execute("PRAGMA user_version").fetchone()
+        return int(row[0])
+
+    def quick_check(self) -> str:
+        with self.connect() as conn:
+            row = conn.execute("PRAGMA quick_check").fetchone()
+        return str(row[0])
 
     @contextmanager
     def connect(self) -> Iterator[sqlite3.Connection]:

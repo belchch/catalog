@@ -49,8 +49,8 @@ def test_get_settings_defaults_are_absolute_under_data_root() -> None:
         assert value.is_absolute(), f"{attr} must be absolute, got {value}"
 
     assert Path(settings.workspace_dir) == data_dir / "workspace"
-    assert Path(settings.db_path) == data_dir / "catalog.db"
-    assert Path(settings.prompt_log_dir) == Path(settings.workspace_dir) / "prompt_logs"
+    assert Path(settings.db_path) == data_dir / "app.db"
+    assert Path(settings.prompt_log_dir) == data_dir / "prompt_logs"
 
     # Nothing lands in the source tree / process CWD by default.
     assert not str(settings.workspace_dir).startswith(str(Path.cwd()))
@@ -63,8 +63,8 @@ def test_app_data_dir_overrides_root(monkeypatch: pytest.MonkeyPatch, tmp_path: 
     settings = get_settings()
 
     assert Path(settings.workspace_dir) == tmp_path / "workspace"
-    assert Path(settings.db_path) == tmp_path / "catalog.db"
-    assert Path(settings.prompt_log_dir) == tmp_path / "workspace" / "prompt_logs"
+    assert Path(settings.db_path) == tmp_path / "app.db"
+    assert Path(settings.prompt_log_dir) == tmp_path / "prompt_logs"
 
 
 def test_point_overrides_still_win(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:

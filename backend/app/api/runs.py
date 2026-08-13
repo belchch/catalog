@@ -27,7 +27,7 @@ from pathlib import Path
 from fastapi import APIRouter, Depends, HTTPException, WebSocket, WebSocketDisconnect
 
 from app.agent.registry import ToolRegistry
-from app.api.deps import agent_event_to_frame, get_db, get_workspace
+from app.api.deps import agent_event_to_frame, get_workspace_db, get_workspace
 from app.api.schemas import ApplyRequest, DocumentOut, RunCreated, RunOut
 from app.api.sessions import _is_cancel_frame
 from app.documents.ingest import build_doc_path
@@ -55,7 +55,7 @@ router = APIRouter()
 async def apply_endpoint(
     skill_id: str,
     req: ApplyRequest,
-    db: Database = Depends(get_db),
+    db: Database = Depends(get_workspace_db),
 ) -> RunCreated:
     skill = get_skill(db, skill_id)
     if skill is None:
@@ -97,7 +97,7 @@ async def apply_endpoint(
 
 
 @router.get("/runs/{run_id}", response_model=RunOut)
-async def get_run_endpoint(run_id: str, db: Database = Depends(get_db)) -> RunOut:
+async def get_run_endpoint(run_id: str, db: Database = Depends(get_workspace_db)) -> RunOut:
     row = get_run(db, run_id)
     if row is None:
         raise HTTPException(status_code=404, detail="run not found")
@@ -121,7 +121,7 @@ async def get_run_endpoint(run_id: str, db: Database = Depends(get_db)) -> RunOu
 @router.post("/runs/{run_id}/save", response_model=DocumentOut)
 async def save_run_result_endpoint(
     run_id: str,
-    db: Database = Depends(get_db),
+    db: Database = Depends(get_workspace_db),
     workspace: str = Depends(get_workspace),
 ) -> DocumentOut:
     """Materialize a finished run's on-screen result into a document (CATALOG-18).
@@ -169,9 +169,14 @@ async def save_run_result_endpoint(
 async def run_stream_ws(websocket: WebSocket, run_id: str) -> None:
     await websocket.accept()
 
-    db: Database = websocket.app.state.db
+    manager = websocket.app.state.workspace_manager
+    db = manager.current
+    if db is None or manager.root is None:
+        await websocket.send_json({"type": "error", "message": "workspace not open"})
+        await websocket.close()
+        return
     provider: LLMProvider = websocket.app.state.provider
-    workspace: str = websocket.app.state.workspace
+    workspace: str = str(manager.root)
 
     run = get_run(db, run_id)
     if run is None:
@@ -203,7 +208,11 @@ async def run_stream_ws(websocket: WebSocket, run_id: str) -> None:
     if session_id is not None:
         tools: ToolRegistry = build_document_tools(db, workspace, session_id)
     else:
-        tools = websocket.app.state.tools
+        tools = getattr(websocket.app.state, "tools", None)
+        if tools is None:
+            await websocket.send_json({"type": "error", "message": "workspace not open"})
+            await websocket.close()
+            return
 
     # CATALOG-6: honour a provider pinned on the skill (set in the settings
     # modal); fall back to the app's active provider otherwise.

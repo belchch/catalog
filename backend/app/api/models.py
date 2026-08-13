@@ -11,9 +11,11 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 
-from app.api.deps import get_provider
+from app.api.deps import get_app_db, get_provider
 from app.api.schemas import ModelOut, ProviderOut, SettingsOut, SettingsUpdate
 from app.llm.base import LLMProvider
+from app.storage.db import Database
+from app.storage.repo_app_settings import get_app_settings, set_app_settings
 
 router = APIRouter()
 
@@ -84,16 +86,22 @@ async def list_provider_models_endpoint(
 
 
 @router.get("/settings", response_model=SettingsOut)
-async def get_settings_endpoint(request: Request) -> SettingsOut:
+async def get_settings_endpoint(
+    request: Request, app_db: Database = Depends(get_app_db)
+) -> SettingsOut:
     """Return the current runtime provider/model selection (CATALOG-14)."""
     provider = getattr(request.app.state, "active_provider", None) or ""
     model = getattr(request.app.state, "active_model", None) or ""
+    if not provider and not model:
+        provider, model = get_app_settings(app_db)
     return SettingsOut(provider=provider, model=model)
 
 
 @router.post("/settings", response_model=SettingsOut)
 async def update_settings_endpoint(
-    req: SettingsUpdate, request: Request
+    req: SettingsUpdate,
+    request: Request,
+    app_db: Database = Depends(get_app_db),
 ) -> SettingsOut:
     """Switch the runtime active provider and/or model (CATALOG-14).
 
@@ -109,6 +117,11 @@ async def update_settings_endpoint(
         request.app.state.provider = providers[req.provider]
     if req.model is not None:
         request.app.state.active_model = req.model
+    set_app_settings(
+        app_db,
+        provider=request.app.state.active_provider,
+        model=request.app.state.active_model,
+    )
     return SettingsOut(
         provider=request.app.state.active_provider,
         model=request.app.state.active_model,

@@ -37,6 +37,7 @@ from app.llm.base import (
 )
 from app.main import app
 from app.storage.db import Database
+from app.storage.workspace import WorkspaceManager
 
 
 class FakeProvider:
@@ -88,17 +89,22 @@ class FakeProvider:
         yield StreamDelta(content="")
 
 
-# Static protocol check: FakeProvider satisfies LLMProvider.
 _PROVIDER: LLMProvider = FakeProvider([])  # type: ignore[assignment]
+
+
+def open_workspace(client: TestClient, path: Path, *, confirm_init: bool = True) -> Database:
+    path.mkdir(parents=True, exist_ok=True)
+    manager: WorkspaceManager = client.app.state.workspace_manager
+    return manager.open(path, confirm_init=confirm_init)
 
 
 @pytest.fixture()
 def settings(tmp_path: Path) -> Settings:
     """Test settings pointing at tmp_path (no repo pollution, no OS data-root)."""
     return Settings(
-        db_path=str(tmp_path / "api.db"),
+        db_path=str(tmp_path / "app.db"),
         workspace_dir=str(tmp_path / "ws"),
-        prompt_log_dir=str(tmp_path / "ws" / "prompt_logs"),
+        prompt_log_dir=str(tmp_path / "prompt_logs"),
         default_model="test/model",
         app_provider="",
         zai_api_key="",
@@ -115,9 +121,17 @@ def provider() -> FakeProvider:
 def client(
     settings: Settings, provider: FakeProvider, monkeypatch: pytest.MonkeyPatch
 ) -> Iterator[TestClient]:
-    # The lifespan calls app.main.get_settings(); patch it to test settings so
-    # the database/workspace land in tmp_path. Only the provider is overridden
-    # afterwards — db/tools/workspace/settings come from the lifespan.
+    monkeypatch.setattr("app.main.get_settings", lambda: settings)
+    with TestClient(app) as c:
+        c.app.state.provider = provider
+        open_workspace(c, Path(settings.workspace_dir), confirm_init=True)
+        yield c
+
+
+@pytest.fixture()
+def client_no_workspace(
+    settings: Settings, provider: FakeProvider, monkeypatch: pytest.MonkeyPatch
+) -> Iterator[TestClient]:
     monkeypatch.setattr("app.main.get_settings", lambda: settings)
     with TestClient(app) as c:
         c.app.state.provider = provider
@@ -125,9 +139,7 @@ def client(
 
 
 @pytest.fixture()
-def db(client: TestClient, settings: Settings) -> Database:
-    """Open the lifespan-created database file for direct seeding/inspection.
-
-    Depends on ``client`` so the lifespan (which creates the schema) has run.
-    """
-    return Database(settings.db_path)
+def db(client: TestClient) -> Database:
+    manager: WorkspaceManager = client.app.state.workspace_manager
+    assert manager.current is not None
+    return manager.current

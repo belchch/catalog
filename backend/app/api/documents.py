@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, UploadFile
 
-from app.api.deps import get_db, get_workspace
+from app.api.deps import get_workspace_db, get_workspace
 from app.api.schemas import DocumentOut
 from app.documents.ingest import ingest_file, kind_for_filename
 from app.storage.db import Database
@@ -16,7 +16,7 @@ router = APIRouter()
 @router.post("/documents", response_model=DocumentOut)
 async def upload_document(
     file: UploadFile,
-    db: Database = Depends(get_db),
+    db: Database = Depends(get_workspace_db),
     workspace: str = Depends(get_workspace),
 ) -> DocumentOut:
     try:
@@ -33,7 +33,7 @@ async def upload_document(
 
 @router.get("/documents", response_model=list[DocumentOut])
 async def list_documents_endpoint(
-    db: Database = Depends(get_db),
+    db: Database = Depends(get_workspace_db),
     workspace: str = Depends(get_workspace),
 ) -> list[DocumentOut]:
     reconcile_orphans(db, workspace)
@@ -48,7 +48,7 @@ async def list_documents_endpoint(
 @router.delete("/documents/{doc_id}", status_code=204)
 async def delete_document_endpoint(
     doc_id: str,
-    db: Database = Depends(get_db),
+    db: Database = Depends(get_workspace_db),
     workspace: str = Depends(get_workspace),
 ) -> None:
     deleted = delete_document(db, workspace, doc_id)
@@ -58,7 +58,7 @@ async def delete_document_endpoint(
 
 @router.post("/documents/reconcile")
 async def reconcile_documents_endpoint(
-    db: Database = Depends(get_db),
+    db: Database = Depends(get_workspace_db),
     workspace: str = Depends(get_workspace),
 ) -> dict[str, list[str]]:
     removed = reconcile_orphans(db, workspace)

@@ -28,7 +28,7 @@ from fastapi import APIRouter, Depends, HTTPException, Response, WebSocket, WebS
 from app.agent import run_agent
 from app.agent.events import FinishEvent, ToolResultEvent
 from app.agent.registry import ToolRegistry
-from app.api.deps import agent_event_to_frame, get_db, get_tools
+from app.api.deps import agent_event_to_frame, get_workspace_db, get_tools
 from app.api.schemas import (
     ArtifactPatchRequest,
     DocumentOut,
@@ -226,7 +226,7 @@ def _conversation_messages(db: Database, session_id: str) -> list[Message]:
 
 
 @router.post("/sessions", response_model=SessionCreated)
-async def create_session_endpoint(db: Database = Depends(get_db)) -> SessionCreated:
+async def create_session_endpoint(db: Database = Depends(get_workspace_db)) -> SessionCreated:
     return SessionCreated(id=create_session(db))
 
 
@@ -247,7 +247,7 @@ async def list_sessions_endpoint(
     limit: int = 50,
     offset: int = 0,
     status: str | None = None,
-    db: Database = Depends(get_db),
+    db: Database = Depends(get_workspace_db),
 ) -> list[SessionOut]:
     rows = list_sessions(db, limit=limit, offset=offset, status=status)
     return [_session_out(r) for r in rows]
@@ -256,7 +256,7 @@ async def list_sessions_endpoint(
 @router.get("/sessions/{session_id}", response_model=SessionOut)
 async def get_session_endpoint(
     session_id: str,
-    db: Database = Depends(get_db),
+    db: Database = Depends(get_workspace_db),
 ) -> SessionOut:
     row = get_session(db, session_id)
     if row is None:
@@ -268,7 +268,7 @@ async def get_session_endpoint(
 async def update_session_endpoint(
     session_id: str,
     req: SessionUpdate,
-    db: Database = Depends(get_db),
+    db: Database = Depends(get_workspace_db),
 ) -> SessionOut:
     row = update_session_llm_timeout(db, session_id, req.llm_timeout_seconds)
     if row is None:
@@ -279,7 +279,7 @@ async def update_session_endpoint(
 @router.get("/sessions/{session_id}/messages", response_model=list[MessageOut])
 async def list_session_messages_endpoint(
     session_id: str,
-    db: Database = Depends(get_db),
+    db: Database = Depends(get_workspace_db),
 ) -> list[MessageOut]:
     if get_session(db, session_id) is None:
         raise HTTPException(status_code=404, detail="session not found")
@@ -289,7 +289,7 @@ async def list_session_messages_endpoint(
 @router.get("/sessions/{session_id}/documents", response_model=list[DocumentOut])
 async def list_session_documents_endpoint(
     session_id: str,
-    db: Database = Depends(get_db),
+    db: Database = Depends(get_workspace_db),
 ) -> list[DocumentOut]:
     if get_session(db, session_id) is None:
         raise HTTPException(status_code=404, detail="session not found")
@@ -303,7 +303,7 @@ async def list_session_documents_endpoint(
 async def detach_session_document_endpoint(
     session_id: str,
     doc_id: str,
-    db: Database = Depends(get_db),
+    db: Database = Depends(get_workspace_db),
 ) -> Response:
     if get_session(db, session_id) is None:
         raise HTTPException(status_code=404, detail="session not found")
@@ -316,7 +316,7 @@ async def detach_session_document_endpoint(
 @router.delete("/sessions/{session_id}", status_code=204)
 async def delete_session_endpoint(
     session_id: str,
-    db: Database = Depends(get_db),
+    db: Database = Depends(get_workspace_db),
 ) -> Response:
     if not delete_session(db, session_id):
         raise HTTPException(status_code=404, detail="session not found")
@@ -358,7 +358,7 @@ def _artifact_out(row) -> SessionArtifactOut:
 )
 async def list_session_artifacts_endpoint(
     session_id: str,
-    db: Database = Depends(get_db),
+    db: Database = Depends(get_workspace_db),
 ) -> list[SessionArtifactOut]:
     if get_session(db, session_id) is None:
         raise HTTPException(status_code=404, detail="session not found")
@@ -373,7 +373,7 @@ async def patch_session_artifact_endpoint(
     session_id: str,
     artifact_type: str,
     req: ArtifactPatchRequest,
-    db: Database = Depends(get_db),
+    db: Database = Depends(get_workspace_db),
     tools: ToolRegistry = Depends(get_tools),
 ) -> SessionArtifactOut:
     if get_session(db, session_id) is None:
@@ -480,7 +480,7 @@ async def patch_session_artifact_endpoint(
 async def patch_skill_meta_endpoint(
     session_id: str,
     req: SkillMetaPatchRequest,
-    db: Database = Depends(get_db),
+    db: Database = Depends(get_workspace_db),
     tools: ToolRegistry = Depends(get_tools),
 ) -> SessionArtifactOut:
     if get_session(db, session_id) is None:
@@ -611,27 +611,17 @@ async def _run_planner_turn(
     )
 
 
-@router.websocket("/sessions/{session_id}")
-async def session_ws(
-    websocket: WebSocket,
-    session_id: str,
-) -> None:
-    await websocket.accept()
-
-    db: Database = websocket.app.state.db
-    settings: Settings = websocket.app.state.settings
-    workspace: str = websocket.app.state.workspace
-
-    if get_session(db, session_id) is None:
-        await websocket.send_json({"type": "error", "message": "session not found"})
-        await websocket.close()
-        return
-
-    base_tools: ToolRegistry = websocket.app.state.tools
+def _ws_session_tools(
+    db: Database, workspace: str, session_id: str, base_tools: ToolRegistry, websocket: WebSocket
+) -> ToolRegistry:
     tools: ToolRegistry = build_document_tools(db, workspace, session_id)
 
     async def _notify_artifacts() -> None:
-        await websocket.send_json(artifacts_frame(db, session_id))
+        manager = websocket.app.state.workspace_manager
+        current = manager.current
+        if current is None:
+            return
+        await websocket.send_json(artifacts_frame(current, session_id))
 
     artifact_tools = build_artifact_tools(
         db,
@@ -643,15 +633,56 @@ async def session_ws(
         entry = artifact_tools.get(name)
         if entry is not None:
             tools.register(entry[0], entry[1])
+    return tools
 
-    # CATALOG-13: starter suggestions for an empty session so the chat shows
-    # quick-reply buttons before the first message.
+
+@router.websocket("/sessions/{session_id}")
+async def session_ws(
+    websocket: WebSocket,
+    session_id: str,
+) -> None:
+    await websocket.accept()
+
+    settings: Settings = websocket.app.state.settings
+    manager = websocket.app.state.workspace_manager
+    if manager.current is None or manager.root is None:
+        await websocket.send_json({"type": "error", "message": "workspace not open"})
+        await websocket.close()
+        return
+
+    db = manager.current
+    workspace = str(manager.root)
+    if get_session(db, session_id) is None:
+        await websocket.send_json({"type": "error", "message": "session not found"})
+        await websocket.close()
+        return
+
+    base_tools: ToolRegistry | None = getattr(websocket.app.state, "tools", None)
+    if base_tools is None:
+        await websocket.send_json({"type": "error", "message": "workspace not open"})
+        await websocket.close()
+        return
+
     if not list_messages(db, session_id):
         await websocket.send_json({"type": "suggestions", "items": STARTER_SUGGESTIONS})
 
     buffered: str | None = None
     try:
         while True:
+            manager = websocket.app.state.workspace_manager
+            db = manager.current
+            if db is None or manager.root is None:
+                await websocket.send_json({"type": "error", "message": "workspace not open"})
+                await websocket.close()
+                return
+            workspace = str(manager.root)
+            base_tools = getattr(websocket.app.state, "tools", None)
+            if base_tools is None:
+                await websocket.send_json({"type": "error", "message": "workspace not open"})
+                await websocket.close()
+                return
+            tools = _ws_session_tools(db, workspace, session_id, base_tools, websocket)
+
             if buffered is not None:
                 raw = buffered
                 buffered = None
@@ -669,8 +700,6 @@ async def session_ws(
 
             messages = _conversation_messages(db, session_id)
 
-            # CATALOG-14: read the runtime active provider/model each turn so a
-            # mid-session UI switch takes effect immediately.
             provider = websocket.app.state.provider
             model = (
                 getattr(websocket.app.state, "active_model", None)
@@ -695,10 +724,6 @@ async def session_ws(
                     system_prompt=_planner_system_prompt(db, session_id),
                 )
 
-            # Emit the final assistant text as a single token frame (collect
-            # mode does not stream tokens incrementally — see module docstring).
-            # CATALOG-13: strip the <suggestions> block from the shown/persisted
-            # text and emit it as a separate suggestions frame before finish.
             if final_text:
                 clean_text, items = parse_suggestions(final_text)
                 await websocket.send_json({"type": "token", "delta": clean_text})

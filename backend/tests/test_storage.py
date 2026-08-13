@@ -68,6 +68,21 @@ def test_init_schema_is_idempotent(db: Database) -> None:
     } <= _table_names(db)
 
 
+def test_workspace_user_version_set(db: Database) -> None:
+    from app.storage.schema import WORKSPACE_USER_VERSION
+
+    assert db.user_version() == WORKSPACE_USER_VERSION
+
+
+def test_app_schema_tables() -> None:
+    from app.storage.schema import APP_SCHEMA, APP_USER_VERSION
+
+    d = Database(":memory:")
+    d.init_schema(APP_SCHEMA, APP_USER_VERSION, migrations=[])
+    assert {"workspace_registry", "app_settings"} <= _table_names(d)
+    assert d.user_version() == APP_USER_VERSION
+
+
 def test_create_and_get_document(db: Database) -> None:
     row = create_document(db, title="T", path="documents/x.md", kind="md")
     assert isinstance(row, DocumentRow)

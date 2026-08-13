@@ -1,10 +1,10 @@
 """Catalog API application (FastAPI).
 
 Wires the engine (step 03), storage (04) and skills (05) into the HTTP /
-WebSocket routers (06). The lifespan boots the SQLite database, a shared
-``httpx`` client and the LLM provider factory, and builds the base document
-tool registry — all carried on ``app.state`` so the routers (and tests) read
-their collaborators from one place.
+WebSocket routers (06). The lifespan boots the global app SQLite database, a
+workspace manager (no folder open at start), a shared ``httpx`` client and the
+LLM provider factory — all carried on ``app.state`` so the routers (and tests)
+read their collaborators from one place.
 
 The factory (:func:`app.llm.factory.build_providers`) instantiates every
 configured provider (OpenRouter always; z.ai when ``ZAI_API_KEY`` is set) and
@@ -33,42 +33,31 @@ from fastapi.staticfiles import StaticFiles
 
 from app.api import documents, models, runs, sessions, skills
 from app.config import Settings, get_settings
-from app.documents.tools import build_document_tools
 from app.llm.factory import build_providers, select_provider
 from app.llm.openrouter import build_debug_hooks
 from app.llm.zai import DEFAULT_ZAI_MODEL
 from app.logging_config import setup_logging
 from app.storage.db import Database
-from app.storage.git import ensure_repo
-from app.storage.repo_document import reconcile_orphans
+from app.storage.repo_app_settings import get_app_settings, set_app_settings
+from app.storage.schema import APP_SCHEMA, APP_USER_VERSION
+from app.storage.workspace import WorkspaceManager
 
-# Configure stdout logging at import time so every ``app.*`` log line carries
-# the correlation context. Runs once when ``app.main`` is first imported
-# (after uvicorn has set up its own loggers); idempotent on re-import.
 setup_logging(level=get_settings().log_level)
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     settings: Settings = get_settings()
-    # ADR-0012: data-root lives outside the source tree and may not exist yet
-    # (fresh install / first run) — create it and the two app-owned git repos
-    # (documents/, skills/) before anything tries to read/write under it.
     Path(settings.db_path).parent.mkdir(parents=True, exist_ok=True)
-    ensure_repo(Path(settings.workspace_dir) / "documents")
-    ensure_repo(Path(settings.workspace_dir) / "skills")
-    db = Database(settings.db_path)
-    db.init_schema()
+    app_db = Database(settings.db_path)
+    app_db.init_schema(APP_SCHEMA, APP_USER_VERSION, migrations=[])
     http_client = httpx.AsyncClient(timeout=60.0, event_hooks=build_debug_hooks())
-    app.state.db = db
+    app.state.app_db = app_db
     app.state.http_client = http_client
     providers = build_providers(settings, http_client)
     app.state.providers = providers
     selected = select_provider(providers, settings.app_provider)
     app.state.provider = selected
-    # CATALOG-14: mutable runtime selection of the active provider/model. Seeded
-    # from env (frozen Settings); switchable at runtime via POST /settings. The
-    # frozen Settings remain the source of API keys and the initial default.
     active_name = next(
         (name for name, inst in providers.items() if inst is selected),
         next(iter(providers), "openrouter"),
@@ -78,10 +67,19 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     if active_name == "zai" and ("/" in default_model or not default_model):
         default_model = DEFAULT_ZAI_MODEL
     app.state.active_model = default_model
-    app.state.workspace = settings.workspace_dir
-    app.state.tools = build_document_tools(db, settings.workspace_dir)
+    stored_provider, stored_model = get_app_settings(app_db)
+    if stored_provider or stored_model:
+        if stored_provider and stored_provider in providers:
+            app.state.active_provider = stored_provider
+            app.state.provider = providers[stored_provider]
+        if stored_model:
+            app.state.active_model = stored_model
+    else:
+        set_app_settings(app_db, provider=active_name, model=default_model)
+    manager = WorkspaceManager()
+    manager.bind(app_db=app_db, app_state=app.state)
+    app.state.workspace_manager = manager
     app.state.settings = settings
-    reconcile_orphans(db, settings.workspace_dir)
     try:
         yield
     finally:

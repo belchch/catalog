@@ -1,13 +1,27 @@
-"""Single source of truth for the SQLite schema.
+"""Single source of truth for the SQLite schemas (app + workspace).
 
-All ``CREATE TABLE`` statements are idempotent (``IF NOT EXISTS``). The slice
-is solo with no data, so there is no migration framework: this module is the
-only place the schema is defined. Repositories for ``session``/``message``/
-``skill``/``skill_run`` are added in later steps; the tables are created here
-so the whole schema lives in one place.
+All ``CREATE TABLE`` statements are idempotent (``IF NOT EXISTS``).
 """
 
-SCHEMA_SQL = """
+APP_USER_VERSION = 1
+WORKSPACE_USER_VERSION = 1
+
+APP_SCHEMA = """
+CREATE TABLE IF NOT EXISTS workspace_registry(
+  id TEXT PRIMARY KEY,
+  path TEXT NOT NULL UNIQUE,
+  display_name TEXT,
+  opened_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS app_settings(
+  id INTEGER PRIMARY KEY CHECK (id = 1),
+  provider TEXT NOT NULL DEFAULT '',
+  model TEXT NOT NULL DEFAULT ''
+);
+INSERT OR IGNORE INTO app_settings(id, provider, model) VALUES (1, '', '');
+"""
+
+WORKSPACE_SCHEMA = """
 CREATE TABLE IF NOT EXISTS document(
   id TEXT PRIMARY KEY,            -- uuid4 hex
   title TEXT NOT NULL,
@@ -64,11 +78,8 @@ CREATE TABLE IF NOT EXISTS session_artifact(
 );
 """
 
-# Safe additive migrations for existing databases (CATALOG-4 / CATALOG-17
-# pattern). There is no migration framework: ``CREATE TABLE IF NOT EXISTS``
-# only covers fresh databases, so columns added after the initial release need
-# an idempotent ``ALTER TABLE`` guarded against the "duplicate column" error
-# for databases that already have them. Each entry is ``(table, column, ddl)``.
+SCHEMA_SQL = WORKSPACE_SCHEMA
+
 ADDITIVE_MIGRATIONS: list[tuple[str, str, str]] = [
     ("skill_run", "input_doc_ids", "ALTER TABLE skill_run ADD COLUMN input_doc_ids TEXT"),
     ("session", "skill_id", "ALTER TABLE session ADD COLUMN skill_id TEXT"),

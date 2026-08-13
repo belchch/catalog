@@ -23,7 +23,7 @@ import json
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import ValidationError
 
-from app.api.deps import get_db, get_provider, get_settings, get_tools
+from app.api.deps import get_workspace_db, get_provider, get_settings, get_tools
 from app.api.schemas import (
     CommitOut,
     EditStarted,
@@ -788,7 +788,7 @@ def _format_skill_for_edit(record: SkillRecord) -> str:
 
 @router.post("/skills/{skill_id}/edit", response_model=EditStarted)
 async def edit_skill_endpoint(
-    skill_id: str, db: Database = Depends(get_db)
+    skill_id: str, db: Database = Depends(get_workspace_db)
 ) -> EditStarted:
     """Start an edit session for an existing skill (CATALOG-17).
 
@@ -815,7 +815,7 @@ async def edit_skill_endpoint(
 async def propose_skill_tracks_endpoint(
     request: Request,
     session_id: str,
-    db: Database = Depends(get_db),
+    db: Database = Depends(get_workspace_db),
     provider: LLMProvider = Depends(get_provider),
     settings: Settings = Depends(get_settings),
 ) -> SkillTracksOut:
@@ -853,7 +853,7 @@ async def propose_skill_tracks_endpoint(
 async def select_skill_track_endpoint(
     session_id: str,
     req: SkillTrackSelectRequest,
-    db: Database = Depends(get_db),
+    db: Database = Depends(get_workspace_db),
 ) -> SkillTrackSelected:
     session_row = get_session(db, session_id)
     if session_row is None:
@@ -882,7 +882,7 @@ async def select_skill_track_endpoint(
 async def build_skill_endpoint(
     request: Request,
     session_id: str,
-    db: Database = Depends(get_db),
+    db: Database = Depends(get_workspace_db),
     provider: LLMProvider = Depends(get_provider),
     tools: ToolRegistry = Depends(get_tools),
     settings: Settings = Depends(get_settings),
@@ -910,7 +910,7 @@ async def build_skill_endpoint(
 async def configure_skill_endpoint(
     skill_id: str,
     req: SkillConfigureRequest,
-    db: Database = Depends(get_db),
+    db: Database = Depends(get_workspace_db),
 ) -> SkillBuilt:
     """Apply the user's model/provider/reasoning choices from the settings modal.
 
@@ -944,7 +944,7 @@ async def configure_skill_endpoint(
 async def rename_skill_endpoint(
     skill_id: str,
     req: SkillRenameRequest,
-    db: Database = Depends(get_db),
+    db: Database = Depends(get_workspace_db),
 ) -> SkillOut:
     skill = get_skill(db, skill_id)
     if skill is None:
@@ -965,7 +965,7 @@ async def rename_skill_endpoint(
 
 @router.post("/skills/{skill_id}/commit", response_model=CommitOut)
 async def commit_skill_endpoint(
-    skill_id: str, db: Database = Depends(get_db)
+    skill_id: str, db: Database = Depends(get_workspace_db)
 ) -> CommitOut:
     skill = get_skill(db, skill_id)
     if skill is None:
@@ -976,7 +976,7 @@ async def commit_skill_endpoint(
 
 @router.get("/skills", response_model=list[SkillOut])
 async def list_skills_endpoint(
-    db: Database = Depends(get_db), status: str | None = None
+    db: Database = Depends(get_workspace_db), status: str | None = None
 ) -> list[SkillOut]:
     rows = list_skills(db, status=status)
     return [
@@ -999,7 +999,7 @@ async def list_skills_endpoint(
 
 @router.delete("/skills/{skill_id}", status_code=204)
 async def delete_skill_endpoint(
-    skill_id: str, db: Database = Depends(get_db)
+    skill_id: str, db: Database = Depends(get_workspace_db)
 ) -> None:
     if not delete_skill(db, skill_id):
         raise HTTPException(status_code=404, detail="skill not found")

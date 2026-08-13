@@ -120,6 +120,24 @@ def test_health(client) -> None:
     assert "git_sha" in body
 
 
+def test_business_endpoints_409_without_workspace(client_no_workspace) -> None:
+    client = client_no_workspace
+    assert client.get("/sessions").status_code == 409
+    assert client.get("/documents").status_code == 409
+    assert client.get("/skills").status_code == 409
+    assert client.get("/settings").status_code == 200
+    assert client.get("/providers").status_code == 200
+    assert client.get("/models").status_code == 200
+
+
+def test_close_workspace_returns_409(client, settings) -> None:
+    assert client.get("/sessions").status_code == 200
+    client.app.state.workspace_manager.close()
+    assert client.get("/sessions").status_code == 409
+    client.app.state.workspace_manager.open(Path(settings.workspace_dir), confirm_init=True)
+    assert client.get("/sessions").status_code == 200
+
+
 def test_upload_and_list_documents(client) -> None:
     resp = client.post(
         "/documents", files={"file": ("note.md", b"# Title\n\nbody", "text/markdown")}

@@ -11,7 +11,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from fastapi import Request, WebSocket
+from fastapi import HTTPException, Request, WebSocket
 
 from app.agent.events import (
     ReasoningEvent,
@@ -27,10 +27,22 @@ from app.agent.registry import ToolRegistry
 from app.config import Settings
 from app.llm.base import LLMProvider
 from app.storage.db import Database
+from app.storage.workspace import WorkspaceManager
 
 
-def get_db(request: Request) -> Database:
-    return request.app.state.db
+def get_app_db(request: Request) -> Database:
+    return request.app.state.app_db
+
+
+def get_workspace_manager(request: Request) -> WorkspaceManager:
+    return request.app.state.workspace_manager
+
+
+def get_workspace_db(request: Request) -> Database:
+    manager: WorkspaceManager = request.app.state.workspace_manager
+    if manager.current is None:
+        raise HTTPException(status_code=409, detail="workspace not open")
+    return manager.current
 
 
 def get_provider(request: Request) -> LLMProvider:
@@ -38,11 +50,17 @@ def get_provider(request: Request) -> LLMProvider:
 
 
 def get_workspace(request: Request) -> str:
-    return request.app.state.workspace
+    manager: WorkspaceManager = request.app.state.workspace_manager
+    if manager.root is None:
+        raise HTTPException(status_code=409, detail="workspace not open")
+    return str(manager.root)
 
 
 def get_tools(request: Request) -> ToolRegistry:
-    return request.app.state.tools
+    tools = getattr(request.app.state, "tools", None)
+    if tools is None:
+        raise HTTPException(status_code=409, detail="workspace not open")
+    return tools
 
 
 def get_settings(request: Request) -> Settings:
@@ -109,8 +127,6 @@ def agent_event_to_frame(event) -> dict | None:
         return frame
     if isinstance(event, ReasoningEvent):
         return {"type": "reasoning", "text": _snip(event.text)}
-    # FinishEvent is handled by the caller (sessions emits a token+finish pair;
-    # runs emit an authoritative finish from the DB after the stream drains).
     return None
 
 
