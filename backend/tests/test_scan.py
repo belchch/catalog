@@ -41,6 +41,36 @@ def test_scan_indexes_nested_and_skips(db: Database, tmp_path: Path) -> None:
     assert again.removed == []
 
 
+def test_unchanged_rescan_skips_file_hashing(
+    db: Database, tmp_path: Path, monkeypatch
+) -> None:
+    from catalog.documents import scan as scan_mod
+
+    ingest_file(db, tmp_path, filename="note.md", content=b"stable")
+    calls: list[Path] = []
+
+    def _boom(path: Path) -> str:
+        calls.append(path)
+        raise AssertionError("hash should not run for unchanged files")
+
+    monkeypatch.setattr(scan_mod, "_hash_file", _boom)
+    report = scan_workspace(db, tmp_path)
+    assert report.added == []
+    assert report.updated == []
+    assert calls == []
+
+
+def test_hash_file_matches_full_digest(tmp_path: Path) -> None:
+    import hashlib
+
+    from catalog.documents.scan import _hash_file
+
+    path = tmp_path / "doc.bin"
+    payload = b"x" * (1024 * 1024 + 17)
+    path.write_bytes(payload)
+    assert _hash_file(path) == hashlib.sha256(payload).hexdigest()
+
+
 def test_scan_does_not_delete_hidden_indexed_file(db: Database, tmp_path: Path) -> None:
     row = ingest_file(db, tmp_path, filename=".notes.md", content=b"keep me")
     assert row.path == ".notes.md"

@@ -15,6 +15,7 @@ from catalog.storage.repo_document import (
 )
 
 _CATALOG_DIR = ".catalog"
+_HASH_CHUNK_SIZE = 1024 * 1024
 
 
 @dataclass
@@ -41,12 +42,26 @@ class _FsEntry:
     kind: str
     mtime: float
     size: int
-    content_hash: str
     title: str
+    abs_path: Path
+    content_hash: str | None = None
 
 
-def _content_hash(data: bytes) -> str:
-    return hashlib.sha256(data).hexdigest()
+def _hash_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as fh:
+        while True:
+            chunk = fh.read(_HASH_CHUNK_SIZE)
+            if not chunk:
+                break
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _ensure_hash(entry: _FsEntry) -> str:
+    if entry.content_hash is None:
+        entry.content_hash = _hash_file(entry.abs_path)
+    return entry.content_hash
 
 
 def _is_hidden_part(name: str) -> bool:
@@ -81,7 +96,6 @@ def _walk_workspace(root: Path) -> tuple[list[_FsEntry], list[str]]:
                 continue
             try:
                 st = full.stat()
-                data = full.read_bytes()
             except OSError:
                 skipped.append(rel)
                 continue
@@ -91,8 +105,8 @@ def _walk_workspace(root: Path) -> tuple[list[_FsEntry], list[str]]:
                     kind=kind,
                     mtime=st.st_mtime,
                     size=st.st_size,
-                    content_hash=_content_hash(data),
                     title=Path(name).stem,
+                    abs_path=full,
                 )
             )
     return entries, skipped
@@ -136,28 +150,30 @@ def scan_workspace(db: Database, workspace_dir: str | Path) -> ScanReport:
                     update_document(
                         db,
                         existing.id,
-                        content_hash=entry.content_hash,
+                        content_hash=_ensure_hash(entry),
                     )
                 continue
-            hash_changed = existing.content_hash != entry.content_hash
+            file_hash = _ensure_hash(entry)
+            hash_changed = existing.content_hash != file_hash
             update_document(
                 db,
                 existing.id,
                 mtime=entry.mtime,
                 size=entry.size,
-                content_hash=entry.content_hash,
+                content_hash=file_hash,
             )
             if hash_changed:
                 report.updated.append(existing.id)
             continue
 
+        file_hash = _ensure_hash(entry)
         rename_candidate = None
         for doc in docs:
             if doc.id in claimed_ids:
                 continue
             if doc.path in fs_paths:
                 continue
-            if doc.content_hash and doc.content_hash == entry.content_hash:
+            if doc.content_hash and doc.content_hash == file_hash:
                 rename_candidate = doc
                 break
         if rename_candidate is None:
@@ -182,7 +198,7 @@ def scan_workspace(db: Database, workspace_dir: str | Path) -> ScanReport:
                 path=entry.rel_path,
                 mtime=entry.mtime,
                 size=entry.size,
-                content_hash=entry.content_hash,
+                content_hash=file_hash,
             )
             claimed_ids.add(rename_candidate.id)
             report.renamed.append(rename_candidate.id)
@@ -195,7 +211,7 @@ def scan_workspace(db: Database, workspace_dir: str | Path) -> ScanReport:
             kind=entry.kind,
             mtime=entry.mtime,
             size=entry.size,
-            content_hash=entry.content_hash,
+            content_hash=file_hash,
         )
         claimed_ids.add(row.id)
         report.added.append(row.id)
