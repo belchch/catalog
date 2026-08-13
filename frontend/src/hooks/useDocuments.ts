@@ -10,12 +10,18 @@ export interface UseDocumentsResult {
   upload: (file: File) => Promise<DocumentOut>
 }
 
-export function useDocuments(): UseDocumentsResult {
+export function useDocuments(enabled = true): UseDocumentsResult {
   const [documents, setDocuments] = useState<DocumentOut[]>([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
   const refresh = useCallback(async () => {
+    if (!enabled) {
+      setDocuments([])
+      setError(null)
+      setLoading(false)
+      return
+    }
     setLoading(true)
     setError(null)
     try {
@@ -25,7 +31,7 @@ export function useDocuments(): UseDocumentsResult {
     } finally {
       setLoading(false)
     }
-  }, [])
+  }, [enabled])
 
   const upload = useCallback(async (file: File) => {
     const doc = await uploadDocument(file)
@@ -34,8 +40,14 @@ export function useDocuments(): UseDocumentsResult {
   }, [])
 
   useEffect(() => {
+    if (!enabled) {
+      setDocuments([])
+      setError(null)
+      setLoading(false)
+      return
+    }
     void refresh()
-  }, [refresh])
+  }, [refresh, enabled])
 
   return { documents, loading, error, refresh, upload }
 }

@@ -63,9 +63,13 @@ async def current_workspace(
 async def open_workspace(
     body: WorkspaceOpenRequest,
     manager: WorkspaceManager = Depends(get_workspace_manager),
+    settings: Settings = Depends(get_settings),
 ) -> WorkspaceOpenResult:
+    open_path = body.path.strip() if body.path else ""
+    if open_path in ("", "."):
+        open_path = str(Path(settings.fs_root).expanduser().resolve())
     try:
-        result = manager.open_for_api(body.path, confirm=body.confirm)
+        result = manager.open_for_api(open_path, confirm=body.confirm)
     except WorkspaceBusyError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     except WorkspaceNotFoundError as exc:

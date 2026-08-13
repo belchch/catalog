@@ -19,12 +19,18 @@ export interface UseSkillsResult {
   rename: (skillId: string, name: string) => Promise<void>
 }
 
-export function useSkills(): UseSkillsResult {
+export function useSkills(enabled = true): UseSkillsResult {
   const [skills, setSkills] = useState<SkillOut[]>([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
   const refresh = useCallback(async () => {
+    if (!enabled) {
+      setSkills([])
+      setError(null)
+      setLoading(false)
+      return
+    }
     setLoading(true)
     setError(null)
     try {
@@ -34,7 +40,7 @@ export function useSkills(): UseSkillsResult {
     } finally {
       setLoading(false)
     }
-  }, [])
+  }, [enabled])
 
   const commit = useCallback(async (skillId: string) => {
     await commitSkill(skillId)
@@ -82,8 +88,14 @@ export function useSkills(): UseSkillsResult {
   }, [])
 
   useEffect(() => {
+    if (!enabled) {
+      setSkills([])
+      setError(null)
+      setLoading(false)
+      return
+    }
     void refresh()
-  }, [refresh])
+  }, [refresh, enabled])
 
   return { skills, loading, error, refresh, commit, apply, remove, rename }
 }

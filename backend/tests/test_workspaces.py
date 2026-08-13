@@ -41,6 +41,15 @@ def test_open_needs_confirm_then_indexes(client_no_workspace, tmp_path: Path) ->
     assert docs[0]["title"] == "note"
 
 
+def test_open_dot_resolves_to_fs_root(client_no_workspace, tmp_path: Path) -> None:
+    client = client_no_workspace
+    resp = client.post("/workspaces/open", json={"path": ".", "confirm": False})
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["status"] in ("ok", "needs_init", "needs_confirm")
+    assert body["path"] == str(tmp_path.resolve())
+
+
 def test_open_empty_needs_init(client_no_workspace, tmp_path: Path) -> None:
     client = client_no_workspace
     folder = tmp_path / "empty"

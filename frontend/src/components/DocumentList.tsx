@@ -6,15 +6,21 @@ interface DocumentListProps {
   docs: UseDocumentsResult
   currentDocId: string | null
   onSelect: (id: string) => void
+  uploadDisabled?: boolean
 }
 
-export function DocumentList({ docs, currentDocId, onSelect }: DocumentListProps) {
+export function DocumentList({
+  docs,
+  currentDocId,
+  onSelect,
+  uploadDisabled = false,
+}: DocumentListProps) {
   const inputRef = useRef<HTMLInputElement>(null)
   const [uploading, setUploading] = useState(false)
   const [err, setErr] = useState<string | null>(null)
 
   const onFile = async (file: File | undefined) => {
-    if (!file) return
+    if (!file || uploadDisabled) return
     setUploading(true)
     setErr(null)
     try {
@@ -27,15 +33,25 @@ export function DocumentList({ docs, currentDocId, onSelect }: DocumentListProps
     }
   }
 
+  const disabled = uploadDisabled || uploading
+
   return (
     <div className="flex flex-col gap-2">
-      <label className="cursor-pointer rounded-md border border-dashed border-line-strong px-3 py-2 text-center text-xs text-ink-faint hover:border-line-brand focus-within:outline-none focus-within:ring-2 focus-within:ring-brand">
+      <label
+        className={
+          'rounded-md border border-dashed border-line-strong px-3 py-2 text-center text-xs focus-within:outline-none focus-within:ring-2 focus-within:ring-brand ' +
+          (disabled
+            ? 'cursor-not-allowed text-ink-faint opacity-60'
+            : 'cursor-pointer text-ink-faint hover:border-line-brand')
+        }
+      >
         {uploading ? 'Загрузка…' : '+ Загрузить документ'}
         <input
           ref={inputRef}
           type="file"
           accept=".md,.docx,.pdf,.csv,.xlsx"
           className="hidden"
+          disabled={disabled}
           onChange={(e) => void onFile(e.target.files?.[0])}
         />
       </label>

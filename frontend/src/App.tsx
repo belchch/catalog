@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import {
+  ApiError,
   buildSkill,
   createSession,
   extractApiDetail,
@@ -14,6 +15,7 @@ import {
   type ApplyMode,
   type ArtifactType,
   type DocumentOut,
+  type ScanReport,
   type SkillPreview,
   type SkillTrack,
 } from './api.ts'
@@ -23,18 +25,22 @@ import { Chat } from './components/Chat.tsx'
 import { CollapsibleSection } from './components/CollapsibleSection.tsx'
 import { DocumentList } from './components/DocumentList.tsx'
 import { ModelSelector } from './components/ModelSelector.tsx'
+import { RescanReportModal } from './components/RescanReportModal.tsx'
 import { RunView } from './components/RunView.tsx'
 import { SessionsPanel } from './components/SessionsPanel.tsx'
 import { SessionTimeoutModal } from './components/SessionTimeoutModal.tsx'
 import { SkillSettingsModal } from './components/SkillSettingsModal.tsx'
 import { SkillTrackPicker } from './components/SkillTrackPicker.tsx'
 import { SkillsPanel } from './components/SkillsPanel.tsx'
+import { WorkspaceBar } from './components/WorkspaceBar.tsx'
+import { WorkspacePicker } from './components/WorkspacePicker.tsx'
 import { useDocuments } from './hooks/useDocuments.ts'
 import { usePlannerSession } from './hooks/usePlannerSession.ts'
 import { useRunStream } from './hooks/useRunStream.ts'
 import { useSessions } from './hooks/useSessions.ts'
 import { useSettings } from './hooks/useSettings.ts'
 import { useSkills } from './hooks/useSkills.ts'
+import { useWorkspace } from './hooks/useWorkspace.ts'
 
 const SESSION_STORAGE_KEY = 'catalog.sessionId'
 
@@ -82,10 +88,12 @@ function useIsLg(): boolean {
 }
 
 export default function App() {
-  const docs = useDocuments()
-  const skillsHook = useSkills()
+  const workspace = useWorkspace()
+  const hasWorkspace = Boolean(workspace.current)
+  const docs = useDocuments(hasWorkspace)
+  const skillsHook = useSkills(hasWorkspace)
   const settingsHook = useSettings()
-  const sessions = useSessions()
+  const sessions = useSessions(hasWorkspace)
   const isLg = useIsLg()
 
   const [sessionId, setSessionId] = useState<string | null>(() => readStoredSessionId())
@@ -110,6 +118,10 @@ export default function App() {
   const [draftPane, setDraftPane] = useState<DraftPane>('summary')
   const [artifactHighlight, setArtifactHighlight] = useState<ArtifactType | null>(null)
   const [gitSha, setGitSha] = useState('')
+  const [pickerOpen, setPickerOpen] = useState(false)
+  const [rescanning, setRescanning] = useState(false)
+  const [rescanReport, setRescanReport] = useState<ScanReport | null>(null)
+  const workspacePathRef = useRef<string | null>(null)
 
   const handleSessionInvalid = useCallback(() => {
     writeStoredSessionId(null)
@@ -118,15 +130,84 @@ export default function App() {
     setArtifactHighlight(null)
   }, [])
 
-  const planner = usePlannerSession(sessionId, { onSessionInvalid: handleSessionInvalid })
+  const planner = usePlannerSession(hasWorkspace ? sessionId : null, {
+    onSessionInvalid: handleSessionInvalid,
+  })
   const { refreshSessionDocuments } = planner
   const run = useRunStream(activeRunId)
   const docsRefresh = docs.refresh
   const sessionsRefresh = sessions.refresh
+  const skillsRefresh = skillsHook.refresh
+  const workspaceRefreshCurrent = workspace.refreshCurrent
+  const workspaceRefreshRecents = workspace.refreshRecents
+  const workspaceRescan = workspace.rescan
 
   useEffect(() => {
     writeStoredSessionId(sessionId)
   }, [sessionId])
+
+  useEffect(() => {
+    const nextPath = workspace.current?.path ?? null
+    const prevPath = workspacePathRef.current
+    if (prevPath !== null && nextPath !== prevPath) {
+      setSessionId(null)
+      setActiveRunId(null)
+      setEditingSkill(null)
+      setCurrentDocId(null)
+      setSavedResultDoc(null)
+      setBuildError(null)
+      setArtifactHighlight(null)
+    }
+    workspacePathRef.current = nextPath
+  }, [workspace.current?.path])
+
+  const openPicker = useCallback(() => {
+    setNotice(null)
+    setPickerOpen(true)
+  }, [])
+
+  const handleWorkspaceOpened = useCallback(() => {
+    setPickerOpen(false)
+    setNotice(null)
+    void workspaceRefreshCurrent()
+    void workspaceRefreshRecents()
+    void docsRefresh()
+    void sessionsRefresh()
+    void skillsRefresh()
+  }, [
+    workspaceRefreshCurrent,
+    workspaceRefreshRecents,
+    docsRefresh,
+    sessionsRefresh,
+    skillsRefresh,
+  ])
+
+  const handleBusyConflict = useCallback((detail: string) => {
+    setNotice(detail)
+  }, [])
+
+  const handleRescan = useCallback(async () => {
+    if (!hasWorkspace || rescanning) return
+    setRescanning(true)
+    setNotice(null)
+    try {
+      const report = await workspaceRescan()
+      setRescanReport(report)
+    } catch (e) {
+      if (e instanceof ApiError && e.status === 409) {
+        setNotice(e.detail)
+      } else {
+        setNotice(extractApiDetail(e))
+      }
+    } finally {
+      setRescanning(false)
+    }
+  }, [hasWorkspace, rescanning, workspaceRescan])
+
+  const handleRescanClose = useCallback(() => {
+    setRescanReport(null)
+    void docsRefresh()
+  }, [docsRefresh])
 
   useEffect(() => {
     void getHealth()
@@ -189,12 +270,13 @@ export default function App() {
   }, [planner.streaming, sessionsRefresh])
 
   const ensureSession = useCallback(async (): Promise<string> => {
+    if (!hasWorkspace) throw new Error('Сначала откройте папку воркспейса')
     if (sessionId) return sessionId
     const created = await createSession()
     setSessionId(created.id)
     void sessions.refresh()
     return created.id
-  }, [sessionId, sessions])
+  }, [hasWorkspace, sessionId, sessions])
 
   const handleSend = useCallback(
     async (text: string, docIds?: string[]) => {
@@ -458,12 +540,23 @@ export default function App() {
             <span aria-hidden="true">⌕</span>
             <span>Поиск</span>
           </div>
-          <button type="button" className="catalog-new-chat" onClick={handleNewChat} disabled={sessions.loading}>
+          <button
+            type="button"
+            className="catalog-new-chat"
+            onClick={handleNewChat}
+            disabled={!hasWorkspace || sessions.loading}
+          >
             <span aria-hidden="true">✎</span>
             Новый чат
           </button>
           <p className="catalog-sidebar__section-label">Проект</p>
-          <div className="catalog-project-title"><span aria-hidden="true">▱</span> Catalog</div>
+          <WorkspaceBar
+            path={workspace.current?.path ?? null}
+            displayName={workspace.current?.display_name ?? null}
+            rescanning={rescanning}
+            onOpenPicker={openPicker}
+            onRescan={() => void handleRescan()}
+          />
           <div className="catalog-sidebar__sections">
           <CollapsibleSection
             title="Сессии"
@@ -475,7 +568,7 @@ export default function App() {
                   type="button"
                   className="btn-secondary"
                   onClick={handleNewChat}
-                  disabled={sessions.loading}
+                  disabled={!hasWorkspace || sessions.loading}
                 >
                   + Новый чат
                 </button>
@@ -483,7 +576,7 @@ export default function App() {
                   type="button"
                   className="btn-secondary"
                   onClick={() => void sessions.refresh()}
-                  disabled={sessions.loading}
+                  disabled={!hasWorkspace || sessions.loading}
                 >
                   {sessions.loading ? '…' : 'Обновить'}
                 </button>
@@ -506,13 +599,18 @@ export default function App() {
                 type="button"
                 className="btn-secondary"
                 onClick={() => void docs.refresh()}
-                disabled={docs.loading}
+                disabled={!hasWorkspace || docs.loading}
               >
                 {docs.loading ? '…' : 'Обновить'}
               </button>
             }
           >
-            <DocumentList docs={docs} currentDocId={currentDocId} onSelect={setCurrentDocId} />
+            <DocumentList
+              docs={docs}
+              currentDocId={currentDocId}
+              onSelect={setCurrentDocId}
+              uploadDisabled={!hasWorkspace}
+            />
           </CollapsibleSection>
           <CollapsibleSection
             title="Скиллы"
@@ -523,7 +621,7 @@ export default function App() {
                 type="button"
                 className="btn-secondary"
                 onClick={() => void skillsHook.refresh()}
-                disabled={skillsHook.loading}
+                disabled={!hasWorkspace || skillsHook.loading}
               >
                 {skillsHook.loading ? '…' : 'Обновить'}
               </button>
@@ -542,7 +640,11 @@ export default function App() {
           </div>
           <div className="catalog-sidebar__footer">
             <span className="catalog-avatar">C</span>
-            <span>Catalog workspace</span>
+            <span className="truncate" title={workspace.current?.path ?? undefined}>
+              {workspace.current
+                ? workspace.current.display_name || workspace.current.path
+                : 'Папка не открыта'}
+            </span>
           </div>
         </aside>
         <main className="catalog-main overflow-hidden">
@@ -556,6 +658,23 @@ export default function App() {
               savingResult={savingResult}
               savedDoc={savedResultDoc}
             />
+          ) : !hasWorkspace ? (
+            <div className="flex h-full items-center justify-center p-6">
+              <div className="max-w-sm text-center">
+                <div className="mb-3 text-3xl text-ink-faint" aria-hidden="true">
+                  ▱
+                </div>
+                <h2 className="mb-1 text-sm font-semibold text-ink">
+                  Воркспейс не открыт
+                </h2>
+                <p className="mb-4 text-xs text-ink-faint">
+                  Откройте папку, чтобы начать работу с документами и скиллами
+                </p>
+                <button type="button" className="btn-primary" onClick={openPicker}>
+                  Открыть папку
+                </button>
+              </div>
+            </div>
           ) : (
             <div className="flex h-full flex-col overflow-hidden">
               <div
@@ -683,6 +802,19 @@ export default function App() {
           )}
         </main>
       </div>
+      {pickerOpen && (
+        <WorkspacePicker
+          recents={workspace.recents}
+          browse={workspace.browse}
+          open={workspace.open}
+          onOpened={handleWorkspaceOpened}
+          onClose={() => setPickerOpen(false)}
+          onBusyConflict={handleBusyConflict}
+        />
+      )}
+      {rescanReport && (
+        <RescanReportModal report={rescanReport} onClose={handleRescanClose} />
+      )}
       {settingsSkill && (
         <SkillSettingsModal
           skillId={settingsSkill.skillId}

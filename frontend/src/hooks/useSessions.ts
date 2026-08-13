@@ -11,12 +11,18 @@ export interface UseSessionsResult {
   patchLocal: (session: SessionOut) => void
 }
 
-export function useSessions(): UseSessionsResult {
+export function useSessions(enabled = true): UseSessionsResult {
   const [sessions, setSessions] = useState<SessionOut[]>([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
   const refresh = useCallback(async () => {
+    if (!enabled) {
+      setSessions([])
+      setError(null)
+      setLoading(false)
+      return
+    }
     setLoading(true)
     setError(null)
     try {
@@ -26,7 +32,7 @@ export function useSessions(): UseSessionsResult {
     } finally {
       setLoading(false)
     }
-  }, [])
+  }, [enabled])
 
   const remove = useCallback(async (id: string) => {
     await deleteSession(id)
@@ -44,8 +50,14 @@ export function useSessions(): UseSessionsResult {
   }, [])
 
   useEffect(() => {
+    if (!enabled) {
+      setSessions([])
+      setError(null)
+      setLoading(false)
+      return
+    }
     void refresh()
-  }, [refresh])
+  }, [refresh, enabled])
 
   return { sessions, loading, error, refresh, remove, patchLocal }
 }

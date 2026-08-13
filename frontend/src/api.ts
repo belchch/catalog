@@ -203,6 +203,72 @@ export function getHealth(): Promise<HealthOut> {
   return jsonFetch<HealthOut>('/health')
 }
 
+export interface WorkspaceOut {
+  path: string
+  display_name: string | null
+  last_opened: string | null
+}
+
+export interface ScanReport {
+  added: string[]
+  updated: string[]
+  renamed: string[]
+  removed: string[]
+  skipped: string[]
+}
+
+export type WorkspaceOpenStatus = 'ok' | 'needs_init' | 'needs_confirm'
+
+export interface WorkspaceOpenResult {
+  status: WorkspaceOpenStatus
+  path: string | null
+  display_name: string | null
+  scan: ScanReport | null
+}
+
+export interface FsEntry {
+  name: string
+  path: string
+  has_catalog: boolean
+}
+
+export function listWorkspaces(): Promise<WorkspaceOut[]> {
+  return jsonFetch<WorkspaceOut[]>('/workspaces')
+}
+
+export async function getCurrentWorkspace(): Promise<WorkspaceOut | null> {
+  const res = await fetch(`${API_URL}/workspaces/current`)
+  if (res.status === 204) return null
+  if (!res.ok) {
+    const body = await res.text().catch(() => '')
+    throw new ApiError(res.status, res.statusText, body)
+  }
+  return (await res.json()) as WorkspaceOut
+}
+
+export function openWorkspace(
+  path: string,
+  confirm = false,
+): Promise<WorkspaceOpenResult> {
+  return jsonFetch<WorkspaceOpenResult>('/workspaces/open', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ path, confirm }),
+  })
+}
+
+export function rescanWorkspace(): Promise<ScanReport> {
+  return jsonFetch<ScanReport>('/workspaces/rescan', { method: 'POST' })
+}
+
+export function browseFs(path?: string): Promise<FsEntry[]> {
+  const qs =
+    path != null && path !== ''
+      ? `?path=${encodeURIComponent(path)}`
+      : ''
+  return jsonFetch<FsEntry[]>(`/fs/browse${qs}`)
+}
+
 export function listDocuments(): Promise<DocumentOut[]> {
   return jsonFetch<DocumentOut[]>('/documents')
 }
