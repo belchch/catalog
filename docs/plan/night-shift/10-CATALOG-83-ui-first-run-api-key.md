@@ -3,6 +3,7 @@
 - **Задача Plane:** [CATALOG-83](https://app.plane.so/belchch/projects/catalog-app/work-items/83) (id: `39b2d419-0f04-4579-a708-5648cd33ecf7`, state: In Progress)
 - **Статус плана:** Analyzed
 - **Тип шага:** ui
+- **Очередь:** 10 · предусловие: 09 (code того же тикета)
 - **Цель:** Если ключи провайдера ещё не заданы, показать экран ввода ключа до работы с воркспейсом. После сохранения — обычный UI (пикер папки CATALOG-80).
 
 ## Постановка задачи (актуальное ТЗ)
@@ -21,7 +22,7 @@ _(источник: описание задачи — комментариев �
 
 _нет — комментариев к задаче не было_
 
-Предусловие: `CATALOG-83-code-uv-packaging.md` (persist ключей + API `keys_configured` / запись ключа). Пикер папки: `CATALOG-80-ui-workspace-picker.md`.
+Предусловие: `09-CATALOG-83-code-uv-packaging.md` (persist ключей + API `keys_configured` / запись ключа). Пикер папки: `07-CATALOG-80-ui-workspace-picker.md`.
 
 ## Контекст
 

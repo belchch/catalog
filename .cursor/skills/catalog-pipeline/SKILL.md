@@ -1,6 +1,6 @@
 ---
 name: catalog-pipeline
-description: Автономный ночной pipeline по шагам docs/plan/night-shift/CATALOG-*.md. Владеет общей веткой pipeline, PR, файлом состояния .cursor/state/night-shift.json и циклом generator↔reviewer (до 5 циклов на шаг). Использовать явно через /catalog-pipeline, когда нужно прогнать один или несколько шагов ночного пайплайна.
+description: Автономный ночной pipeline по шагам docs/plan/night-shift/NN-CATALOG-*.md. Владеет общей веткой pipeline, PR, файлом состояния .cursor/state/night-shift.json и циклом generator↔reviewer (до 5 циклов на шаг). Использовать явно через /catalog-pipeline, когда нужно прогнать один или несколько шагов ночного пайплайна.
 disable-model-invocation: true
 ---
 
@@ -11,7 +11,7 @@ disable-model-invocation: true
 Модель парента выбирается пользователем в UI/CLI до запуска (ориентир: Grok 4.5). Эта инструкция работает независимо от того, какая модель её выполняет.
 
 ## Параметры запуска
-- **STEPS** — список шагов для прогона. Если пользователь не указал явно — возьми из `.cursor/state/night-shift.json.steps`, отфильтровав `status == "pending"`, в порядке очереди из плана 2 (`docs/plan/night-shift/`): по номеру CATALOG-NN, если не указано иное.
+- **STEPS** — список шагов для прогона. Если пользователь не указал явно — возьми из `.cursor/state/night-shift.json.steps`, отфильтровав `status == "pending"`, в порядке очереди из `docs/plan/night-shift/`: по числовому префиксу `NN-` в имени файла (`00-…`, `01-…`, …), не по номеру CATALOG-NN. Файлы `*.design.md` в очередь не входят.
 - **BRANCH** — общая ветка pipeline. Если в state есть `branch` — используй её. Иначе спроси/уточни у пользователя (не угадывай имя ветки молча).
 - **CYCLES_MAX = 5** (на шаг).
 - **STATE** = `.cursor/state/night-shift.json` (см. схему ниже). Файл в `.gitignore`, никогда не коммитить.
@@ -50,7 +50,7 @@ disable-model-invocation: true
 4. **Лимит циклов без APPROVED:**
    - `STATE.steps[STEP].status = "failed"`, `failure_reason = <краткое summary ISSUES>`. Запиши STATE.
    - Создай/допиши `.cursor/steps-results/<STEP без .md>.md` с сводкой ISSUES и статусом проверок (пишешь **ты**, не reviewer).
-   - Не падай, не останавливай весь прогон без явной fail-policy пользователя — переходи к следующему STEP, если шаги независимы (см. план 2, раздел «Fail policy»). Если шаг блокирующий для следующих — стоп очереди, сообщи.
+   - Не падай, не останавливай весь прогон без явной fail-policy пользователя. Смотри поле **Очередь** в плане: если у следующих pending-шагов в `blocked_by` есть упавший тикет — стоп этой цепочки, сообщи. Независимые шаги (в **Очередь** стоит «независимый») можно продолжать.
 
 ## Жёсткие правила
 - Git/GitHub-операции выполняешь **только ты**, никогда не через подагентов.
@@ -70,7 +70,7 @@ disable-model-invocation: true
   "pr_number": null,
   "pr_url": null,
   "steps": {
-    "CATALOG-17-skill-editing.md": {
+    "00-CATALOG-17-skill-editing.md": {
       "status": "pending",
       "kind": "code",
       "attempt": 0,

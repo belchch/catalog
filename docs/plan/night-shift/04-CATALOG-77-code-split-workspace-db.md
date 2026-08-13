@@ -3,6 +3,7 @@
 - **Задача Plane:** [CATALOG-77](https://app.plane.so/belchch/projects/catalog-app/work-items/77) (id: `2ee5e86e-61de-4dbd-b73e-19ff3364e06e`, state: In Progress)
 - **Статус плана:** Analyzed
 - **Тип шага:** code
+- **Очередь:** 04 · blocked_by CATALOG-76 · blocking CATALOG-78
 - **Цель:** Разрезать одну `catalog.db` на глобальную БД (настройки + реестр воркспейсов в `APP_DATA_DIR`) и БД воркспейса (`.catalog/index.db`). Приложение стартует без открытой папки; бизнес-эндпоинты отвечают 409, пока воркспейс не открыт.
 
 ## Постановка задачи (актуальное ТЗ)
@@ -26,7 +27,7 @@ _(источник: описание задачи — комментариев �
 
 _нет — комментариев к задаче не было_
 
-Связанный план: `docs/plan/night-shift/CATALOG-76-code-adr-workspace-as-folder.md` (ADR модели). Этот шаг — реализация хранилища; UI открытия папки — не здесь.
+Связанный план: `docs/plan/night-shift/03-CATALOG-76-code-adr-workspace-as-folder.md` (ADR модели). Этот шаг — реализация хранилища; UI открытия папки — не здесь.
 
 ## Контекст
 
@@ -52,7 +53,7 @@ Lifespan (`backend/app/main.py:51–88`): mkdir data-root → `ensure_repo` docu
 - `backend/app/main.py` — lifespan: только app-db + менеджер (пустой); без `ensure_repo` и стартового `reconcile_orphans`.
 - `backend/app/api/deps.py` — `get_app_db`, `get_workspace_db` (HTTP 409), `get_workspace`/`get_tools` из менеджера.
 - `backend/app/api/sessions.py`, `documents.py`, `skills.py`, `runs.py` — заменить `get_db`; WS не кэшировать db на всё соединение дольше запроса/сообщения.
-- HTTP open/close/browse — **не этот шаг**, это CATALOG-79 (`CATALOG-79-code-workspaces-api.md`). Здесь менеджер + deps; в тестах 77 открывать папку вызовом менеджера, не HTTP.
+- HTTP open/close/browse — **не этот шаг**, это CATALOG-79 (`06-CATALOG-79-code-workspaces-api.md`). Здесь менеджер + deps; в тестах 77 открывать папку вызовом менеджера, не HTTP.
 - `backend/app/config.py` — `APP_DB_PATH` указывает на глобальную БД в `APP_DATA_DIR` (не `catalog.db` как workspace). Имя файла глобальной БД зафиксировать в ADR/коде (например `app.db` или оставить `catalog.db` только для app-слоя).
 - `backend/tests/conftest.py` + `test_storage.py` / `test_api.py` / остальные `init_schema` — две базы; фикстура «открыть tmp-папку».
 - `backend/app/storage/git.py` — не вызывать `ensure_repo` из lifespan (файл можно оставить для других шагов).

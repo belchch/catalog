@@ -3,6 +3,7 @@
 - **Задача Plane:** [CATALOG-80](https://app.plane.so/belchch/projects/catalog-app/work-items/80) (id: `19adb538-8c00-47f4-ad5e-baf6b21e8f9c`, state: In Progress)
 - **Статус плана:** Analyzed
 - **Тип шага:** ui
+- **Очередь:** 07 · blocked_by CATALOG-79 · blocking CATALOG-81
 - **Цель:** Дать пользователю выбрать и переключить папку-воркспейс, увидеть ре-скан с отчётом и пустое состояние «воркспейс не открыт». Upload по-прежнему кладёт файл в открытую папку.
 
 ## Постановка задачи (актуальное ТЗ)

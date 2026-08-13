@@ -3,6 +3,7 @@
 - **Задача Plane:** [CATALOG-76](https://app.plane.so/belchch/projects/catalog-app/work-items/76) (id: `391f171d-6bac-4b53-8db1-b522e5491fd7`, state: In Progress)
 - **Статус плана:** Analyzed
 - **Тип шага:** code
+- **Очередь:** 03 · blocking CATALOG-77
 - **Цель:** Зафиксировать модель «воркспейс = папка пользователя» в новом ADR, обновить индекс ADR и привести README / README-RUN к нативному запуску как основному способу доставки. Только docs, код не менять.
 
 ## Постановка задачи (актуальное ТЗ)

@@ -3,6 +3,7 @@
 - **Задача Plane:** [CATALOG-78](https://app.plane.so/belchch/projects/catalog-app/work-items/78) (id: `356c69f6-b2ab-482b-b684-567ebb2bab9c`, state: In Progress)
 - **Статус плана:** Analyzed
 - **Тип шага:** code
+- **Очередь:** 05 · blocked_by CATALOG-77 · blocking CATALOG-79
 - **Цель:** Синхронизировать таблицу `document` с файлами в папке воркспейса: скан при открытии и вручную (без watcher). Upload пишет файл под оригинальным именем; результаты скиллов — в `results/`.
 
 ## Постановка задачи (актуальное ТЗ)

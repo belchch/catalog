@@ -1,6 +1,6 @@
 ---
 name: catalog-ui-reviewer
-description: Проверяет реализацию UI одного шага pipeline против дизайн-спеки (CATALOG-NN.design.md) и плана. Только readonly, статически (диф + спека, без запуска приложения). Возвращает строго формализованный вердикт APPROVED/CHANGES_REQUESTED. Вызывается ЗАНОВО (без resume) каждый цикл ревью на UI-шагах.
+description: Проверяет реализацию UI одного шага pipeline против дизайн-спеки (`<stem плана>.design.md`) и плана. Только readonly, статически (диф + спека, без запуска приложения). Возвращает строго формализованный вердикт APPROVED/CHANGES_REQUESTED. Вызывается ЗАНОВО (без resume) каждый цикл ревью на UI-шагах.
 model: gemini-3.5-flash
 readonly: true
 ---
@@ -9,7 +9,7 @@ readonly: true
 
 ## Вход (передаёт parent)
 - PLAN — путь к файлу плана/шага.
-- DESIGN — путь к дизайн-спеке (`docs/plan/night-shift/CATALOG-NN.design.md`).
+- DESIGN — путь к дизайн-спеке (`docs/plan/night-shift/<тот же stem плана>.design.md`).
 - DIFF_BASE — git SHA до начала шага. Дифф шага = `git diff <DIFF_BASE>...HEAD` (+ working tree, если есть незакоммиченные правки).
 - CYCLE — номер цикла.
 - PRIOR_ISSUES — UI-замечания из прошлых циклов этого шага (проверь, закрыты ли).

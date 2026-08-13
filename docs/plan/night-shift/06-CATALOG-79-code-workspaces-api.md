@@ -3,6 +3,7 @@
 - **Задача Plane:** [CATALOG-79](https://app.plane.so/belchch/projects/catalog-app/work-items/79) (id: `66296bc6-eb90-4e40-a083-769cab0cb81c`, state: In Progress)
 - **Статус плана:** Analyzed
 - **Тип шага:** code
+- **Очередь:** 06 · blocked_by CATALOG-78 · blocking CATALOG-80
 - **Цель:** HTTP-слой над менеджером воркспейсов и сканером: реестр, open с ветками подтверждения, rescan, безопасный browse ФС, 409 при активном `skill_run`.
 
 ## Постановка задачи (актуальное ТЗ)
