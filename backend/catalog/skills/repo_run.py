@@ -45,14 +45,6 @@ def create_run(
     persist: bool = True,
     user_prompt: str | None = None,
 ) -> str:
-    """Insert a skill_run row with ``status='running'`` and return its id.
-
-    ``input_doc_ids`` is serialized to a JSON array in ``input_doc_ids``; the
-    first id is also written to the legacy ``input_doc_id`` column for
-    backward compatibility with older readers. ``persist`` (CATALOG-18)
-    records the requested output mode for this run. ``user_prompt``
-    (CATALOG-56) is the optional runtime clarification for agent apply.
-    """
     if not input_doc_ids:
         raise ValueError("create_run requires at least one input document id")
     run_id = uuid.uuid4().hex
@@ -64,7 +56,7 @@ def create_run(
             "INSERT INTO skill_run(id, skill_id, session_id, input_doc_id, "
             "input_doc_ids, output_doc_id, status, trace_json, started_at, ended_at, "
             "persist, result_text, user_prompt) "
-            "VALUES (?, ?, ?, ?, ?, NULL, 'running', NULL, ?, NULL, ?, NULL, ?)",
+            "VALUES (?, ?, ?, ?, ?, NULL, 'pending', NULL, ?, NULL, ?, NULL, ?)",
             (
                 run_id,
                 skill_id,
@@ -77,6 +69,14 @@ def create_run(
             ),
         )
     return run_id
+
+
+def mark_run_running(db: Database, run_id: str) -> None:
+    with db.connect() as conn:
+        conn.execute(
+            "UPDATE skill_run SET status = 'running' WHERE id = ?",
+            (run_id,),
+        )
 
 
 def finish_run(

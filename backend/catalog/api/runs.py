@@ -197,7 +197,7 @@ async def run_stream_ws(websocket: WebSocket, run_id: str) -> None:
         await websocket.send_json({"type": "error", "message": "run not found"})
         await websocket.close()
         return
-    if run["status"] != "running":
+    if run["status"] not in {"pending", "running"}:
         await websocket.send_json(
             {"type": "error", "message": f"run is not running (status={run['status']})"}
         )

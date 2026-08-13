@@ -121,6 +121,24 @@ def test_switch_blocked_while_run_active(tmp_path: Path, app_db: Database) -> No
         manager.open(b, confirm_init=True)
 
 
+def test_switch_allowed_while_run_pending(tmp_path: Path, app_db: Database) -> None:
+    manager = WorkspaceManager()
+    manager.bind(app_db=app_db, app_state=type("S", (), {})())
+    a = tmp_path / "a"
+    b = tmp_path / "b"
+    a.mkdir()
+    b.mkdir()
+    db = manager.open(a, confirm_init=True)
+    with db.connect() as conn:
+        conn.execute(
+            "INSERT INTO skill_run(id, skill_id, status, started_at) "
+            "VALUES ('r1', 's1', 'pending', '2026-01-01T00:00:00Z')"
+        )
+    other = manager.open(b, confirm_init=True)
+    assert manager.root == b.resolve()
+    assert other is manager.current
+
+
 def test_close_clears_current(tmp_path: Path, app_db: Database) -> None:
     state = type("S", (), {})()
     manager = WorkspaceManager()
