@@ -72,18 +72,26 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         (name for name, inst in providers.items() if inst is selected),
         next(iter(providers), "openrouter"),
     )
-    app.state.active_provider = active_name
+    stored_provider, stored_model = get_app_settings(app_db)
+    if stored_provider and stored_provider in providers:
+        app.state.active_provider = stored_provider
+        app.state.provider = providers[stored_provider]
+        active_name = stored_provider
+    else:
+        app.state.active_provider = active_name
+        if stored_provider:
+            stored_model = ""
     default_model = settings.default_model
     if active_name == "zai" and ("/" in default_model or not default_model):
         default_model = DEFAULT_ZAI_MODEL
     app.state.active_model = default_model
-    stored_provider, stored_model = get_app_settings(app_db)
     if stored_provider or stored_model:
-        if stored_provider and stored_provider in providers:
-            app.state.active_provider = stored_provider
-            app.state.provider = providers[stored_provider]
         if stored_model:
-            app.state.active_model = stored_model
+            zai_model = "/" not in stored_model
+            if active_name == "zai" and zai_model:
+                app.state.active_model = stored_model
+            elif active_name != "zai" and not zai_model:
+                app.state.active_model = stored_model
     else:
         set_app_settings(app_db, provider=active_name, model=default_model)
     manager = WorkspaceManager()

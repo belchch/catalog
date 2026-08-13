@@ -676,6 +676,10 @@ async def session_ws(
                 await websocket.close()
                 return
             workspace = str(manager.root)
+            if get_session(db, session_id) is None:
+                await websocket.send_json({"type": "error", "message": "session not found"})
+                await websocket.close()
+                return
             base_tools = getattr(websocket.app.state, "tools", None)
             if base_tools is None:
                 await websocket.send_json({"type": "error", "message": "workspace not open"})
