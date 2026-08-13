@@ -205,8 +205,10 @@ async def main() -> int:
         return 1
 
     with tempfile.TemporaryDirectory(prefix="catalog-golden-") as tmp:
-        db_path = os.path.join(tmp, "golden.db")
         workspace = os.path.join(tmp, "workspace")
+        catalog = os.path.join(workspace, ".catalog")
+        os.makedirs(catalog, exist_ok=True)
+        db_path = os.path.join(catalog, "index.db")
         db = Database(db_path)
         db.init_schema()
         client = httpx.AsyncClient(timeout=60.0)

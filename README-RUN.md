@@ -1,57 +1,97 @@
 # Catalog — как запустить
 
-Catalog работает с **папкой на твоём компьютере**: документы лежат там, куда ты их положил. Основной способ запуска — **нативный** (Python + Node), без Docker.
+Основной способ: **нативно** (Python venv + uvicorn, Node/pnpm). Docker для локальной работы с документами **не используй** — см. раздел в конце.
+
+После этих шагов у тебя будут backend, UI и открытая папка-воркспейс с твоими файлами.
 
 ---
 
 ## Что нужно один раз
 
-1. **Python 3.11+** (лучше 3.13) — https://www.python.org/downloads/
-2. **Node.js** и **pnpm** (для интерфейса) — https://nodejs.org/ · `npm install -g pnpm`
-3. Ключ **OpenRouter** (`OPENROUTER_API_KEY`) — впиши в `backend/.env` (см. ниже)
+1. **Python 3.11+** (удобнее 3.13) — https://www.python.org/downloads/
+2. **Node.js** и **pnpm** — https://nodejs.org/ · затем `npm install -g pnpm`
+3. Ключ LLM-провайдера:
+   - по умолчанию **OpenRouter**: `OPENROUTER_API_KEY` (+ tool-capable `OPENROUTER_DEFAULT_MODEL`);
+   - либо **z.ai** (`APP_PROVIDER=zai`, `ZAI_API_KEY`) — см. `backend/.env.example`.
 
 ---
 
-## Запуск (основной путь)
+## 1. Окружение backend
 
-### Backend
+Из корня репозитория:
 
 ```bash
 cd backend
 cp .env.example .env
-# отредактируй .env: OPENROUTER_API_KEY=... и при необходимости OPENROUTER_DEFAULT_MODEL=...
+```
 
+Открой `backend/.env` и задай минимум:
+
+- `OPENROUTER_API_KEY=...` (или ключ z.ai при `APP_PROVIDER=zai`)
+- `OPENROUTER_DEFAULT_MODEL=...` — модель с function-calling / tool use
+
+Остальное можно не трогать. Пути к документам в `.env` не задаются: папку выбираешь в UI.
+
+```bash
 python3 -m venv .venv
 source .venv/bin/activate          # Windows: .venv\Scripts\activate
 pip install -e ".[dev]"
-uvicorn app.main:app --reload      # API: http://localhost:8000  ·  health: /health
+uvicorn app.main:app --reload
 ```
 
-### Frontend
+Проверка: http://localhost:8000/health
 
-В другом терминале:
+Оставь этот терминал запущенным.
+
+---
+
+## 2. Frontend
+
+В **другом** терминале:
 
 ```bash
 cd frontend
 pnpm install
-pnpm run dev                       # http://localhost:5173
+pnpm run dev
 ```
 
-Открой в браузере `http://localhost:5173` — это интерфейс Catalog.
+Открой в браузере: http://localhost:5173
 
-### Остановка
+---
+
+## 3. Открыть или создать папку-воркспейс
+
+В UI выбери папку («Открыть воркспейс» / пикер папок):
+
+| Папка | Что произойдёт |
+|---|---|
+| Пустая (без маркера Catalog) | Предложение **создать** воркспейс → подтверди |
+| С обычными файлами, без `.catalog` | Показ превью индекса → **подтверди инициализацию** |
+| Уже воркспейс (есть `.catalog/index.db`) | Откроется сразу, индекс при необходимости обновится |
+
+Документы остаются **обычными файлами в выбранной папке**. Служебное — только `.catalog/` (в т.ч. `index.db`); руками править не нужно.
+
+Глобальные настройки и список известных воркспейсов лежат в каталоге данных ОС (на macOS — `~/Library/Application Support/catalog`, иначе `~/.local/share/catalog`), не рядом с исходниками и не в Docker-томе.
+
+---
+
+## Остановка
 
 В каждом терминале (backend / frontend) — **Ctrl+C**.
 
 ---
 
-## Где мои документы
+## Сквозной прогон (golden path)
 
-Документы — в **папке-воркспейсе**, которую ты открываешь в приложении (обычная папка на диске).
+Нужны настроенный `backend/.env` и samples в корне репо (`samples/golden.docx`, `samples/golden2.docx`). Скрипт сам создаёт временную папку-воркспейс с `.catalog/index.db` и гоняет цикл ingest → план → скилл → apply:
 
-- Каталог не хранит «твои файлы» внутри Docker-тома и не требует искать данные рядом со скриптом запуска.
-- Служебные данные воркспейса — в подпапке `.catalog/` (в т.ч. `index.db`). Её не нужно править вручную.
-- Глобальные настройки и список известных воркспейсов живут отдельно от папки с документами (см. ADR-0016).
+```bash
+cd backend
+source .venv/bin/activate   # если ещё не активирован
+python scripts/golden_run.py
+```
+
+Успех: в конце `=== GOLDEN RUN PASSED ===` и JSON-отчёт.
 
 ---
 
@@ -59,17 +99,20 @@ pnpm run dev                       # http://localhost:5173
 
 | Симптом | Что делать |
 |---|---|
-| `OPENROUTER_API_KEY` / ошибки LLM | Проверь `backend/.env`: ключ задан, модель умеет tool use |
-| Порт 8000 или 5173 занят | Останови другой процесс или смени порт в команде запуска |
-| `pnpm: command not found` | Установи pnpm: `npm install -g pnpm` |
-| Backend не стартует после `pip install` | Активируй venv и повтори `pip install -e ".[dev]"` из `backend/` |
+| Нет ключа / ошибки LLM | Проверь `backend/.env`: ключ задан; модель умеет tool use |
+| Порт **8000** занят | Останови другой процесс или `uvicorn ... --port 8001` |
+| Порт **5173** занят | Vite предложит другой порт или останови конфликтующий процесс |
+| `pnpm: command not found` | `npm install -g pnpm` |
+| Backend не стартует после install | Активируй venv, из `backend/` снова `pip install -e ".[dev]"` |
+| HTTP **409** `workspace not open` | В UI ещё не открыта папка — открой воркспейс (шаг 3) |
+| 409 при смене папки | Дождись окончания активного прогона скилла, затем переключи |
 
-Если ничего не помогает — пришли вывод терминала (backend и/или frontend) тому, кто дал тебе проект.
+Если ничего не помогает — пришли вывод терминала (backend и/или frontend).
 
 ---
 
-## Опционально: Docker
+## Устарело для локального запуска: Docker
 
-Docker Desktop + `Catalog.command` — **не** основной способ. Имеет смысл только если так удобнее упаковать окружение; данные в модели workspace-as-folder всё равно должны жить в выбранной папке пользователя, а не в томе `catalog-data` как единственном хранилище.
+`docker-compose.yml`, том `catalog-data` → `/data`, `Catalog.command` / `Build.command` — **не** продуктовый сценарий для работы с документами на своём компьютере. Named volume больше не место «где лежат мои файлы».
 
-Скрипты `Catalog.command` / образ в репозитории могут ещё существовать для совместимости — для повседневной работы предпочитай нативный запуск выше.
+Скрипты и образ в репозитории оставлены как задел под возможный серверный деплой. Для повседневной локальной работы используй нативный путь выше.

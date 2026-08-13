@@ -161,9 +161,12 @@ def test_golden_run_end_to_end(tmp_path: Path) -> None:
         ["Другой отчёт", "Содержит иные тезисы для применения скилла."],
     )
 
-    db = Database(str(tmp_path / "golden.db"))
+    workspace = tmp_path / "ws"
+    catalog = workspace / ".catalog"
+    catalog.mkdir(parents=True)
+    db = Database(str(catalog / "index.db"))
     db.init_schema()
-    workspace = str(tmp_path / "ws")
+    workspace = str(workspace)
 
     report = asyncio.run(
         run_golden(
