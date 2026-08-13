@@ -32,6 +32,7 @@ from catalog.agent.trace import Trace
 from catalog.storage.db import Database
 
 PENDING_MAX_AGE_SECONDS = 15 * 60
+RUNNING_MAX_AGE_SECONDS = 60 * 60
 
 
 def _now_iso() -> str:
@@ -117,8 +118,8 @@ def delete_runs_for_skill(db: Database, skill_id: str) -> int:
         return int(cur.rowcount)
 
 
-def abandon_stale_pending_runs(
-    db: Database, *, max_age_seconds: int = PENDING_MAX_AGE_SECONDS
+def _abandon_stale_runs(
+    db: Database, *, status: str, max_age_seconds: int
 ) -> int:
     cutoff = (
         datetime.now(timezone.utc) - timedelta(seconds=max_age_seconds)
@@ -127,14 +128,31 @@ def abandon_stale_pending_runs(
     with db.connect() as conn:
         cur = conn.execute(
             "UPDATE skill_run SET status = 'cancelled', ended_at = ? "
-            "WHERE status = 'pending' AND started_at < ?",
-            (now, cutoff),
+            "WHERE status = ? AND started_at < ?",
+            (now, status, cutoff),
         )
         return int(cur.rowcount)
 
 
+def abandon_stale_pending_runs(
+    db: Database, *, max_age_seconds: int = PENDING_MAX_AGE_SECONDS
+) -> int:
+    return _abandon_stale_runs(
+        db, status="pending", max_age_seconds=max_age_seconds
+    )
+
+
+def abandon_stale_running_runs(
+    db: Database, *, max_age_seconds: int = RUNNING_MAX_AGE_SECONDS
+) -> int:
+    return _abandon_stale_runs(
+        db, status="running", max_age_seconds=max_age_seconds
+    )
+
+
 def has_running_runs(db: Database) -> bool:
     abandon_stale_pending_runs(db)
+    abandon_stale_running_runs(db)
     with db.connect() as conn:
         row = conn.execute(
             "SELECT 1 FROM skill_run WHERE status IN ('pending', 'running') LIMIT 1"

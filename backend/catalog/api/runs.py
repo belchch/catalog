@@ -206,12 +206,6 @@ async def run_stream_ws(websocket: WebSocket, run_id: str) -> None:
         await websocket.send_json({"type": "error", "message": message})
         await websocket.close()
         return
-    if not claim_run(db, run_id):
-        await websocket.send_json(
-            {"type": "error", "message": "run is already in progress"}
-        )
-        await websocket.close()
-        return
 
     skill = get_skill(db, run["skill_id"])
     if skill is None:
@@ -236,6 +230,13 @@ async def run_stream_ws(websocket: WebSocket, run_id: str) -> None:
             await websocket.send_json({"type": "error", "message": "workspace not open"})
             await websocket.close()
             return
+
+    if not claim_run(db, run_id):
+        await websocket.send_json(
+            {"type": "error", "message": "run is already in progress"}
+        )
+        await websocket.close()
+        return
 
     # CATALOG-6: honour a provider pinned on the skill (set in the settings
     # modal); fall back to the app's active provider otherwise.
