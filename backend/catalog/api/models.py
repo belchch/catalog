@@ -13,7 +13,7 @@ from catalog.api.schemas import (
 )
 from catalog.config import keys_are_configured, with_resolved_keys
 from catalog.llm.base import LLMProvider
-from catalog.runtime import apply_runtime_providers
+from catalog.runtime import apply_runtime_providers, coerce_model_for_provider
 from catalog.storage.db import Database
 from catalog.storage.repo_app_settings import (
     get_api_keys,
@@ -133,6 +133,14 @@ async def update_settings_endpoint(
         request.app.state.provider = providers[req.provider]
     if req.model is not None:
         request.app.state.active_model = req.model
+    elif req.provider is not None:
+        settings = getattr(request.app.state, "settings", None)
+        fallback = settings.default_model if settings is not None else ""
+        request.app.state.active_model = coerce_model_for_provider(
+            request.app.state.active_provider,
+            getattr(request.app.state, "active_model", None),
+            fallback,
+        )
     set_app_settings(
         app_db,
         provider=request.app.state.active_provider,

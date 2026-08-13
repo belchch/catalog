@@ -1095,9 +1095,12 @@ def test_update_settings_switches_active_provider(client) -> None:
     """POST /settings provider=openrouter resolves the active instance (CATALOG-14)."""
     providers = client.app.state.providers
     assert "openrouter" in providers
+    client.app.state.active_model = "glm-4.6"
     resp = client.post("/settings", json={"provider": "openrouter"})
     assert resp.status_code == 200, resp.text
     assert client.app.state.provider is providers["openrouter"]
+    assert client.app.state.active_model == "test/model"
+    assert resp.json()["model"] == "test/model"
 
 
 def test_provider_models_endpoint(client, monkeypatch) -> None:

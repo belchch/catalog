@@ -132,6 +132,12 @@ def scan_workspace(db: Database, workspace_dir: str | Path) -> ScanReport:
                 existing.mtime == entry.mtime and existing.size == entry.size
             )
             if same_meta:
+                if not existing.content_hash:
+                    update_document(
+                        db,
+                        existing.id,
+                        content_hash=entry.content_hash,
+                    )
                 continue
             hash_changed = existing.content_hash != entry.content_hash
             update_document(

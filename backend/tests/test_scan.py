@@ -72,6 +72,26 @@ def test_scan_update_on_content_change(db: Database, tmp_path: Path) -> None:
     assert refreshed.content_hash != row.content_hash
 
 
+def test_scan_backfills_empty_content_hash(db: Database, tmp_path: Path) -> None:
+    row = ingest_file(db, tmp_path, filename="note.md", content=b"same")
+    with db.connect() as conn:
+        conn.execute(
+            "UPDATE document SET content_hash = NULL WHERE id = ?",
+            (row.id,),
+        )
+    cleared = get_document(db, row.id)
+    assert cleared is not None
+    assert not cleared.content_hash
+
+    report = scan_workspace(db, tmp_path)
+    assert report.updated == []
+    assert report.added == []
+    refreshed = get_document(db, row.id)
+    assert refreshed is not None
+    assert refreshed.content_hash
+    assert refreshed.content_hash == row.content_hash
+
+
 def test_scan_removes_missing(db: Database, tmp_path: Path) -> None:
     kept = ingest_file(db, tmp_path, filename="keep.md", content=b"keep")
     gone = ingest_file(db, tmp_path, filename="gone.md", content=b"gone")

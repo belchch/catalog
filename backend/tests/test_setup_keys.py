@@ -40,6 +40,50 @@ def test_api_keys_roundtrip_in_app_db() -> None:
     assert get_api_keys(db) == ("secret-or", "secret-zai")
 
 
+def test_coerce_model_for_provider_styles() -> None:
+    from catalog.llm.zai import DEFAULT_ZAI_MODEL
+    from catalog.runtime import coerce_model_for_provider
+
+    assert coerce_model_for_provider("zai", "openrouter/free", "test/model") == DEFAULT_ZAI_MODEL
+    assert coerce_model_for_provider("openrouter", "glm-5.2", "test/model") == "test/model"
+    assert coerce_model_for_provider("zai", "glm-4.6", "test/model") == "glm-4.6"
+    assert coerce_model_for_provider("openrouter", "google/gem", "test/model") == "google/gem"
+
+
+def test_apply_runtime_providers_resets_model_on_fallback(client, monkeypatch) -> None:
+    from catalog.config import with_resolved_keys
+    from catalog.runtime import apply_runtime_providers
+
+    monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
+    monkeypatch.delenv("ZAI_API_KEY", raising=False)
+    set_api_keys(
+        client.app.state.app_db,
+        openrouter_api_key="or-key",
+        zai_api_key="zai-key",
+    )
+    settings = with_resolved_keys(
+        client.app.state.settings,
+        persisted_openrouter="or-key",
+        persisted_zai="zai-key",
+    )
+    apply_runtime_providers(client.app, settings)
+    assert "zai" in client.app.state.providers
+    client.app.state.active_provider = "zai"
+    client.app.state.provider = client.app.state.providers["zai"]
+    client.app.state.active_model = "glm-4.6"
+
+    set_api_keys(client.app.state.app_db, openrouter_api_key="or-key", zai_api_key="")
+    settings = with_resolved_keys(
+        client.app.state.settings,
+        persisted_openrouter="or-key",
+        persisted_zai="",
+    )
+    apply_runtime_providers(client.app, settings)
+    assert client.app.state.active_provider == "openrouter"
+    assert "zai" not in client.app.state.providers
+    assert client.app.state.active_model == "test/model"
+
+
 def test_setup_endpoints_hide_secrets(client, monkeypatch) -> None:
     monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
     monkeypatch.delenv("ZAI_API_KEY", raising=False)

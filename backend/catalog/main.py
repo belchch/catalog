@@ -16,8 +16,8 @@ from catalog.api import documents, models, runs, sessions, skills, workspaces
 from catalog.config import get_settings, with_resolved_keys
 from catalog.llm.factory import build_providers, select_provider
 from catalog.llm.openrouter import build_debug_hooks
-from catalog.llm.zai import DEFAULT_ZAI_MODEL
 from catalog.logging_config import setup_logging
+from catalog.runtime import coerce_model_for_provider
 from catalog.storage.db import Database
 from catalog.storage.repo_app_settings import (
     get_api_keys,
@@ -81,19 +81,13 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         app.state.active_provider = active_name
         if stored_provider:
             stored_model = ""
-    default_model = settings.default_model
-    if active_name == "zai" and ("/" in default_model or not default_model):
-        default_model = DEFAULT_ZAI_MODEL
-    app.state.active_model = default_model
-    if stored_provider or stored_model:
-        if stored_model:
-            zai_model = "/" not in stored_model
-            if active_name == "zai" and zai_model:
-                app.state.active_model = stored_model
-            elif active_name != "zai" and not zai_model:
-                app.state.active_model = stored_model
-    else:
-        set_app_settings(app_db, provider=active_name, model=default_model)
+    app.state.active_model = coerce_model_for_provider(
+        active_name,
+        stored_model,
+        settings.default_model,
+    )
+    if not stored_provider and not stored_model:
+        set_app_settings(app_db, provider=active_name, model=app.state.active_model)
     manager = WorkspaceManager()
     manager.bind(app_db=app_db, app_state=app.state)
     app.state.workspace_manager = manager
