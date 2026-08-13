@@ -83,6 +83,17 @@ def claim_run(db: Database, run_id: str) -> bool:
         return int(cur.rowcount) == 1
 
 
+def cancel_pending_run(db: Database, run_id: str) -> bool:
+    now = _now_iso()
+    with db.connect() as conn:
+        cur = conn.execute(
+            "UPDATE skill_run SET status = 'cancelled', ended_at = ? "
+            "WHERE id = ? AND status = 'pending'",
+            (now, run_id),
+        )
+        return int(cur.rowcount) == 1
+
+
 def finish_run(
     db: Database,
     run_id: str,

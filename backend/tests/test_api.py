@@ -1606,8 +1606,8 @@ def test_apply_stream_rejects_second_claim(client, provider, db) -> None:
         assert "already in progress" in frame["message"]
 
 
-def test_apply_stream_validation_failure_does_not_claim(client, db) -> None:
-    from catalog.skills.repo_run import get_run
+def test_apply_stream_validation_failure_cancels_pending(client, db) -> None:
+    from catalog.skills.repo_run import get_run, has_running_runs
 
     doc_id = _upload(client, "input.md", b"source text")
     skill_id = _seed_committed_skill(db)
@@ -1624,7 +1624,8 @@ def test_apply_stream_validation_failure_does_not_claim(client, db) -> None:
 
     row = get_run(db, run_id)
     assert row is not None
-    assert row["status"] == "pending"
+    assert row["status"] == "cancelled"
+    assert has_running_runs(db) is False
 
 
 def test_apply_agent_prompt_reaches_llm(client, provider, db) -> None:

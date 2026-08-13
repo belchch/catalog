@@ -45,7 +45,13 @@ from catalog.llm.base import LLMProvider
 from catalog.llm.factory import provider_for_skill, provider_name_for_skill
 from catalog.llm.log_context import prompt_log_context
 from catalog.skills.apply import apply_skill
-from catalog.skills.repo_run import claim_run, create_run, get_run, set_output_doc_id
+from catalog.skills.repo_run import (
+    cancel_pending_run,
+    claim_run,
+    create_run,
+    get_run,
+    set_output_doc_id,
+)
 from catalog.skills.repo_skill import get_skill
 from catalog.storage.db import Database
 from catalog.storage.repo_document import create_document, get_document
@@ -209,12 +215,14 @@ async def run_stream_ws(websocket: WebSocket, run_id: str) -> None:
 
     skill = get_skill(db, run["skill_id"])
     if skill is None:
+        cancel_pending_run(db, run_id)
         await websocket.send_json({"type": "error", "message": "skill not found"})
         await websocket.close()
         return
 
     input_doc_ids = run["input_doc_ids"]
     if not input_doc_ids:
+        cancel_pending_run(db, run_id)
         await websocket.send_json(
             {"type": "error", "message": "run has no input document"}
         )
@@ -227,6 +235,7 @@ async def run_stream_ws(websocket: WebSocket, run_id: str) -> None:
     else:
         tools = getattr(websocket.app.state, "tools", None)
         if tools is None:
+            cancel_pending_run(db, run_id)
             await websocket.send_json({"type": "error", "message": "workspace not open"})
             await websocket.close()
             return
