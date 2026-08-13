@@ -1,6 +1,6 @@
 from fastapi.testclient import TestClient
 
-from app.main import app
+from catalog.main import app
 
 
 def test_health_ok() -> None:

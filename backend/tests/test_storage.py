@@ -6,13 +6,13 @@ from pathlib import Path
 
 import pytest
 
-from app.documents.extract import extract_text
-from app.documents.ingest import ingest_file
-from app.documents.tools import build_document_tools
-from app.storage.db import Database
-from app.agent.trace import Trace
-from app.skills.repo_run import create_run, finish_run, get_run
-from app.storage.repo_document import (
+from catalog.documents.extract import extract_text
+from catalog.documents.ingest import ingest_file
+from catalog.documents.tools import build_document_tools
+from catalog.storage.db import Database
+from catalog.agent.trace import Trace
+from catalog.skills.repo_run import create_run, finish_run, get_run
+from catalog.storage.repo_document import (
     DocumentRow,
     create_document,
     delete_document,
@@ -21,8 +21,8 @@ from app.storage.repo_document import (
     list_documents_by_kind,
     reconcile_orphans,
 )
-from app.storage.repo_session import create_session
-from app.storage.repo_session_document import (
+from catalog.storage.repo_session import create_session
+from catalog.storage.repo_session_document import (
     attach_documents,
     detach_documents,
     list_session_documents,
@@ -69,18 +69,28 @@ def test_init_schema_is_idempotent(db: Database) -> None:
 
 
 def test_workspace_user_version_set(db: Database) -> None:
-    from app.storage.schema import WORKSPACE_USER_VERSION
+    from catalog.storage.schema import WORKSPACE_USER_VERSION
 
     assert db.user_version() == WORKSPACE_USER_VERSION
 
 
 def test_app_schema_tables() -> None:
-    from app.storage.schema import APP_SCHEMA, APP_USER_VERSION
+    from catalog.storage.schema import (
+        APP_ADDITIVE_MIGRATIONS,
+        APP_SCHEMA,
+        APP_USER_VERSION,
+    )
 
     d = Database(":memory:")
-    d.init_schema(APP_SCHEMA, APP_USER_VERSION, migrations=[])
+    d.init_schema(APP_SCHEMA, APP_USER_VERSION, migrations=APP_ADDITIVE_MIGRATIONS)
     assert {"workspace_registry", "app_settings"} <= _table_names(d)
     assert d.user_version() == APP_USER_VERSION
+    with d.connect() as conn:
+        cols = {
+            row["name"]
+            for row in conn.execute("PRAGMA table_info(app_settings)").fetchall()
+        }
+    assert {"openrouter_api_key", "zai_api_key"} <= cols
 
 
 def test_create_and_get_document(db: Database) -> None:

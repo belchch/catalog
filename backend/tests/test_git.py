@@ -6,7 +6,7 @@ from pathlib import Path
 
 from dulwich.repo import Repo
 
-from app.storage.git import ensure_repo
+from catalog.storage.git import ensure_repo
 
 
 def test_ensure_repo_creates_git_dir(tmp_path: Path) -> None:

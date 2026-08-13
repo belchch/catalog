@@ -1,16 +1,29 @@
 # Catalog — как запустить
 
-Основной способ: **нативно** (Python venv + uvicorn, Node/pnpm). Docker для локальной работы с документами **не используй** — см. раздел в конце.
+Основной способ: **нативно** (Python venv / `uv tool install`, Node/pnpm для разработки UI). Docker для локальной работы с документами **не используй** — см. раздел в конце.
 
 После этих шагов у тебя будут backend, UI и открытая папка-воркспейс с твоими файлами.
 
 ---
 
-## Что нужно один раз
+## Быстрый путь: `uv tool install` (из git)
+
+PyPI пока не используем (имя пакета не зафиксировано). Ставится из репозитория; для сборки wheel нужны **uv**, **Node.js** и **pnpm** (hook собирает фронт в пакет).
+
+```bash
+uv tool install "git+https://github.com/belchch/catalog.git#subdirectory=backend"
+catalog
+```
+
+Команда `catalog` поднимает uvicorn на `127.0.0.1:8000` и открывает браузер. Ключи можно задать через env (`OPENROUTER_API_KEY` / `ZAI_API_KEY`) или позже через API `/setup` (экран первого запуска — отдельный UI-шаг); persist — в глобальной `app.db`, не в `.env` CWD.
+
+---
+
+## Что нужно один раз (dev из исходников)
 
 1. **Python 3.11+** (удобнее 3.13) — https://www.python.org/downloads/
 2. **Node.js** и **pnpm** — https://nodejs.org/ · затем `npm install -g pnpm`
-3. Ключ LLM-провайдера:
+3. Ключ LLM-провайдера (env перекрывает persist):
    - по умолчанию **OpenRouter**: `OPENROUTER_API_KEY` (+ tool-capable `OPENROUTER_DEFAULT_MODEL`);
    - либо **z.ai** (`APP_PROVIDER=zai`, `ZAI_API_KEY`) — см. `backend/.env.example`.
 
@@ -25,7 +38,7 @@ cd backend
 cp .env.example .env
 ```
 
-Открой `backend/.env` и задай минимум:
+Открой `backend/.env` и задай минимум (для CI/dev; в продукте ключи могут жить в app-db):
 
 - `OPENROUTER_API_KEY=...` (или ключ z.ai при `APP_PROVIDER=zai`)
 - `OPENROUTER_DEFAULT_MODEL=...` — модель с function-calling / tool use
@@ -36,7 +49,8 @@ cp .env.example .env
 python3 -m venv .venv
 source .venv/bin/activate          # Windows: .venv\Scripts\activate
 pip install -e ".[dev]"
-uvicorn app.main:app --reload
+uvicorn catalog.main:app --reload
+# или: catalog --no-browser
 ```
 
 Проверка: http://localhost:8000/health

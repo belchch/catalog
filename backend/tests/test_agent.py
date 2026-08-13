@@ -6,7 +6,7 @@ from typing import Any
 
 import pytest
 
-from app.agent.events import (
+from catalog.agent.events import (
     FinishEvent,
     ReasoningEvent,
     StepEvent,
@@ -14,9 +14,9 @@ from app.agent.events import (
     ToolCallEvent,
     ToolResultEvent,
 )
-from app.agent.registry import ToolRegistry
-from app.agent.runner import run_agent, run_agent_collect
-from app.llm.base import (
+from catalog.agent.registry import ToolRegistry
+from catalog.agent.runner import run_agent, run_agent_collect
+from catalog.llm.base import (
     CompletionResult,
     LLMProvider,
     Message,
@@ -509,7 +509,7 @@ def test_serialize_result_truncates_long_payloads() -> None:
     """_serialize_result bounds the LLM history: oversized payloads are
     truncated with a marker so a huge read_document cannot overflow the model
     context, while short payloads (str, dict, list) pass through unchanged."""
-    from app.agent.runner import MAX_TOOL_RESULT_CHARS, _serialize_result
+    from catalog.agent.runner import MAX_TOOL_RESULT_CHARS, _serialize_result
 
     short_str = "hello world"
     assert _serialize_result(short_str) == short_str

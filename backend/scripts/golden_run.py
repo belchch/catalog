@@ -33,20 +33,20 @@ from typing import Any
 
 import httpx
 
-from app.agent.registry import ToolRegistry
-from app.agent.runner import run_agent_collect
-from app.api.skills import build_skill_from_session
-from app.config import Settings
-from app.documents.ingest import ingest_file
-from app.documents.tools import build_document_tools
-from app.llm.base import LLMProvider, Message
-from app.llm.openrouter import OpenRouterProvider
-from app.skills.apply import apply_skill_collect
-from app.skills.repo_skill import get_skill, update_status
-from app.storage.db import Database
-from app.storage.repo_message import add_message
-from app.storage.repo_session import create_session
-from app.storage.repo_session_document import attach_documents
+from catalog.agent.registry import ToolRegistry
+from catalog.agent.runner import run_agent_collect
+from catalog.api.skills import build_skill_from_session
+from catalog.config import Settings
+from catalog.documents.ingest import ingest_file
+from catalog.documents.tools import build_document_tools
+from catalog.llm.base import LLMProvider, Message
+from catalog.llm.openrouter import OpenRouterProvider
+from catalog.skills.apply import apply_skill_collect
+from catalog.skills.repo_skill import get_skill, update_status
+from catalog.storage.db import Database
+from catalog.storage.repo_message import add_message
+from catalog.storage.repo_session import create_session
+from catalog.storage.repo_session_document import attach_documents
 
 # Repo root = two parents up from backend/scripts/golden_run.py.
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -185,7 +185,7 @@ async def run_golden(
 async def main() -> int:
     """Wire the real provider from the environment and run the golden path."""
     # Imported lazily so unit tests importing run_golden don't require env.
-    from app.config import (
+    from catalog.config import (
         OPENROUTER_API_KEY,
         OPENROUTER_BASE_URL,
         OPENROUTER_DEFAULT_MODEL,

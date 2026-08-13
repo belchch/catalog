@@ -14,9 +14,9 @@ from __future__ import annotations
 
 import pytest
 
-from app.api.sessions import PLANNER_SYSTEM_PROMPT
-from app.api.skills import BUILD_SKILL_SYSTEM_PROMPT, _BUILD_SKILL_PARAMETERS
-from app.skills.script_runner import (
+from catalog.api.sessions import PLANNER_SYSTEM_PROMPT
+from catalog.api.skills import BUILD_SKILL_SYSTEM_PROMPT, _BUILD_SKILL_PARAMETERS
+from catalog.skills.script_runner import (
     SCRIPT_CODE_CONTRACT_EN,
     SCRIPT_CODE_CONTRACT_RU,
     ScriptRuntimeError,

@@ -7,7 +7,7 @@ from typing import Any
 
 import docx
 
-from app.llm.base import (
+from catalog.llm.base import (
     CompletionResult,
     LLMProvider,
     Message,
@@ -16,7 +16,7 @@ from app.llm.base import (
     ToolCall,
     ToolSpec,
 )
-from app.storage.db import Database
+from catalog.storage.db import Database
 from scripts.golden_run import run_golden
 
 

@@ -11,15 +11,15 @@ import asyncio
 import json
 from pathlib import Path
 
-from app.documents.tools import build_document_tools
-from app.llm.base import CompletionResult, ToolCall
+from catalog.documents.tools import build_document_tools
+from catalog.llm.base import CompletionResult, ToolCall
 
-from app.skills.config import SkillConfig, VerifyCheck, compute_tags
-from app.skills.repo_skill import create_skill, get_skill, update_status
-from app.storage.repo_document import get_document
-from app.storage.repo_message import add_message, list_messages
-from app.storage.repo_session import get_session
-from app.storage.repo_session_document import attach_documents, list_session_documents
+from catalog.skills.config import SkillConfig, VerifyCheck, compute_tags
+from catalog.skills.repo_skill import create_skill, get_skill, update_status
+from catalog.storage.repo_document import get_document
+from catalog.storage.repo_message import add_message, list_messages
+from catalog.storage.repo_session import get_session
+from catalog.storage.repo_session_document import attach_documents, list_session_documents
 
 
 def _completion(
@@ -207,7 +207,7 @@ _FIXTURES = Path(__file__).parent / "fixtures"
 
 
 def test_extract_csv() -> None:
-    from app.documents.extract import extract_text
+    from catalog.documents.extract import extract_text
 
     text = extract_text(str(_FIXTURES / "sample.csv"), "csv")
     assert "name,city,score" in text
@@ -216,7 +216,7 @@ def test_extract_csv() -> None:
 
 
 def test_extract_csv_cp1251_fallback(tmp_path) -> None:
-    from app.documents.extract import extract_text
+    from catalog.documents.extract import extract_text
 
     cp1251_bytes = "name,city\nAnna,Тверь\n".encode("cp1251")
     p = tmp_path / "win.csv"
@@ -226,7 +226,7 @@ def test_extract_csv_cp1251_fallback(tmp_path) -> None:
 
 
 def test_extract_csv_utf8_bom(tmp_path) -> None:
-    from app.documents.extract import extract_text
+    from catalog.documents.extract import extract_text
 
     p = tmp_path / "bom.csv"
     p.write_bytes("\ufeffname,city\nAnna,Moscow\n".encode("utf-8"))
@@ -236,7 +236,7 @@ def test_extract_csv_utf8_bom(tmp_path) -> None:
 
 
 def test_extract_xlsx() -> None:
-    from app.documents.extract import extract_text
+    from catalog.documents.extract import extract_text
 
     text = extract_text(str(_FIXTURES / "sample.xlsx"), "xlsx")
     assert "## Sheet: Data" in text
@@ -249,7 +249,7 @@ def test_extract_xlsx() -> None:
 
 def test_extract_xlsx_escapes_pipes_and_newlines(tmp_path) -> None:
     import openpyxl
-    from app.documents.extract import extract_text
+    from catalog.documents.extract import extract_text
 
     wb = openpyxl.Workbook()
     ws = wb.active
@@ -267,7 +267,7 @@ def test_extract_xlsx_escapes_pipes_and_newlines(tmp_path) -> None:
 
 
 def test_extract_pdf() -> None:
-    from app.documents.extract import extract_text
+    from catalog.documents.extract import extract_text
 
     text = extract_text(str(_FIXTURES / "sample-text.pdf"), "pdf")
     assert "--- page 1 ---" in text
@@ -277,7 +277,7 @@ def test_extract_pdf() -> None:
 
 
 def test_extract_pdf_scan_returns_warning() -> None:
-    from app.documents.extract import extract_text
+    from catalog.documents.extract import extract_text
 
     text = extract_text(str(_FIXTURES / "sample-scan.pdf"), "pdf")
     assert "no extractable text" in text.lower()
@@ -287,7 +287,7 @@ def test_extract_pdf_scan_returns_warning() -> None:
 def test_delete_document(client, db) -> None:
     from pathlib import Path
 
-    from app.storage.repo_document import get_document
+    from catalog.storage.repo_document import get_document
 
     uploaded = client.post(
         "/documents", files={"file": ("note.md", b"# Title\n", "text/markdown")}
@@ -311,7 +311,7 @@ def test_delete_document(client, db) -> None:
 def test_list_documents_does_not_auto_scan(client, db) -> None:
     from pathlib import Path
 
-    from app.storage.repo_document import get_document
+    from catalog.storage.repo_document import get_document
 
     kept_id = _upload(client, "keep.md", b"keep")
     orphan_id = _upload(client, "gone.md", b"gone")
@@ -330,7 +330,7 @@ def test_list_documents_does_not_auto_scan(client, db) -> None:
 def test_reconcile_documents_endpoint(client, db) -> None:
     from pathlib import Path
 
-    from app.storage.repo_document import get_document
+    from catalog.storage.repo_document import get_document
 
     orphan_id = _upload(client, "gone.md", b"gone")
     orphan = get_document(db, orphan_id)
@@ -346,7 +346,7 @@ def test_reconcile_documents_endpoint(client, db) -> None:
 def test_workspaces_rescan_endpoint(client, db) -> None:
     from pathlib import Path
 
-    from app.storage.repo_document import get_document
+    from catalog.storage.repo_document import get_document
 
     workspace = Path(client.app.state.workspace)
     (workspace / "nested").mkdir()
@@ -552,7 +552,7 @@ def test_session_reopen_get_documents_restores_composition(client, db) -> None:
 
 def test_parse_suggestions_extracts_and_strips() -> None:
     """parse_suggestions pulls items out and removes the block (CATALOG-13)."""
-    from app.api.sessions import parse_suggestions
+    from catalog.api.sessions import parse_suggestions
 
     text = "Вот план.\n\n<suggestions>Шаг 1 | Шаг 2 | Шаг 3</suggestions>"
     clean, items = parse_suggestions(text)
@@ -562,7 +562,7 @@ def test_parse_suggestions_extracts_and_strips() -> None:
 
 def test_parse_suggestions_no_block_unchanged() -> None:
     """Without a block the text is returned as-is with an empty list."""
-    from app.api.sessions import parse_suggestions
+    from catalog.api.sessions import parse_suggestions
 
     text = "Просто ответ без подсказок."
     clean, items = parse_suggestions(text)
@@ -572,7 +572,7 @@ def test_parse_suggestions_no_block_unchanged() -> None:
 
 def test_parse_suggestions_empty_items() -> None:
     """A block with only separators yields no items and is still stripped."""
-    from app.api.sessions import parse_suggestions
+    from catalog.api.sessions import parse_suggestions
 
     clean, items = parse_suggestions("Ответ.\n<suggestions>  |  |  </suggestions>")
     assert items == []
@@ -641,7 +641,7 @@ def test_planner_uses_active_model(client, provider, db) -> None:
 
 def test_ws_session_idle_keepalive(client, monkeypatch) -> None:
     """Idle planner WS emits ping frames before the typical ~5 min proxy timeout (CATALOG-23)."""
-    import app.api.sessions as sessions_mod
+    import catalog.api.sessions as sessions_mod
 
     monkeypatch.setattr(sessions_mod, "WS_KEEPALIVE_INTERVAL_S", 0.05)
     session_id = client.post("/sessions").json()["id"]
@@ -1006,7 +1006,7 @@ def test_rename_skill_rejects_empty_name(client, provider, db) -> None:
 
 def test_list_models_endpoint(client, provider, monkeypatch) -> None:
     """GET /models returns the active provider catalog with reasoning info."""
-    from app.llm.base import ModelInfo
+    from catalog.llm.base import ModelInfo
 
     async def _models() -> list[ModelInfo]:
         return [
@@ -1041,7 +1041,7 @@ def test_list_providers_endpoint(client) -> None:
 
 def test_provider_for_skill_resolves_pinned_provider() -> None:
     """A skill's pinned provider is used at apply; unknown/empty falls back (CATALOG-6)."""
-    from app.llm.factory import provider_for_skill
+    from catalog.llm.factory import provider_for_skill
 
     active = object()
     zai = object()
@@ -1102,7 +1102,7 @@ def test_update_settings_switches_active_provider(client) -> None:
 
 def test_provider_models_endpoint(client, monkeypatch) -> None:
     """GET /providers/{id}/models lists a specific provider's catalog (CATALOG-14)."""
-    from app.llm.base import ModelInfo
+    from catalog.llm.base import ModelInfo
 
     class _FakeProv:
         async def list_models(self) -> list[ModelInfo]:
@@ -1154,7 +1154,7 @@ def test_build_agent_skill_empty_allowed_tools_adds_read_document(
 
 
 def test_build_skill_timeout_returns_504(client, provider, db) -> None:
-    from app.llm.timeout import LLMTimeoutError
+    from catalog.llm.timeout import LLMTimeoutError
 
     session_id = client.post("/sessions").json()["id"]
     add_message(db, session_id=session_id, role="user", content="make a skill")
@@ -1353,7 +1353,7 @@ def test_delete_draft_skill(client, db) -> None:
 
 
 def test_delete_committed_skill_cascades_runs(client, db) -> None:
-    from app.skills.repo_run import create_run, get_run
+    from catalog.skills.repo_run import create_run, get_run
 
     skill_id = _seed_committed_skill(db, name="CommittedToDelete")
     doc_id = _upload(client, "in.md", b"body")
@@ -1860,7 +1860,7 @@ def test_apply_persist_attaches_output_to_session_via_api(
     assert finish["status"] == "ok"
     assert finish["output_doc_id"] is not None
 
-    from app.skills.repo_run import get_run
+    from catalog.skills.repo_run import get_run
 
     assert get_run(db, run_id)["session_id"] == session_id
     session_docs = list_session_documents(db, session_id)

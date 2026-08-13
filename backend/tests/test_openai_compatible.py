@@ -18,8 +18,8 @@ import json
 import httpx
 import pytest
 
-from app.llm.base import Message, StreamDelta, ToolSpec
-from app.llm.openai_compatible import OpenAICompatibleProvider
+from catalog.llm.base import Message, StreamDelta, ToolSpec
+from catalog.llm.openai_compatible import OpenAICompatibleProvider
 
 BASE = "https://example.test/api/v1"
 API_KEY = "test-key-123"
@@ -324,7 +324,7 @@ def test_stream_401_raises_provider_error() -> None:
 def test_complete_logs_provider_base_url_and_url(caplog: pytest.LogCaptureFixture) -> None:
     async def _run() -> None:
         provider = _make_provider(_handler_complete_with_reasoning)
-        with caplog.at_level("INFO", logger="app.llm"):
+        with caplog.at_level("INFO", logger="catalog.llm"):
             await provider.complete(
                 model="m",
                 messages=[Message(role="user", content="What is the answer?")],
@@ -352,7 +352,7 @@ def test_list_models_logs_provider_and_base_url(caplog: pytest.LogCaptureFixture
 
     async def _run() -> None:
         provider = _make_provider(handler)
-        with caplog.at_level("INFO", logger="app.llm"):
+        with caplog.at_level("INFO", logger="catalog.llm"):
             models = await provider.list_models()
         assert len(models) == 1
 
@@ -371,7 +371,7 @@ def test_http_error_logs_url(caplog: pytest.LogCaptureFixture) -> None:
 
     async def _run() -> None:
         provider = _make_provider(handler, max_retries=0)
-        with caplog.at_level("WARNING", logger="app.llm"):
+        with caplog.at_level("WARNING", logger="catalog.llm"):
             with pytest.raises(RuntimeError, match="bad model"):
                 await provider.complete(
                     model="m", messages=[Message(role="user", content="hi")]

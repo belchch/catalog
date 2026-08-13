@@ -13,8 +13,8 @@ import json
 
 import httpx
 
-from app.llm.base import Message
-from app.llm.zai import DEFAULT_ZAI_MODEL, ZaiProvider
+from catalog.llm.base import Message
+from catalog.llm.zai import DEFAULT_ZAI_MODEL, ZaiProvider
 
 BASE = "https://api.z.ai/api/paas/v4"
 API_KEY = "zai-jwt-token"

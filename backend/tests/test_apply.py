@@ -6,7 +6,7 @@ from typing import Any
 
 import pytest
 
-from app.agent.events import (
+from catalog.agent.events import (
     FinishEvent,
     ReasoningEvent,
     RunMetaEvent,
@@ -14,11 +14,11 @@ from app.agent.events import (
     StepEvent,
     VerifyEvent,
 )
-from app.agent.registry import ToolRegistry
-from app.documents.ingest import ingest_file
-from app.documents.tools import build_document_tools
-from app.storage.repo_document import get_document
-from app.llm.base import (
+from catalog.agent.registry import ToolRegistry
+from catalog.documents.ingest import ingest_file
+from catalog.documents.tools import build_document_tools
+from catalog.storage.repo_document import get_document
+from catalog.llm.base import (
     CompletionResult,
     LLMProvider,
     Message,
@@ -26,13 +26,13 @@ from app.llm.base import (
     StreamDelta,
     ToolSpec,
 )
-from app.skills.apply import apply_skill, apply_skill_collect
-from app.skills.config import SkillConfig, VerifyCheck
-from app.skills.repo_run import get_run
-from app.skills.repo_skill import create_skill, get_skill
-from app.storage.db import Database
-from app.storage.repo_session import create_session
-from app.storage.repo_session_document import list_session_documents
+from catalog.skills.apply import apply_skill, apply_skill_collect
+from catalog.skills.config import SkillConfig, VerifyCheck
+from catalog.skills.repo_run import get_run
+from catalog.skills.repo_skill import create_skill, get_skill
+from catalog.storage.db import Database
+from catalog.storage.repo_session import create_session
+from catalog.storage.repo_session_document import list_session_documents
 
 
 # --------------------------------------------------------------------------- #

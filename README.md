@@ -44,14 +44,14 @@ Catalog/
 
 ## Быстрый старт (после инициализации)
 ```bash
-# env (backend): скопируй шаблон и впиши ключи
+# env (backend): скопируй шаблон и впиши ключи (env перекрывает persist в app.db)
 cd backend
 cp .env.example .env
-#   OPENROUTER_API_KEY=...        # обязательный ключ OpenRouter
+#   OPENROUTER_API_KEY=...        # ключ OpenRouter (или задай через /setup)
 #   OPENROUTER_DEFAULT_MODEL=...   # tool-capable модель (см. ниже)
 python3 -m venv .venv && source .venv/bin/activate
 pip install -e ".[dev]"
-uvicorn app.main:app --reload      # http://localhost:8000/health
+uvicorn catalog.main:app --reload  # http://localhost:8000/health
 
 # frontend
 cd frontend
@@ -59,7 +59,14 @@ pnpm install
 pnpm run dev                       # http://localhost:5173
 ```
 
-> `OPENROUTER_DEFAULT_MODEL` должна уметь в function-calling (tool use) — иначе агент не сможет вызывать инструменты. Для работы с дефолтной модели нужен tool-capable вариант; fallback-модель зашита в `app/config.py`.
+Установка без клона (wheel из git, нужен Node/pnpm на машине сборки):
+
+```bash
+uv tool install "git+https://github.com/belchch/catalog.git#subdirectory=backend"
+catalog
+```
+
+> `OPENROUTER_DEFAULT_MODEL` должна уметь в function-calling (tool use) — иначе агент не сможет вызывать инструменты. Для работы с дефолтной модели нужен tool-capable вариант; fallback-модель зашита в `catalog/config.py`.
 
 Полный пользовательский сценарий (env → backend → frontend → открытие папки) — в `README-RUN.md`. Docker для локальной работы с документами не используй.
 
@@ -75,7 +82,7 @@ python scripts/golden_run.py
 - Новый инструмент/проверка → регистрируем в реестре + запись в `docs/verification-checks.md`.
 - Значимое архитектурное решение → новый ADR + строка в `docs/adr/README.md`.
 - Произвольная кодогенерация `.py` — вне среза (инструменты только из реестра); sandbox — позже.
-- Ключ `OPENROUTER_API_KEY` — только в `.env` (в `.gitignore`), никогда в коде/коммитах.
+- Ключи LLM — только в env / persist (app.db через `/setup`), никогда в коде/коммитах.
 
 ## Новому ИИ-агенту (onboarding)
 1. Прочитай этот README целиком.

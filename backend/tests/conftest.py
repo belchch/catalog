@@ -26,8 +26,8 @@ from typing import Any
 import pytest
 from fastapi.testclient import TestClient
 
-from app.config import Settings
-from app.llm.base import (
+from catalog.config import Settings
+from catalog.llm.base import (
     CompletionResult,
     LLMProvider,
     Message,
@@ -35,9 +35,9 @@ from app.llm.base import (
     StreamDelta,
     ToolSpec,
 )
-from app.main import app
-from app.storage.db import Database
-from app.storage.workspace import WorkspaceManager
+from catalog.main import app
+from catalog.storage.db import Database
+from catalog.storage.workspace import WorkspaceManager
 
 
 class FakeProvider:
@@ -122,7 +122,7 @@ def provider() -> FakeProvider:
 def client(
     settings: Settings, provider: FakeProvider, monkeypatch: pytest.MonkeyPatch
 ) -> Iterator[TestClient]:
-    monkeypatch.setattr("app.main.get_settings", lambda: settings)
+    monkeypatch.setattr("catalog.main.get_settings", lambda: settings)
     with TestClient(app) as c:
         c.app.state.provider = provider
         open_workspace(c, Path(settings.workspace_dir), confirm_init=True)
@@ -133,7 +133,7 @@ def client(
 def client_no_workspace(
     settings: Settings, provider: FakeProvider, monkeypatch: pytest.MonkeyPatch
 ) -> Iterator[TestClient]:
-    monkeypatch.setattr("app.main.get_settings", lambda: settings)
+    monkeypatch.setattr("catalog.main.get_settings", lambda: settings)
     with TestClient(app) as c:
         c.app.state.provider = provider
         yield c

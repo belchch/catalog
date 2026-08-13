@@ -1,15 +1,15 @@
 from __future__ import annotations
 
-from app.api.skills import (
+from catalog.api.skills import (
     BUILD_SKILL_SYSTEM_PROMPT,
     PROPOSE_SKILL_TRACKS_SYSTEM_PROMPT,
     TRACK_INTENT_PREFIX,
     _ASSISTANT_JOURNAL_MARK,
     _USER_INTENT_MARK,
 )
-from app.llm.base import CompletionResult, ToolCall
-from app.skills.repo_skill import get_skill
-from app.storage.repo_message import add_message, list_messages
+from catalog.llm.base import CompletionResult, ToolCall
+from catalog.skills.repo_skill import get_skill
+from catalog.storage.repo_message import add_message, list_messages
 
 
 def _completion(
@@ -160,8 +160,8 @@ def test_propose_skill_tracks_invalid_then_fallback(client, provider, db) -> Non
 
 
 def test_propose_skill_tracks_edit_session_skipped(client, db) -> None:
-    from app.skills.config import SkillConfig
-    from app.skills.repo_skill import create_skill
+    from catalog.skills.config import SkillConfig
+    from catalog.skills.repo_skill import create_skill
 
     sid = create_skill(
         db,
@@ -210,8 +210,8 @@ def test_select_skill_track_appends_user_message_without_planner(
 
 
 def test_select_skill_track_edit_session_rejected(client, db) -> None:
-    from app.skills.config import SkillConfig
-    from app.skills.repo_skill import create_skill
+    from catalog.skills.config import SkillConfig
+    from catalog.skills.repo_skill import create_skill
 
     sid = create_skill(
         db,

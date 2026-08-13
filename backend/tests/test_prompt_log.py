@@ -14,11 +14,11 @@ from pathlib import Path
 import httpx
 import pytest
 
-from app import config
-from app.llm.base import Message, ToolSpec
-from app.llm.log_context import prompt_log_context
-from app.llm.openrouter import OpenRouterProvider
-from app.llm.prompt_log import write_prompt_log
+from catalog import config
+from catalog.llm.base import Message, ToolSpec
+from catalog.llm.log_context import prompt_log_context
+from catalog.llm.openrouter import OpenRouterProvider
+from catalog.llm.prompt_log import write_prompt_log
 
 
 @pytest.fixture
@@ -207,7 +207,7 @@ def test_write_failure_swallowed(
     def _boom(src: str, dst: str) -> None:
         raise OSError("disk full")
 
-    monkeypatch.setattr("app.llm.prompt_log.os.replace", _boom)
+    monkeypatch.setattr("catalog.llm.prompt_log.os.replace", _boom)
 
     async def _run() -> None:
         # Must not raise.

@@ -14,8 +14,8 @@ from pathlib import Path
 
 import pytest
 
-from app.config import get_settings
-from app.storage.paths import os_default_data_dir, resolve_data_dir
+from catalog.config import get_settings
+from catalog.storage.paths import os_default_data_dir, resolve_data_dir
 
 _DATA_ROOT_ENV_VARS = ("APP_DATA_DIR", "APP_WORKSPACE", "APP_DB_PATH", "PROMPT_LOG_DIR")
 

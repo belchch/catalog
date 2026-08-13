@@ -6,14 +6,14 @@ import sys
 
 import httpx
 
-from app.config import (
+from catalog.config import (
     OPENROUTER_API_KEY,
     OPENROUTER_BASE_URL,
     OPENROUTER_DEFAULT_MODEL,
     OPENROUTER_FALLBACK_MODEL,
 )
-from app.llm import Message, OpenRouterProvider, ToolSpec
-from app.llm.openrouter import build_debug_hooks
+from catalog.llm import Message, OpenRouterProvider, ToolSpec
+from catalog.llm.openrouter import build_debug_hooks
 
 logging.basicConfig(level=logging.DEBUG, format="%(levelname)s %(name)s %(message)s")
 logger = logging.getLogger("smoke")

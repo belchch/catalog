@@ -17,7 +17,7 @@ from typing import Any
 
 import pytest
 
-from app.agent.events import (
+from catalog.agent.events import (
     FinishEvent,
     ReasoningEvent,
     RunMetaEvent,
@@ -28,12 +28,12 @@ from app.agent.events import (
     ToolResultEvent,
     VerifyEvent,
 )
-from app.agent.logging import _trunc, log_agent_event
-from app.agent.registry import ToolRegistry
-from app.agent.runner import run_agent, run_agent_collect
-from app.documents.ingest import ingest_file
-from app.documents.tools import build_document_tools
-from app.llm.base import (
+from catalog.agent.logging import _trunc, log_agent_event
+from catalog.agent.registry import ToolRegistry
+from catalog.agent.runner import run_agent, run_agent_collect
+from catalog.documents.ingest import ingest_file
+from catalog.documents.tools import build_document_tools
+from catalog.llm.base import (
     CompletionResult,
     LLMProvider,
     Message,
@@ -42,12 +42,12 @@ from app.llm.base import (
     ToolCall,
     ToolSpec,
 )
-from app.logging_config import AppFormatter, ContextFilter
-from app.llm.log_context import prompt_log_context
-from app.skills.apply import apply_skill_collect
-from app.skills.config import SkillConfig, VerifyCheck
-from app.skills.repo_skill import create_skill
-from app.storage.db import Database
+from catalog.logging_config import AppFormatter, ContextFilter
+from catalog.llm.log_context import prompt_log_context
+from catalog.skills.apply import apply_skill_collect
+from catalog.skills.config import SkillConfig, VerifyCheck
+from catalog.skills.repo_skill import create_skill
+from catalog.storage.db import Database
 
 _ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
 
@@ -286,7 +286,7 @@ def test_apply_logging(
 def test_context_filter_formats_context() -> None:
     """ContextFilter renders bound contextvars into a compact record.ctx."""
     record = logging.LogRecord(
-        name="app.test",
+        name="catalog.test",
         level=logging.INFO,
         pathname=__file__,
         lineno=1,
@@ -304,7 +304,7 @@ def test_context_filter_formats_context() -> None:
     # A long run_id is truncated to its first 8 chars in the tag; the full id
     # stays only in the trace / prompt-log / DB.
     long_record = logging.LogRecord(
-        name="app.test",
+        name="catalog.test",
         level=logging.INFO,
         pathname=__file__,
         lineno=1,
@@ -322,7 +322,7 @@ def test_context_filter_formats_context() -> None:
 def test_context_filter_empty_when_no_context() -> None:
     """With nothing bound, record.ctx is an empty string (tag is omitted)."""
     record = logging.LogRecord(
-        name="app.test",
+        name="catalog.test",
         level=logging.INFO,
         pathname=__file__,
         lineno=1,
@@ -390,7 +390,7 @@ def test_formatter_renders_uvicorn_prefix_and_context() -> None:
 
     # With a bound context → compact tag present; no timestamp / logger name.
     with_ctx = logging.LogRecord(
-        name="app.test",
+        name="catalog.test",
         level=logging.INFO,
         pathname=__file__,
         lineno=1,
@@ -404,11 +404,11 @@ def test_formatter_renders_uvicorn_prefix_and_context() -> None:
     assert rendered.startswith("INFO:")  # uvicorn level prefix (stable part)
     assert "[run=R1 purpose=apply_skill]" in rendered
     assert rendered.endswith("hello")
-    assert "app.test" not in rendered  # no logger name
+    assert "catalog.test" not in rendered  # no logger name
 
     # Without context → no tag at all, still prefix-aligned.
     no_ctx = logging.LogRecord(
-        name="app.test",
+        name="catalog.test",
         level=logging.INFO,
         pathname=__file__,
         lineno=1,
@@ -447,7 +447,7 @@ def test_log_agent_event_handles_all_event_types(caplog: pytest.LogCaptureFixtur
     """
     caplog.set_level(logging.INFO, logger="app")
 
-    from app.skills.verify import VerifyResult
+    from catalog.skills.verify import VerifyResult
 
     log_agent_event(StepEvent(1))
     log_agent_event(ToolCallEvent("id", "read_doc", {"path": "a"}))

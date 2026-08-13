@@ -5,16 +5,16 @@ from pathlib import Path
 
 import pytest
 
-from app.documents.ingest import ingest_file
-from app.documents.tools import build_document_tools
-from app.llm.base import CompletionResult, Message, ModelInfo, StreamDelta, ToolSpec
-from app.skills.apply import apply_skill_collect
-from app.skills.config import SkillConfig, VerifyCheck
-from app.skills.repo_skill import create_skill
-from app.storage.db import Database
-from app.storage.repo_document import get_document, list_documents
-from app.storage.repo_session import create_session
-from app.storage.repo_session_document import (
+from catalog.documents.ingest import ingest_file
+from catalog.documents.tools import build_document_tools
+from catalog.llm.base import CompletionResult, Message, ModelInfo, StreamDelta, ToolSpec
+from catalog.skills.apply import apply_skill_collect
+from catalog.skills.config import SkillConfig, VerifyCheck
+from catalog.skills.repo_skill import create_skill
+from catalog.storage.db import Database
+from catalog.storage.repo_document import get_document, list_documents
+from catalog.storage.repo_session import create_session
+from catalog.storage.repo_session_document import (
     attach_documents,
     detach_documents,
     list_session_documents,

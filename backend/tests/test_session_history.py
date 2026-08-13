@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import time
 
-from app.storage.repo_message import add_message, list_messages
-from app.storage.repo_session import create_session, get_session, list_sessions
+from catalog.storage.repo_message import add_message, list_messages
+from catalog.storage.repo_session import create_session, get_session, list_sessions
 
 
 def test_list_get_delete_sessions(client, db) -> None:

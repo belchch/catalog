@@ -2,18 +2,18 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from app.documents.ingest import ingest_file
-from app.documents.scan import scan_workspace
-from app.storage.db import Database
-from app.storage.repo_document import get_document
-from app.storage.repo_session import create_session
-from app.storage.repo_session_document import attach_documents, list_session_documents
-from app.storage.schema import (
+from catalog.documents.ingest import ingest_file
+from catalog.documents.scan import scan_workspace
+from catalog.storage.db import Database
+from catalog.storage.repo_document import get_document
+from catalog.storage.repo_session import create_session
+from catalog.storage.repo_session_document import attach_documents, list_session_documents
+from catalog.storage.schema import (
     APP_SCHEMA,
     APP_USER_VERSION,
     WORKSPACE_USER_VERSION,
 )
-from app.storage.workspace import WorkspaceManager
+from catalog.storage.workspace import WorkspaceManager
 
 
 def test_scan_indexes_nested_and_skips(db: Database, tmp_path: Path) -> None:

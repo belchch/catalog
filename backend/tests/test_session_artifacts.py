@@ -5,14 +5,14 @@ import json
 
 import pytest
 
-from app.llm.base import CompletionResult, ToolCall
-from app.skills.artifact_tools import build_artifact_tools
-from app.skills.config import SkillConfig, VerifyCheck
-from app.skills.repo_skill import create_skill, get_skill
-from app.storage.db import Database
-from app.storage.repo_message import list_messages
-from app.storage.repo_session import create_session
-from app.storage.repo_session_artifact import (
+from catalog.llm.base import CompletionResult, ToolCall
+from catalog.skills.artifact_tools import build_artifact_tools
+from catalog.skills.config import SkillConfig, VerifyCheck
+from catalog.skills.repo_skill import create_skill, get_skill
+from catalog.storage.db import Database
+from catalog.storage.repo_message import list_messages
+from catalog.storage.repo_session import create_session
+from catalog.storage.repo_session_artifact import (
     delete_artifact,
     get_artifact,
     list_artifacts,
@@ -395,7 +395,7 @@ def test_build_missing_prompt_returns_422(client, db) -> None:
 
 
 def test_build_fallback_llm_when_no_artifacts(client, provider, db) -> None:
-    from app.llm.base import CompletionResult, ToolCall
+    from catalog.llm.base import CompletionResult, ToolCall
 
     session_id = client.post("/sessions").json()["id"]
     assert list_artifacts(db, session_id) == []

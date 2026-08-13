@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from app.skills.config import VerifyCheck
-from app.skills.verify import VerifyResult, run_verify
+from catalog.skills.config import VerifyCheck
+from catalog.skills.verify import VerifyResult, run_verify
 
 
 def _vc(check: str, **params: object) -> VerifyCheck:

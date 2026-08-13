@@ -4,13 +4,13 @@ from pathlib import Path
 
 import pytest
 
-from app.storage.db import Database
-from app.storage.schema import (
+from catalog.storage.db import Database
+from catalog.storage.schema import (
     APP_SCHEMA,
     APP_USER_VERSION,
     WORKSPACE_USER_VERSION,
 )
-from app.storage.workspace import (
+from catalog.storage.workspace import (
     WorkspaceBusyError,
     WorkspaceManager,
     WorkspaceValidationError,

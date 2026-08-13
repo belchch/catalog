@@ -12,6 +12,9 @@ node_modules/
 dist/
 .vite/
 
+# Packaged SPA assets (copied into the wheel by the backend build hook)
+backend/catalog/static/
+
 # Env
 .env
 .env.*

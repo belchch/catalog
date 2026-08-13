@@ -2,10 +2,10 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from app.storage.db import Database
-from app.storage.repo_session_document import attach_documents, list_session_documents
-from app.storage.schema import WORKSPACE_USER_VERSION
-from app.storage.workspace import WorkspaceManager
+from catalog.storage.db import Database
+from catalog.storage.repo_session_document import attach_documents, list_session_documents
+from catalog.storage.schema import WORKSPACE_USER_VERSION
+from catalog.storage.workspace import WorkspaceManager
 
 
 def test_list_and_current_without_open(client_no_workspace) -> None:

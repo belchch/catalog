@@ -183,10 +183,17 @@ export interface HealthOut {
 
 const envUrl: string | undefined = import.meta.env.VITE_API_URL
 export const API_URL: string =
-  envUrl && envUrl.length > 0 ? envUrl : 'http://localhost:8000'
+  envUrl === undefined
+    ? import.meta.env.DEV
+      ? 'http://localhost:8000'
+      : ''
+    : envUrl
 
-/** WebSocket base URL derived from the API base (http -> ws, https -> wss). */
 export function wsBaseUrl(): string {
+  if (!API_URL) {
+    const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
+    return `${proto}//${window.location.host}`
+  }
   return API_URL.replace(/^http/, 'ws')
 }
 

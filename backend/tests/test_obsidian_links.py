@@ -6,19 +6,19 @@ from typing import Any
 
 import pytest
 
-from app.documents.ingest import ingest_file
-from app.documents.obsidian import (
+from catalog.documents.ingest import ingest_file
+from catalog.documents.obsidian import (
     build_title_to_stem_map,
     ensure_parent_wikilinks,
     rewrite_wiki_links,
 )
-from app.documents.tools import build_document_tools
-from app.llm.base import CompletionResult, Message, ModelInfo, StreamDelta, ToolSpec
-from app.skills.apply import apply_skill_collect
-from app.skills.config import SkillConfig, VerifyCheck
-from app.skills.repo_skill import create_skill
-from app.storage.db import Database
-from app.storage.repo_document import create_document, get_document
+from catalog.documents.tools import build_document_tools
+from catalog.llm.base import CompletionResult, Message, ModelInfo, StreamDelta, ToolSpec
+from catalog.skills.apply import apply_skill_collect
+from catalog.skills.config import SkillConfig, VerifyCheck
+from catalog.skills.repo_skill import create_skill
+from catalog.storage.db import Database
+from catalog.storage.repo_document import create_document, get_document
 
 
 class ScriptProvider:

@@ -7,8 +7,8 @@ import time
 import httpx
 import pytest
 
-from app.llm.base import Message, ToolSpec
-from app.llm.openrouter import OpenRouterProvider
+from catalog.llm.base import Message, ToolSpec
+from catalog.llm.openrouter import OpenRouterProvider
 
 BASE = "https://openrouter.ai/api/v1"
 API_KEY = "test-key-123"
@@ -290,7 +290,7 @@ def test_complete_retries_on_timeout() -> None:
 
 
 def test_complete_exhausted_timeout_raises_llm_timeout_error() -> None:
-    from app.llm.timeout import LLMTimeoutError, llm_timeout_context
+    from catalog.llm.timeout import LLMTimeoutError, llm_timeout_context
 
     async def _run() -> None:
         calls = {"n": 0}
@@ -313,7 +313,7 @@ def test_complete_exhausted_timeout_raises_llm_timeout_error() -> None:
 
 
 def test_complete_timeout_is_wall_clock_across_retries() -> None:
-    from app.llm.timeout import LLMTimeoutError, llm_timeout_context
+    from catalog.llm.timeout import LLMTimeoutError, llm_timeout_context
 
     async def _run() -> None:
         calls = {"n": 0}
@@ -340,7 +340,7 @@ def test_complete_timeout_is_wall_clock_across_retries() -> None:
 
 
 def test_complete_timeout_budget_shared_across_calls() -> None:
-    from app.llm.timeout import LLMTimeoutError, llm_timeout_context
+    from catalog.llm.timeout import LLMTimeoutError, llm_timeout_context
 
     async def _run() -> None:
         calls = {"n": 0}
@@ -371,7 +371,7 @@ def test_complete_timeout_budget_shared_across_calls() -> None:
 
 
 def test_complete_uses_session_timeout_override() -> None:
-    from app.llm.timeout import llm_timeout_context
+    from catalog.llm.timeout import llm_timeout_context
 
     async def _run() -> None:
         seen: dict[str, object] = {}
