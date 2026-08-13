@@ -85,7 +85,7 @@ class WorkspaceManager:
             )
         db = Database(str(index))
         version = db.user_version()
-        if version != WORKSPACE_USER_VERSION:
+        if version > WORKSPACE_USER_VERSION:
             raise WorkspaceValidationError(
                 f"incompatible workspace schema version: got {version}, "
                 f"expected {WORKSPACE_USER_VERSION}"

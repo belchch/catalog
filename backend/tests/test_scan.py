@@ -41,6 +41,19 @@ def test_scan_indexes_nested_and_skips(db: Database, tmp_path: Path) -> None:
     assert again.removed == []
 
 
+def test_scan_does_not_delete_hidden_indexed_file(db: Database, tmp_path: Path) -> None:
+    row = ingest_file(db, tmp_path, filename=".notes.md", content=b"keep me")
+    assert row.path == ".notes.md"
+    hidden = tmp_path / row.path
+    assert hidden.is_file()
+
+    report = scan_workspace(db, tmp_path)
+    assert report.removed == []
+    assert get_document(db, row.id) is not None
+    assert hidden.is_file()
+    assert hidden.read_bytes() == b"keep me"
+
+
 def test_scan_rename_keeps_id_and_session(db: Database, tmp_path: Path) -> None:
     row = ingest_file(db, tmp_path, filename="old.md", content=b"same-bytes")
     session_id = create_session(db)

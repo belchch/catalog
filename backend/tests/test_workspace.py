@@ -89,6 +89,21 @@ def test_incompatible_user_version_rejected(tmp_path: Path, app_db: Database) ->
         manager.open(root, confirm_init=False)
 
 
+def test_open_upgrades_older_user_version(tmp_path: Path, app_db: Database) -> None:
+    root = tmp_path / "folder"
+    catalog = root / ".catalog"
+    catalog.mkdir(parents=True)
+    index = catalog / "index.db"
+    old = Database(str(index))
+    old.init_schema(user_version=0)
+    assert old.user_version() == 0
+    manager = WorkspaceManager()
+    manager.bind(app_db=app_db, app_state=type("S", (), {})())
+    db = manager.open(root, confirm_init=False)
+    assert db.user_version() == WORKSPACE_USER_VERSION
+    assert manager.root == root.resolve()
+
+
 def test_switch_blocked_while_run_active(tmp_path: Path, app_db: Database) -> None:
     manager = WorkspaceManager()
     manager.bind(app_db=app_db, app_state=type("S", (), {})())

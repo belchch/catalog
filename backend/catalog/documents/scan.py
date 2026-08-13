@@ -205,6 +205,8 @@ def scan_workspace(db: Database, workspace_dir: str | Path) -> ScanReport:
             continue
         if doc.path in fs_paths:
             continue
+        if (root / doc.path).is_file():
+            continue
         deleted = delete_document(db, root, doc.id)
         if deleted is not None:
             report.removed.append(deleted.id)
