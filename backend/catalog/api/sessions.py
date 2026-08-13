@@ -617,11 +617,7 @@ def _ws_session_tools(
     tools: ToolRegistry = build_document_tools(db, workspace, session_id)
 
     async def _notify_artifacts() -> None:
-        manager = websocket.app.state.workspace_manager
-        current = manager.current
-        if current is None:
-            return
-        await websocket.send_json(artifacts_frame(current, session_id))
+        await websocket.send_json(artifacts_frame(db, session_id))
 
     artifact_tools = build_artifact_tools(
         db,

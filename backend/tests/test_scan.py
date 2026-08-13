@@ -92,6 +92,28 @@ def test_scan_backfills_empty_content_hash(db: Database, tmp_path: Path) -> None
     assert refreshed.content_hash == row.content_hash
 
 
+def test_scan_rename_without_content_hash_keeps_id(db: Database, tmp_path: Path) -> None:
+    row = ingest_file(db, tmp_path, filename="old.md", content=b"same-bytes")
+    session_id = create_session(db)
+    attach_documents(db, session_id, [row.id])
+    with db.connect() as conn:
+        conn.execute(
+            "UPDATE document SET content_hash = NULL WHERE id = ?",
+            (row.id,),
+        )
+    (tmp_path / "old.md").rename(tmp_path / "renamed.md")
+
+    report = scan_workspace(db, tmp_path)
+    assert report.renamed == [row.id]
+    assert report.added == []
+    assert report.removed == []
+    updated = get_document(db, row.id)
+    assert updated is not None
+    assert updated.path == "renamed.md"
+    assert updated.content_hash
+    assert [d.id for d in list_session_documents(db, session_id)] == [row.id]
+
+
 def test_scan_removes_missing(db: Database, tmp_path: Path) -> None:
     kept = ingest_file(db, tmp_path, filename="keep.md", content=b"keep")
     gone = ingest_file(db, tmp_path, filename="gone.md", content=b"gone")

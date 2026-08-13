@@ -160,6 +160,20 @@ def scan_workspace(db: Database, workspace_dir: str | Path) -> ScanReport:
             if doc.content_hash and doc.content_hash == entry.content_hash:
                 rename_candidate = doc
                 break
+        if rename_candidate is None:
+            meta_matches = [
+                doc
+                for doc in docs
+                if doc.id not in claimed_ids
+                and doc.path not in fs_paths
+                and not doc.content_hash
+                and doc.size is not None
+                and doc.mtime is not None
+                and doc.size == entry.size
+                and doc.mtime == entry.mtime
+            ]
+            if len(meta_matches) == 1:
+                rename_candidate = meta_matches[0]
 
         if rename_candidate is not None:
             update_document(

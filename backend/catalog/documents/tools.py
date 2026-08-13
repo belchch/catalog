@@ -8,8 +8,7 @@ from catalog.agent.registry import ToolRegistry
 from catalog.documents.extract import extract_text
 from catalog.llm.base import ToolSpec
 from catalog.storage.db import Database
-from catalog.documents.scan import scan_workspace
-from catalog.storage.repo_document import get_document, list_documents
+from catalog.storage.repo_document import get_document, list_documents, reconcile_orphans
 from catalog.storage.repo_session_document import list_session_documents
 
 
@@ -22,7 +21,7 @@ def build_document_tools(
     reg = ToolRegistry()
 
     async def _list_documents() -> list[dict[str, str]]:
-        scan_workspace(db, workspace)
+        reconcile_orphans(db, workspace)
         if session_id is not None:
             rows = list_session_documents(db, session_id)
         else:

@@ -227,6 +227,11 @@ def delete_document(
 
 
 def reconcile_orphans(db: Database, workspace_dir: str | Path) -> list[str]:
-    from catalog.documents.scan import scan_workspace
-
-    return scan_workspace(db, workspace_dir).removed
+    workspace = Path(workspace_dir)
+    removed: list[str] = []
+    for doc in list_documents(db):
+        if not (workspace / doc.path).is_file():
+            deleted = delete_document(db, workspace, doc.id)
+            if deleted is not None:
+                removed.append(deleted.id)
+    return removed
