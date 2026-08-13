@@ -26,10 +26,12 @@ from __future__ import annotations
 
 import json
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from catalog.agent.trace import Trace
 from catalog.storage.db import Database
+
+PENDING_MAX_AGE_SECONDS = 15 * 60
 
 
 def _now_iso() -> str:
@@ -71,12 +73,13 @@ def create_run(
     return run_id
 
 
-def mark_run_running(db: Database, run_id: str) -> None:
+def claim_run(db: Database, run_id: str) -> bool:
     with db.connect() as conn:
-        conn.execute(
-            "UPDATE skill_run SET status = 'running' WHERE id = ?",
+        cur = conn.execute(
+            "UPDATE skill_run SET status = 'running' WHERE id = ? AND status = 'pending'",
             (run_id,),
         )
+        return int(cur.rowcount) == 1
 
 
 def finish_run(
@@ -88,7 +91,6 @@ def finish_run(
     trace: Trace,
     result_text: str | None = None,
 ) -> None:
-    """Mark a run finished: set status, output doc, trace, text, and ended_at."""
     now = _now_iso()
     with db.connect() as conn:
         conn.execute(
@@ -99,11 +101,6 @@ def finish_run(
 
 
 def set_output_doc_id(db: Database, run_id: str, output_doc_id: str) -> None:
-    """Attach a materialized result document to an existing run (CATALOG-18).
-
-    Used by ``POST /runs/{id}/save`` when a ``persist=False`` (preview) run's
-    on-screen result is saved as a document after the fact.
-    """
     with db.connect() as conn:
         conn.execute(
             "UPDATE skill_run SET output_doc_id = ? WHERE id = ?",
@@ -120,21 +117,32 @@ def delete_runs_for_skill(db: Database, skill_id: str) -> int:
         return int(cur.rowcount)
 
 
+def abandon_stale_pending_runs(
+    db: Database, *, max_age_seconds: int = PENDING_MAX_AGE_SECONDS
+) -> int:
+    cutoff = (
+        datetime.now(timezone.utc) - timedelta(seconds=max_age_seconds)
+    ).isoformat()
+    now = _now_iso()
+    with db.connect() as conn:
+        cur = conn.execute(
+            "UPDATE skill_run SET status = 'cancelled', ended_at = ? "
+            "WHERE status = 'pending' AND started_at < ?",
+            (now, cutoff),
+        )
+        return int(cur.rowcount)
+
+
 def has_running_runs(db: Database) -> bool:
+    abandon_stale_pending_runs(db)
     with db.connect() as conn:
         row = conn.execute(
-            "SELECT 1 FROM skill_run WHERE status = 'running' LIMIT 1"
+            "SELECT 1 FROM skill_run WHERE status IN ('pending', 'running') LIMIT 1"
         ).fetchone()
     return row is not None
 
 
 def get_run(db: Database, run_id: str) -> dict | None:
-    """Fetch a skill_run row as a dict, or ``None`` if not found.
-
-    ``input_doc_ids`` is deserialized from its JSON array. For rows written
-    before CATALOG-4 (no ``input_doc_ids``) the list falls back to
-    ``[input_doc_id]`` so legacy runs keep a non-empty input list.
-    """
     with db.connect() as conn:
         row = conn.execute(
             "SELECT id, skill_id, session_id, input_doc_id, input_doc_ids, "
@@ -152,7 +160,6 @@ def get_run(db: Database, run_id: str) -> dict | None:
         except (json.JSONDecodeError, TypeError):
             input_doc_ids = [row["input_doc_id"]] if row["input_doc_id"] else []
     elif row["input_doc_id"]:
-        # Legacy row written before input_doc_ids existed.
         input_doc_ids = [row["input_doc_id"]]
     else:
         input_doc_ids = []
@@ -167,8 +174,6 @@ def get_run(db: Database, run_id: str) -> dict | None:
         "trace_json": row["trace_json"],
         "started_at": row["started_at"],
         "ended_at": row["ended_at"],
-        # Legacy rows (written before CATALOG-18) have no persist column value
-        # other than the additive migration's DEFAULT 1 backfill.
         "persist": bool(row["persist"]) if row["persist"] is not None else True,
         "result_text": row["result_text"],
         "user_prompt": row["user_prompt"],

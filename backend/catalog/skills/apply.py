@@ -46,7 +46,7 @@ from catalog.documents.obsidian import (
 )
 from catalog.llm.base import LLMProvider, Message
 from catalog.skills.config import SkillConfig, ensure_read_document_tool
-from catalog.skills.repo_run import create_run, finish_run, get_run, mark_run_running
+from catalog.skills.repo_run import claim_run, create_run, finish_run, get_run
 from catalog.skills.script_runner import ScriptRuntimeError, run_script_async
 from catalog.skills.verify import run_verify
 from catalog.storage.db import Database
@@ -154,6 +154,8 @@ async def _apply_core(
             persist=persist,
             user_prompt=runtime_prompt,
         )
+        if not claim_run(db, run_id):
+            raise RuntimeError(f"failed to claim run {run_id}")
     else:
         existing_run = get_run(db, run_id)
         if existing_run is not None:
@@ -163,7 +165,6 @@ async def _apply_core(
                 runtime_prompt = (
                     (existing_run.get("user_prompt") or "").strip() or None
                 )
-    mark_run_running(db, run_id)
 
     logger.info(
         "apply_skill start skill=%s skill_id=%s input_docs=%d run_id=%s",

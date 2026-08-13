@@ -45,7 +45,7 @@ from catalog.llm.base import LLMProvider
 from catalog.llm.factory import provider_for_skill, provider_name_for_skill
 from catalog.llm.log_context import prompt_log_context
 from catalog.skills.apply import apply_skill
-from catalog.skills.repo_run import create_run, get_run, set_output_doc_id
+from catalog.skills.repo_run import claim_run, create_run, get_run, set_output_doc_id
 from catalog.skills.repo_skill import get_skill
 from catalog.storage.db import Database
 from catalog.storage.repo_document import create_document, get_document
@@ -197,9 +197,18 @@ async def run_stream_ws(websocket: WebSocket, run_id: str) -> None:
         await websocket.send_json({"type": "error", "message": "run not found"})
         await websocket.close()
         return
-    if run["status"] not in {"pending", "running"}:
+    if run["status"] != "pending":
+        message = (
+            "run is already in progress"
+            if run["status"] == "running"
+            else f"run is not running (status={run['status']})"
+        )
+        await websocket.send_json({"type": "error", "message": message})
+        await websocket.close()
+        return
+    if not claim_run(db, run_id):
         await websocket.send_json(
-            {"type": "error", "message": f"run is not running (status={run['status']})"}
+            {"type": "error", "message": "run is already in progress"}
         )
         await websocket.close()
         return

@@ -1583,7 +1583,27 @@ def test_apply_creates_pending_run_before_stream(client, db) -> None:
     row = get_run(db, run_id)
     assert row is not None
     assert row["status"] == "pending"
-    assert has_running_runs(db) is False
+    assert has_running_runs(db) is True
+
+
+def test_apply_stream_rejects_second_claim(client, provider, db) -> None:
+    from catalog.skills.repo_run import claim_run, get_run
+
+    doc_id = _upload(client, "input.md", b"source text")
+    skill_id = _seed_committed_skill(
+        db, verify_checks=[VerifyCheck("non_empty")], max_retries=2
+    )
+    provider.script = [_completion("# Result\n\nGreat document.")]
+    run_id = client.post(
+        f"/skills/{skill_id}/apply", json={"doc_id": doc_id}
+    ).json()["run_id"]
+    assert claim_run(db, run_id) is True
+    assert get_run(db, run_id)["status"] == "running"
+
+    with client.websocket_connect(f"/runs/{run_id}/stream") as ws:
+        frame = ws.receive_json()
+        assert frame["type"] == "error"
+        assert "already in progress" in frame["message"]
 
 
 def test_apply_agent_prompt_reaches_llm(client, provider, db) -> None:

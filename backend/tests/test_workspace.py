@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from pathlib import Path
 
 import pytest
@@ -15,6 +16,10 @@ from catalog.storage.workspace import (
     WorkspaceManager,
     WorkspaceValidationError,
 )
+
+
+def _fresh_started_at() -> str:
+    return datetime.now(timezone.utc).isoformat()
 
 
 @pytest.fixture()
@@ -121,7 +126,7 @@ def test_switch_blocked_while_run_active(tmp_path: Path, app_db: Database) -> No
         manager.open(b, confirm_init=True)
 
 
-def test_switch_allowed_while_run_pending(tmp_path: Path, app_db: Database) -> None:
+def test_switch_blocked_while_run_pending(tmp_path: Path, app_db: Database) -> None:
     manager = WorkspaceManager()
     manager.bind(app_db=app_db, app_state=type("S", (), {})())
     a = tmp_path / "a"
@@ -132,11 +137,36 @@ def test_switch_allowed_while_run_pending(tmp_path: Path, app_db: Database) -> N
     with db.connect() as conn:
         conn.execute(
             "INSERT INTO skill_run(id, skill_id, status, started_at) "
-            "VALUES ('r1', 's1', 'pending', '2026-01-01T00:00:00Z')"
+            "VALUES ('r1', 's1', 'pending', ?)",
+            (_fresh_started_at(),),
+        )
+    with pytest.raises(WorkspaceBusyError):
+        manager.open(b, confirm_init=True)
+
+
+def test_stale_pending_run_does_not_block_switch(
+    tmp_path: Path, app_db: Database
+) -> None:
+    from catalog.skills.repo_run import get_run
+
+    manager = WorkspaceManager()
+    manager.bind(app_db=app_db, app_state=type("S", (), {})())
+    a = tmp_path / "a"
+    b = tmp_path / "b"
+    a.mkdir()
+    b.mkdir()
+    db = manager.open(a, confirm_init=True)
+    with db.connect() as conn:
+        conn.execute(
+            "INSERT INTO skill_run(id, skill_id, status, started_at) "
+            "VALUES ('r1', 's1', 'pending', '2020-01-01T00:00:00+00:00')"
         )
     other = manager.open(b, confirm_init=True)
     assert manager.root == b.resolve()
     assert other is manager.current
+    stale = get_run(db, "r1")
+    assert stale is not None
+    assert stale["status"] == "cancelled"
 
 
 def test_close_clears_current(tmp_path: Path, app_db: Database) -> None:
