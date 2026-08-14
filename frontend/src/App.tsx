@@ -234,7 +234,7 @@ export default function App() {
   }, [sessionId])
 
   useEffect(() => {
-    if (!sessionId) {
+    if (!sessionId || !hasWorkspace) {
       setSessionTimeoutSeconds(DEFAULT_SESSION_TIMEOUT)
       return
     }
@@ -254,7 +254,7 @@ export default function App() {
     return () => {
       cancelled = true
     }
-  }, [sessionId, sessions.sessions])
+  }, [sessionId, hasWorkspace, sessions.sessions])
 
   const handledRunFinishRef = useRef<string | null>(null)
   useEffect(() => {
