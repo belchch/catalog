@@ -116,6 +116,10 @@ export function usePlannerSession(
   const readyRef = useRef<boolean>(false)
   const streamingRef = useRef<boolean>(false)
   const skipHydrateRef = useRef<boolean>(false)
+  const docsFromStreamRef = useRef<boolean>(false)
+  const docsHydrateGenRef = useRef(0)
+  const sessionIdRef = useRef<string | null>(sessionId)
+  sessionIdRef.current = sessionId
   const prevSessionRef = useRef<string | null>(null)
   const hadErrorRef = useRef<boolean>(false)
   const onSessionInvalidRef = useRef(options?.onSessionInvalid)
@@ -137,6 +141,7 @@ export function usePlannerSession(
     pendingRef.current = []
     streamingRef.current = false
     skipHydrateRef.current = false
+    docsFromStreamRef.current = false
     hadErrorRef.current = false
   }, [])
 
@@ -177,16 +182,32 @@ export function usePlannerSession(
           },
         ])
         break
-      case 'finish':
+      case 'finish': {
         assistantBufferRef.current = ''
         streamingRef.current = false
         setStreaming(false)
         setCancelling(false)
+        docsFromStreamRef.current = true
+        const sid = sessionIdRef.current
+        if (sid) {
+          const gen = ++docsHydrateGenRef.current
+          void getSessionDocuments(sid).then(
+            (docs) => {
+              if (sessionIdRef.current !== sid) return
+              if (docsHydrateGenRef.current !== gen) return
+              setSessionDocuments(docs)
+            },
+            () => {},
+          )
+        }
         break
+      }
       case 'suggestions':
         setSuggestions(e.items)
         break
       case 'session_docs':
+        docsFromStreamRef.current = true
+        docsHydrateGenRef.current += 1
         setSessionDocuments(e.documents)
         break
       case 'session_artifacts':
@@ -229,6 +250,7 @@ export function usePlannerSession(
       streamingRef.current ||
       assistantBufferRef.current.length > 0 ||
       pendingRef.current.length > 0
+    const hydrateGen = ++docsHydrateGenRef.current
 
     let cancelled = false
     let intentionalClose = false
@@ -259,6 +281,16 @@ export function usePlannerSession(
     void getSessionDocuments(sessionId).then(
       (docs) => {
         if (cancelled) return
+        if (hydrateGen !== docsHydrateGenRef.current) return
+        if (docsFromStreamRef.current) return
+        if (
+          skipHydrateRef.current ||
+          streamingRef.current ||
+          assistantBufferRef.current.length > 0 ||
+          pendingRef.current.length > 0
+        ) {
+          return
+        }
         setSessionDocuments(docs)
       },
       () => {},
@@ -343,6 +375,8 @@ export function usePlannerSession(
   const removeDocument = useCallback(
     async (docId: string) => {
       if (!sessionId) return
+      docsHydrateGenRef.current += 1
+      docsFromStreamRef.current = true
       setSessionDocuments((prev) => prev.filter((d) => d.id !== docId))
       setError(null)
       try {
@@ -363,8 +397,11 @@ export function usePlannerSession(
 
   const refreshSessionDocuments = useCallback(async () => {
     if (!sessionId) return
+    const gen = docsHydrateGenRef.current
     try {
       const docs = await getSessionDocuments(sessionId)
+      if (sessionIdRef.current !== sessionId) return
+      if (docsHydrateGenRef.current !== gen) return
       setSessionDocuments(docs)
     } catch {
       return
