@@ -9,15 +9,31 @@ the agent loop talks to) is selected via ``APP_PROVIDER`` (env), defaulting to
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
 
 import httpx
 
 from catalog.config import Settings
 from catalog.llm.base import LLMProvider
 from catalog.llm.openrouter import OpenRouterProvider
+from catalog.llm.providers import KNOWN_PROVIDERS
 from catalog.llm.zai import ZaiProvider
 
 logger = logging.getLogger("catalog.llm")
+
+
+def _build_openrouter(settings: Settings, http_client: httpx.AsyncClient) -> LLMProvider:
+    return OpenRouterProvider(http_client, settings.api_key, settings.base_url)
+
+
+def _build_zai(settings: Settings, http_client: httpx.AsyncClient) -> LLMProvider:
+    return ZaiProvider(http_client, settings.zai_api_key, settings.zai_base_url)
+
+
+_BUILDERS: dict[str, Callable[[Settings, httpx.AsyncClient], LLMProvider]] = {
+    "openrouter": _build_openrouter,
+    "zai": _build_zai,
+}
 
 
 def build_providers(
@@ -31,14 +47,12 @@ def build_providers(
     """
     providers: dict[str, LLMProvider] = {}
 
-    providers["openrouter"] = OpenRouterProvider(
-        http_client, settings.api_key, settings.base_url
-    )
-
-    if settings.zai_api_key:
-        providers["zai"] = ZaiProvider(
-            http_client, settings.zai_api_key, settings.zai_base_url
-        )
+    for spec in KNOWN_PROVIDERS:
+        key = getattr(settings, spec.settings_field, "")
+        if spec.id != "openrouter" and not key:
+            continue
+        builder = _BUILDERS[spec.id]
+        providers[spec.id] = builder(settings, http_client)
 
     logger.info(
         "build_providers: available=%s active_env=%s",

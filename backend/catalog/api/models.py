@@ -6,13 +6,15 @@ from catalog.api.deps import get_app_db, get_provider
 from catalog.api.schemas import (
     ModelOut,
     ProviderOut,
+    ProviderSetupOut,
     SettingsOut,
     SettingsUpdate,
     SetupKeysUpdate,
     SetupOut,
 )
-from catalog.config import keys_are_configured, with_resolved_keys
+from catalog.config import key_managed_by_env, keys_are_configured, with_resolved_keys
 from catalog.llm.base import LLMProvider
+from catalog.llm.providers import KNOWN_PROVIDERS, provider_display_name
 from catalog.runtime import apply_runtime_providers, coerce_model_for_provider
 from catalog.storage.db import Database
 from catalog.storage.repo_app_settings import (
@@ -25,23 +27,48 @@ from catalog.storage.repo_app_settings import (
 router = APIRouter()
 
 
+def _setup_providers(keys_by_field: dict[str, str], active_provider: str) -> list[ProviderSetupOut]:
+    return [
+        ProviderSetupOut(
+            id=spec.id,
+            name=spec.display_name,
+            configured=bool(str(keys_by_field.get(spec.settings_field, "")).strip()),
+            managed_by_env=key_managed_by_env(spec.env_var),
+            active=spec.id == active_provider,
+        )
+        for spec in KNOWN_PROVIDERS
+    ]
+
+
 def _setup_status(request: Request, app_db: Database) -> SetupOut:
     settings = getattr(request.app.state, "settings", None)
     provider = getattr(request.app.state, "active_provider", None) or ""
     if settings is None:
         provider_db, _model = get_app_settings(app_db)
         persisted_or, persisted_zai = get_api_keys(app_db)
+        active = provider or provider_db
         return SetupOut(
             keys_configured=bool(persisted_or or persisted_zai),
-            provider=provider or provider_db,
+            provider=active,
             openrouter_configured=bool(persisted_or),
             zai_configured=bool(persisted_zai),
+            providers=_setup_providers(
+                {"api_key": persisted_or, "zai_api_key": persisted_zai},
+                active,
+            ),
         )
     return SetupOut(
         keys_configured=keys_are_configured(settings),
         provider=provider,
         openrouter_configured=bool(settings.api_key.strip()),
         zai_configured=bool(settings.zai_api_key.strip()),
+        providers=_setup_providers(
+            {
+                spec.settings_field: getattr(settings, spec.settings_field, "")
+                for spec in KNOWN_PROVIDERS
+            },
+            provider,
+        ),
     )
 
 
@@ -71,14 +98,14 @@ async def list_providers_endpoint(request: Request) -> list[ProviderOut]:
     active: LLMProvider | None = getattr(request.app.state, "provider", None)
     if not providers:
         name = getattr(active, "provider_name", "provider") if active else "provider"
-        return [ProviderOut(id=name, name=name, active=True)]
+        return [ProviderOut(id=name, name=provider_display_name(name), active=True)]
     out = [
-        ProviderOut(id=name, name=name, active=inst is active)
+        ProviderOut(id=name, name=provider_display_name(name), active=inst is active)
         for name, inst in providers.items()
     ]
     if active is not None and not any(inst is active for inst in providers.values()):
         name = getattr(active, "provider_name", "active") or "active"
-        out.append(ProviderOut(id=name, name=name, active=True))
+        out.append(ProviderOut(id=name, name=provider_display_name(name), active=True))
     return out
 
 

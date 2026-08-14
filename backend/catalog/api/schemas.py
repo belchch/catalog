@@ -253,11 +253,21 @@ class SettingsUpdate(BaseModel):
     model: str | None = None
 
 
+class ProviderSetupOut(BaseModel):
+    id: str
+    name: str
+    configured: bool
+    managed_by_env: bool
+    active: bool = False
+
+
 class SetupOut(BaseModel):
     keys_configured: bool
     provider: str
     openrouter_configured: bool
     zai_configured: bool
+    providers: list[ProviderSetupOut] = Field(default_factory=list)
+
 
 
 class SetupKeysUpdate(BaseModel):

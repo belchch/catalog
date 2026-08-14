@@ -62,6 +62,11 @@ def resolve_provider_keys(
     )
 
 
+def key_managed_by_env(env_var: str) -> bool:
+    return bool(os.getenv(env_var, "").strip())
+
+
+
 def keys_are_configured(settings: Settings) -> bool:
     return bool(settings.api_key.strip() or settings.zai_api_key.strip())
 

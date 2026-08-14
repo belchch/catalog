@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import replace
 from pathlib import Path
 
-from catalog.config import resolve_provider_keys
+from catalog.config import key_managed_by_env, resolve_provider_keys
 from catalog.main import package_static_dir
 from catalog.storage.db import Database
 from catalog.storage.repo_app_settings import get_api_keys, set_api_keys
@@ -30,6 +30,15 @@ def test_resolve_provider_keys_falls_back_to_persisted(monkeypatch) -> None:
         persisted_openrouter="db-or",
         persisted_zai="db-zai",
     ) == ("db-or", "db-zai")
+
+
+def test_key_managed_by_env_reads_os_getenv(monkeypatch) -> None:
+    monkeypatch.delenv("ZAI_API_KEY", raising=False)
+    assert key_managed_by_env("ZAI_API_KEY") is False
+    monkeypatch.setenv("ZAI_API_KEY", "  env-secret  ")
+    assert key_managed_by_env("ZAI_API_KEY") is True
+    monkeypatch.setenv("ZAI_API_KEY", "   ")
+    assert key_managed_by_env("ZAI_API_KEY") is False
 
 
 def test_api_keys_roundtrip_in_app_db() -> None:
@@ -110,6 +119,97 @@ def test_setup_endpoints_hide_secrets(client, monkeypatch) -> None:
     settings = client.get("/settings").json()
     assert settings["keys_configured"] is True
     assert "new-secret-key" not in settings.values()
+    for item in body["providers"]:
+        assert "new-secret-key" not in item.values()
+
+
+def test_setup_lists_all_known_providers_when_only_one_configured(
+    client, monkeypatch
+) -> None:
+    monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
+    monkeypatch.delenv("ZAI_API_KEY", raising=False)
+    client.app.state.settings = replace(
+        client.app.state.settings, api_key="test-key", zai_api_key=""
+    )
+    body = client.get("/setup").json()
+    by_id = {item["id"]: item for item in body["providers"]}
+    assert set(by_id) == {"openrouter", "zai"}
+    assert by_id["openrouter"]["configured"] is True
+    assert by_id["zai"]["configured"] is False
+    assert by_id["openrouter"]["name"] == "OpenRouter"
+    assert by_id["zai"]["name"] == "z.ai"
+    assert body["keys_configured"] is True
+    assert body["provider"]
+    assert body["openrouter_configured"] is True
+    assert body["zai_configured"] is False
+    assert by_id[client.app.state.active_provider]["active"] is True
+    assert sum(1 for item in body["providers"] if item["active"]) == 1
+
+
+def test_setup_providers_without_runtime_settings(client, monkeypatch) -> None:
+    monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
+    monkeypatch.delenv("ZAI_API_KEY", raising=False)
+    set_api_keys(
+        client.app.state.app_db,
+        openrouter_api_key="db-or",
+        zai_api_key="",
+    )
+    del client.app.state.settings
+    body = client.get("/setup").json()
+    by_id = {item["id"]: item for item in body["providers"]}
+    assert set(by_id) == {"openrouter", "zai"}
+    assert by_id["openrouter"]["configured"] is True
+    assert by_id["zai"]["configured"] is False
+    assert by_id[body["provider"]]["active"] is True
+    assert body["keys_configured"] is True
+    assert body["openrouter_configured"] is True
+    assert body["zai_configured"] is False
+
+
+def test_setup_managed_by_env_ignores_persisted_value(client, monkeypatch) -> None:
+    monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
+    monkeypatch.setenv("ZAI_API_KEY", "env-zai-secret")
+    set_api_keys(
+        client.app.state.app_db,
+        openrouter_api_key="db-or",
+        zai_api_key="db-zai",
+    )
+    body = client.get("/setup").json()
+    zai = next(item for item in body["providers"] if item["id"] == "zai")
+    assert zai["managed_by_env"] is True
+    assert "env-zai-secret" not in str(body)
+    assert "db-zai" not in str(body)
+    openrouter = next(item for item in body["providers"] if item["id"] == "openrouter")
+    assert openrouter["managed_by_env"] is False
+
+
+def test_put_setup_keys_partial_keeps_other_key_and_exposes_zai(
+    client, monkeypatch
+) -> None:
+    monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
+    monkeypatch.delenv("ZAI_API_KEY", raising=False)
+    set_api_keys(
+        client.app.state.app_db,
+        openrouter_api_key="keep-or",
+        zai_api_key="",
+    )
+    client.app.state.settings = replace(
+        client.app.state.settings, api_key="keep-or", zai_api_key=""
+    )
+
+    resp = client.put("/setup/keys", json={"zai_api_key": "new-zai"})
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert get_api_keys(client.app.state.app_db) == ("keep-or", "new-zai")
+    by_id = {item["id"]: item for item in body["providers"]}
+    assert by_id["openrouter"]["configured"] is True
+    assert by_id["zai"]["configured"] is True
+    assert "keep-or" not in resp.text
+    assert "new-zai" not in resp.text
+
+    providers = client.get("/providers").json()
+    assert any(item["id"] == "zai" for item in providers)
+    assert "zai" in client.app.state.providers
 
 
 def test_package_static_dir_points_inside_package() -> None:
