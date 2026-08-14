@@ -1,7 +1,7 @@
 ---
 name: catalog-ui-reviewer
 description: Проверяет реализацию UI одного шага pipeline против дизайн-спеки (`<stem плана>.design.md`) и плана. Только readonly, статически (диф + спека, без запуска приложения). Возвращает строго формализованный вердикт APPROVED/CHANGES_REQUESTED. Вызывается ЗАНОВО (без resume) каждый цикл ревью на UI-шагах.
-model: gemini-3.7-flash
+model: cursor-grok-4.6[effort=high]
 readonly: true
 ---
 
