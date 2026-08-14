@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { CheckIcon, CopyIcon, RefreshIcon } from './icons.tsx'
 
 interface MessageCommandsProps {
   /** Text of the parent message — copied verbatim and re-sent on «Повторить». */
@@ -68,23 +69,31 @@ export function MessageCommands({
     onRepeat?.(content)
   }
 
+  const repeatLabel = repeatDisabled ? 'Недоступно во время ответа' : 'Переотправить это сообщение'
+
   return (
-    <div className="mt-1 flex justify-end gap-3 text-xs text-ink-faint">
+    <div className="catalog-message-commands mt-1 flex justify-end gap-0.5 opacity-0 transition-opacity duration-150 group-hover:opacity-100 focus-within:opacity-100 motion-reduce:transition-none">
+      <span className="sr-only" role="status" aria-live="polite">
+        {copied ? 'Скопировано' : ''}
+      </span>
       <button
         type="button"
-        className="transition-colors hover:text-brand-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand disabled:cursor-not-allowed disabled:text-ink-faint disabled:hover:text-ink-faint"
+        className="btn-icon-ghost"
         onClick={handleRepeat}
         disabled={repeatDisabled}
-        title={repeatDisabled ? 'Недоступно во время ответа' : 'Переотправить это сообщение'}
+        title={repeatLabel}
+        aria-label={repeatLabel}
       >
-        Повторить
+        <RefreshIcon />
       </button>
       <button
         type="button"
-        className="transition-colors hover:text-brand-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand"
+        className="btn-icon-ghost"
         onClick={handleCopy}
+        title="Копировать"
+        aria-label="Копировать"
       >
-        {copied ? 'Скопировано' : 'Копировать'}
+        {copied ? <CheckIcon className="text-success" /> : <CopyIcon />}
       </button>
     </div>
   )
