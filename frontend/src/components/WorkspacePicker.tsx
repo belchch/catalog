@@ -144,6 +144,7 @@ export function WorkspacePicker({
 }: WorkspacePickerProps) {
   const titleId = useId()
   const bannerId = useId()
+  const filterId = useId()
   const closeRef = useRef<HTMLButtonElement>(null)
   const panelRef = useRef<HTMLDivElement>(null)
   const panelActionRef = useRef<HTMLButtonElement>(null)
@@ -155,6 +156,7 @@ export function WorkspacePicker({
   const [pending, setPending] = useState<PendingPanel | null>(null)
   const [busy, setBusy] = useState<BusyTarget | null>(null)
   const [slowIndexing, setSlowIndexing] = useState(false)
+  const [filter, setFilter] = useState('')
 
   const submitting = busy !== null
   const currentBrowsePath = stack[stack.length - 1] ?? ''
@@ -168,6 +170,11 @@ export function WorkspacePicker({
   const currentBusy = isBusyAt(busy, 'browse-current', openablePath)
   const panelPath = pending?.path
   const panelBusy = panelPath ? isBusyAt(busy, 'panel', panelPath) : false
+  const query = filter.trim().toLowerCase()
+  const visibleEntries = query
+    ? entries.filter((e) => e.name.toLowerCase().includes(query))
+    : entries
+  const showFilter = !browseLoading && !browseError && entries.length > 0
 
   const loadBrowse = useCallback(
     async (path?: string) => {
@@ -198,6 +205,10 @@ export function WorkspacePicker({
   useEffect(() => {
     void loadBrowse(currentBrowsePath)
   }, [currentBrowsePath, loadBrowse])
+
+  useEffect(() => {
+    setFilter('')
+  }, [currentBrowsePath])
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -518,15 +529,35 @@ export function WorkspacePicker({
               </button>
             </div>
 
+            {showFilter ? (
+              <div className="mb-2">
+                <label htmlFor={filterId} className="sr-only">
+                  Фильтр по имени папки
+                </label>
+                <input
+                  id={filterId}
+                  type="search"
+                  className="field"
+                  placeholder="Фильтр по имени"
+                  value={filter}
+                  onChange={(e) => setFilter(e.target.value)}
+                />
+              </div>
+            ) : null}
+
             {browseLoading ? (
               <p className="text-xs text-ink-faint">Загрузка…</p>
             ) : browseError ? (
               <p className="text-xs text-danger-ink">{browseError}</p>
             ) : entries.length === 0 ? (
               <p className="text-xs text-ink-faint">Нет вложенных папок</p>
+            ) : visibleEntries.length === 0 ? (
+              <p className="text-xs text-ink-faint" role="status">
+                Ничего не найдено
+              </p>
             ) : (
               <ul className="space-y-1">
-                {entries.map((entry) => {
+                {visibleEntries.map((entry) => {
                   const entryBusy = isBusyAt(busy, 'browse-entry', entry.path)
                   return (
                     <li
