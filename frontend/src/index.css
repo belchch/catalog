@@ -272,6 +272,7 @@ button { -webkit-tap-highlight-color: transparent; }
 
 @media (hover: none) {
   .catalog-message--user .catalog-message-commands { opacity: 1; }
+  .catalog-skill-row__actions { opacity: 1; }
 }
 .catalog-composer-area { border-top: 0; background: var(--composer-fade); padding-bottom: 20px; }
 .catalog-composer {

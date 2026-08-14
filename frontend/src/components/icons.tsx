@@ -63,3 +63,32 @@ export function SpinnerIcon({ className }: IconProps) {
     </svg>
   )
 }
+
+export function PencilIcon({ className }: IconProps) {
+  return (
+    <svg {...iconBase} className={className}>
+      <path d="M12 20h9" />
+      <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z" />
+    </svg>
+  )
+}
+
+export function CommitIcon({ className }: IconProps) {
+  return (
+    <svg {...iconBase} className={className}>
+      <circle cx="12" cy="12" r="4" />
+      <line x1="1.05" y1="12" x2="7" y2="12" />
+      <line x1="17.01" y1="12" x2="22.96" y2="12" />
+    </svg>
+  )
+}
+
+export function MoreHorizontalIcon({ className }: IconProps) {
+  return (
+    <svg {...iconBase} className={className}>
+      <circle cx="12" cy="12" r="1" />
+      <circle cx="19" cy="12" r="1" />
+      <circle cx="5" cy="12" r="1" />
+    </svg>
+  )
+}

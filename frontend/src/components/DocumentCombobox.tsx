@@ -114,10 +114,10 @@ export function DocumentCombobox(props: DocumentComboboxProps) {
           setOpen((v) => !v)
         }}
         onKeyDown={(e) => {
-          if (e.key === 'Escape') {
-            e.preventDefault()
-            close()
-          }
+          if (e.key !== 'Escape' || !open) return
+          e.preventDefault()
+          e.stopPropagation()
+          close()
         }}
       >
         <span className={`truncate ${selectedIds.length === 0 ? 'text-ink-faint' : ''}`}>
@@ -135,11 +135,11 @@ export function DocumentCombobox(props: DocumentComboboxProps) {
             (placement === 'top' ? 'bottom-full mb-1' : 'mt-1')
           }
           onKeyDown={(e) => {
-            if (e.key === 'Escape') {
-              e.preventDefault()
-              close()
-              rootRef.current?.querySelector('button')?.focus()
-            }
+            if (e.key !== 'Escape') return
+            e.preventDefault()
+            e.stopPropagation()
+            close()
+            rootRef.current?.querySelector('button')?.focus()
           }}
         >
           <div className="border-b border-line p-1">

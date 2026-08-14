@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react'
 import type { ApplyMode, DocumentOut, SkillOut } from '../api.ts'
 import type { UseSkillsResult } from '../hooks/useSkills.ts'
 import { DocumentCombobox } from './DocumentCombobox.tsx'
+import { CommitIcon, MoreHorizontalIcon, PencilIcon } from './icons.tsx'
 
 interface SkillsPanelProps {
   skills: UseSkillsResult
@@ -58,6 +59,14 @@ function nonempty(value: string | null | undefined): string | null {
   if (value == null) return null
   const trimmed = value.trim()
   return trimmed.length > 0 ? trimmed : null
+}
+
+function hasModelMeta(skill: SkillOut): boolean {
+  return (
+    nonempty(skill.provider) != null ||
+    nonempty(skill.model) != null ||
+    nonempty(skill.reasoning) != null
+  )
 }
 
 function SkillModelMeta({ skill }: { skill: SkillOut }) {
@@ -158,6 +167,11 @@ export function SkillsPanel({
   const [renameSaving, setRenameSaving] = useState(false)
   const renameSavingRef = useRef(false)
   const optionRefs = useRef<Record<string, HTMLDivElement | null>>({})
+  const listRef = useRef<HTMLUListElement | null>(null)
+  const renameTriggerRef = useRef<HTMLButtonElement | null>(null)
+  const kebabRef = useRef<HTMLButtonElement | null>(null)
+  const focusRenameTriggerRef = useRef(false)
+  const focusKebabRef = useRef(false)
   const validDocIds = new Set(documents.map((d) => d.id))
 
   const filtered = useMemo(
@@ -190,7 +204,36 @@ export function SkillsPanel({
   useEffect(() => {
     setDescExpanded(false)
     setConfirmOpen(false)
-    setOverflowOpen(false)
+  }, [selectedId])
+
+  useEffect(() => {
+    if (renameId != null || !focusRenameTriggerRef.current) return
+    focusRenameTriggerRef.current = false
+    renameTriggerRef.current?.focus()
+  }, [renameId])
+
+  useEffect(() => {
+    if (!focusKebabRef.current || !overflowOpen) return
+    focusKebabRef.current = false
+    kebabRef.current?.focus()
+  }, [overflowOpen, selectedId])
+
+  useEffect(() => {
+    if (selectedId == null) return
+    const onMouseDown = (e: MouseEvent) => {
+      if (renameSavingRef.current) return
+      const list = listRef.current
+      if (list != null && e.target instanceof Node && list.contains(e.target)) return
+      renameSavingRef.current = false
+      setRenameId(null)
+      setRenameValue('')
+      setRenameSaving(false)
+      setOverflowOpen(false)
+      setConfirmOpen(false)
+      setSelectedId(null)
+    }
+    document.addEventListener('mousedown', onMouseDown)
+    return () => document.removeEventListener('mousedown', onMouseDown)
   }, [selectedId])
 
   const slotsFor = (skill: SkillOut): (string | null)[] => {
@@ -248,8 +291,30 @@ export function SkillsPanel({
   }
 
   const selectSkill = (id: string) => {
-    setSelectedId((prev) => (prev === id ? null : id))
+    setSelectedId(id)
     clearRename()
+    setOverflowOpen(false)
+    setConfirmOpen(false)
+  }
+
+  const escapeCascade = (): boolean => {
+    if (confirmOpen) {
+      setConfirmOpen(false)
+      kebabRef.current?.focus()
+      return true
+    }
+    if (overflowOpen) {
+      setOverflowOpen(false)
+      kebabRef.current?.focus()
+      return true
+    }
+    if (renameId != null) {
+      focusRenameTriggerRef.current = true
+      clearRename()
+      return true
+    }
+    setSelectedId(null)
+    return false
   }
 
   const moveSelection = (dir: 1 | -1) => {
@@ -264,6 +329,8 @@ export function SkillsPanel({
     const nextId = filtered[next]!.id
     setSelectedId(nextId)
     clearRename()
+    setOverflowOpen(false)
+    setConfirmOpen(false)
     requestAnimationFrame(() => {
       optionRefs.current[nextId]?.scrollIntoView({ block: 'nearest' })
     })
@@ -279,6 +346,7 @@ export function SkillsPanel({
   }
 
   const onListKeyDown = (e: KeyboardEvent) => {
+    if (e.target !== e.currentTarget) return
     if (e.key === 'ArrowDown') {
       e.preventDefault()
       moveSelection(1)
@@ -296,26 +364,22 @@ export function SkillsPanel({
     }
     if (e.key === 'Escape') {
       e.preventDefault()
-      if (confirmOpen) {
-        setConfirmOpen(false)
-        return
-      }
-      if (overflowOpen) {
-        setOverflowOpen(false)
-        return
-      }
-      if (renameId != null) {
-        clearRename()
-        return
-      }
-      setSelectedId(null)
+      escapeCascade()
+    }
+  }
+
+  const onActionsEscape = (e: KeyboardEvent) => {
+    if (e.key !== 'Escape' || e.defaultPrevented) return
+    e.preventDefault()
+    e.stopPropagation()
+    const kept = escapeCascade()
+    if (!kept) {
+      listRef.current?.focus()
     }
   }
 
   const hasSkills = skills.skills.length > 0
   const renameEmpty = renameValue.trim().length === 0
-  const toolbarDisabled = selected == null
-  const commitDisabled = selected == null || selected.status !== 'draft'
 
   return (
     <div className="flex flex-col gap-2">
@@ -338,161 +402,6 @@ export function SkillsPanel({
             onChange={(e) => setQuery(e.target.value)}
           />
 
-          {renameId != null && selected != null && renameId === selected.id ? (
-            <div
-              className="flex min-w-0 flex-wrap items-center gap-1.5"
-              onBlur={(e) => {
-                const container = e.currentTarget
-                requestAnimationFrame(() => {
-                  if (renameSavingRef.current) return
-                  if (!container.contains(document.activeElement)) {
-                    clearRename()
-                  }
-                })
-              }}
-            >
-              <input
-                type="text"
-                className="field min-w-[8rem] flex-1"
-                value={renameValue}
-                aria-label="Имя скила"
-                autoFocus
-                disabled={renameSaving}
-                onChange={(e) => setRenameValue(e.target.value)}
-                onFocus={(e) => {
-                  const len = e.target.value.length
-                  e.target.setSelectionRange(len, len)
-                }}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') {
-                    e.preventDefault()
-                    void saveRename(selected.id, selected.name)
-                  } else if (e.key === 'Escape') {
-                    e.preventDefault()
-                    clearRename()
-                  }
-                }}
-              />
-              <button
-                type="button"
-                className="btn-primary text-[11px]"
-                disabled={renameSaving || renameEmpty}
-                onClick={() => void saveRename(selected.id, selected.name)}
-              >
-                {renameSaving ? '…' : 'Сохранить'}
-              </button>
-              <button
-                type="button"
-                className={btnClass}
-                disabled={renameSaving}
-                onClick={clearRename}
-              >
-                Отмена
-              </button>
-            </div>
-          ) : (
-            <div
-              className="flex flex-col gap-1.5"
-              onBlur={(e) => {
-                const container = e.currentTarget
-                requestAnimationFrame(() => {
-                  if (!container.contains(document.activeElement)) {
-                    setOverflowOpen(false)
-                    setConfirmOpen(false)
-                  }
-                })
-              }}
-            >
-              <div className="flex flex-wrap items-center gap-1.5">
-                <button
-                  type="button"
-                  className={btnClass}
-                  disabled={toolbarDisabled}
-                  onClick={() => selected && startRename(selected)}
-                >
-                  Переименовать
-                </button>
-                <button
-                  type="button"
-                  className={btnClass}
-                  disabled={toolbarDisabled}
-                  onClick={() => {
-                    if (!selected) return
-                    clearRename()
-                    onEdit(selected.id, selected.name)
-                  }}
-                >
-                  Редактировать
-                </button>
-                <button
-                  type="button"
-                  className={btnClass}
-                  disabled={commitDisabled}
-                  onClick={() => selected && void skills.commit(selected.id)}
-                >
-                  Коммит
-                </button>
-                <div className="relative ml-auto">
-                  <button
-                    type="button"
-                    className={btnClass}
-                    disabled={toolbarDisabled}
-                    aria-label="Ещё действия"
-                    aria-expanded={overflowOpen || confirmOpen}
-                    onClick={() => {
-                      if (toolbarDisabled) return
-                      setConfirmOpen(false)
-                      setOverflowOpen((o) => !o)
-                    }}
-                  >
-                    ⋯
-                  </button>
-                  {overflowOpen && !confirmOpen && selected != null && (
-                    <div className="absolute right-0 z-10 mt-1 min-w-[7rem] rounded border border-line bg-surface py-1 shadow-card">
-                      <button
-                        type="button"
-                        className="block w-full px-3 py-1.5 text-left text-[11px] text-danger-ink hover:bg-surface-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand"
-                        onClick={() => {
-                          clearRename()
-                          setOverflowOpen(false)
-                          setConfirmOpen(true)
-                        }}
-                      >
-                        Удалить
-                      </button>
-                    </div>
-                  )}
-                </div>
-              </div>
-              {confirmOpen && selected != null && (
-                <div className="flex flex-wrap items-center gap-1.5">
-                  <span className="text-[11px] text-ink-muted">
-                    Удалить скил &laquo;{selected.name}&raquo;?
-                  </span>
-                  <button
-                    type="button"
-                    autoFocus
-                    className="btn-danger text-[11px]"
-                    onClick={() => {
-                      const id = selected.id
-                      setConfirmOpen(false)
-                      onDelete(id)
-                    }}
-                  >
-                    Удалить
-                  </button>
-                  <button
-                    type="button"
-                    className={btnClass}
-                    onClick={() => setConfirmOpen(false)}
-                  >
-                    Отмена
-                  </button>
-                </div>
-              )}
-            </div>
-          )}
-
           {filtered.length === 0 ? (
             <div className="flex flex-wrap items-center gap-2">
               <p className="text-xs text-ink-faint">Ничего не найдено</p>
@@ -506,6 +415,7 @@ export function SkillsPanel({
             </div>
           ) : (
             <ul
+              ref={listRef}
               role="listbox"
               aria-label="Скиллы"
               tabIndex={0}
@@ -525,6 +435,10 @@ export function SkillsPanel({
                 const hint = isSelected && arity === 2 ? mode2Hint(slots) : null
                 const desc = s.description?.trim() ?? ''
                 const descNeedsToggle = desc.length > 72
+                const commitTitle =
+                  s.status !== 'draft' ? 'Скил уже закоммичен' : 'Коммит'
+                const showActionsRule =
+                  desc.length > 0 || hasModelMeta(s)
 
                 return (
                   <li key={s.id} className="min-w-0">
@@ -537,10 +451,10 @@ export function SkillsPanel({
                       aria-label={`${s.name}, ${statusTitle}`}
                       title={`${s.name} (${statusTitle})`}
                       className={
-                        'flex h-8 cursor-pointer items-center gap-2 overflow-hidden whitespace-nowrap rounded px-2 py-1.5 text-xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand ' +
+                        'group flex h-8 cursor-pointer items-center gap-2 overflow-hidden whitespace-nowrap rounded border-l-2 px-2 text-xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand ' +
                         (isSelected
-                          ? 'bg-brand-soft text-ink'
-                          : 'text-ink-muted hover:bg-surface-hover')
+                          ? 'border-brand bg-brand-soft text-ink'
+                          : 'border-transparent text-ink-muted hover:bg-surface-hover')
                       }
                       onClick={() => selectSkill(s.id)}
                     >
@@ -577,10 +491,66 @@ export function SkillsPanel({
                       >
                         {arityInfo.symbol}
                       </span>
+                      <span
+                        className={
+                          'catalog-skill-row__actions flex shrink-0 items-center gap-0.5 transition-opacity duration-150 motion-reduce:transition-none ' +
+                          (isSelected
+                            ? 'opacity-100'
+                            : 'opacity-0 group-hover:opacity-100 group-focus-within:opacity-100')
+                        }
+                      >
+                        <button
+                          type="button"
+                          className="btn-icon-ghost size-6"
+                          tabIndex={isSelected ? 0 : -1}
+                          aria-label="Редактировать скил"
+                          title="Редактировать скил"
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            selectSkill(s.id)
+                            clearRename()
+                            onEdit(s.id, s.name)
+                          }}
+                        >
+                          <PencilIcon />
+                        </button>
+                        <button
+                          type="button"
+                          className="btn-icon-ghost size-6"
+                          tabIndex={isSelected ? 0 : -1}
+                          aria-label="Коммит"
+                          title={commitTitle}
+                          disabled={s.status !== 'draft'}
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            selectSkill(s.id)
+                            void skills.commit(s.id)
+                          }}
+                        >
+                          <CommitIcon />
+                        </button>
+                        <button
+                          type="button"
+                          className="btn-icon-ghost size-6"
+                          tabIndex={isSelected ? 0 : -1}
+                          aria-label="Ещё действия"
+                          title="Ещё действия"
+                          aria-expanded={isSelected && overflowOpen}
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            focusKebabRef.current = true
+                            selectSkill(s.id)
+                            setConfirmOpen(false)
+                            setOverflowOpen(true)
+                          }}
+                        >
+                          <MoreHorizontalIcon />
+                        </button>
+                      </span>
                     </div>
 
                     {isSelected && (
-                      <div className="mt-1.5 flex flex-col gap-1.5 border-t border-line pt-1.5 px-2 pb-1">
+                      <div className="mt-1.5 flex flex-col gap-1.5 border-t border-line px-2 pb-1 pt-1.5">
                         {desc && (
                           <div>
                             <p
@@ -606,8 +576,187 @@ export function SkillsPanel({
                           </div>
                         )}
                         <SkillModelMeta skill={s} />
+                        <div
+                          className={
+                            'flex flex-col gap-1.5' +
+                            (showActionsRule ? ' border-t border-line pt-1.5' : '')
+                          }
+                          onBlur={(e) => {
+                            const container = e.currentTarget
+                            requestAnimationFrame(() => {
+                              if (!container.isConnected) return
+                              const active = document.activeElement
+                              if (container.contains(active)) return
+                              const rowActions = container
+                                .closest('li')
+                                ?.querySelector('.catalog-skill-row__actions')
+                              if (rowActions?.contains(active)) return
+                              setOverflowOpen(false)
+                              setConfirmOpen(false)
+                            })
+                          }}
+                          onKeyDown={onActionsEscape}
+                        >
+                          {renameId === s.id ? (
+                            <div
+                              className="flex min-w-0 flex-wrap items-center gap-1.5"
+                              onBlur={(e) => {
+                                const container = e.currentTarget
+                                requestAnimationFrame(() => {
+                                  if (renameSavingRef.current) return
+                                  if (!container.contains(document.activeElement)) {
+                                    clearRename()
+                                  }
+                                })
+                              }}
+                            >
+                              <input
+                                type="text"
+                                className="field min-w-[8rem] flex-1"
+                                value={renameValue}
+                                aria-label="Имя скила"
+                                autoFocus
+                                disabled={renameSaving}
+                                onChange={(e) => setRenameValue(e.target.value)}
+                                onFocus={(e) => {
+                                  const len = e.target.value.length
+                                  e.target.setSelectionRange(len, len)
+                                }}
+                                onKeyDown={(e) => {
+                                  if (e.key === 'Enter') {
+                                    e.preventDefault()
+                                    e.stopPropagation()
+                                    void saveRename(s.id, s.name)
+                                  } else if (e.key === 'Escape') {
+                                    e.preventDefault()
+                                    e.stopPropagation()
+                                    focusRenameTriggerRef.current = true
+                                    clearRename()
+                                  }
+                                }}
+                              />
+                              <button
+                                type="button"
+                                className="btn-primary text-[11px]"
+                                aria-label="Сохранить"
+                                disabled={renameSaving || renameEmpty}
+                                onClick={() => void saveRename(s.id, s.name)}
+                              >
+                                {renameSaving ? '…' : 'Сохранить'}
+                              </button>
+                              <button
+                                type="button"
+                                className={btnClass}
+                                aria-label="Отмена"
+                                disabled={renameSaving}
+                                onClick={() => {
+                                  focusRenameTriggerRef.current = true
+                                  clearRename()
+                                }}
+                              >
+                                Отмена
+                              </button>
+                            </div>
+                          ) : (
+                            <>
+                              <div className="flex flex-wrap items-center gap-1.5">
+                                <button
+                                  ref={renameTriggerRef}
+                                  type="button"
+                                  className={btnClass}
+                                  aria-label="Переименовать"
+                                  onClick={() => startRename(s)}
+                                >
+                                  Переименовать
+                                </button>
+                                <button
+                                  type="button"
+                                  className={btnClass}
+                                  aria-label="Редактировать"
+                                  onClick={() => {
+                                    clearRename()
+                                    onEdit(s.id, s.name)
+                                  }}
+                                >
+                                  Редактировать
+                                </button>
+                                <button
+                                  type="button"
+                                  className={btnClass}
+                                  aria-label="Коммит"
+                                  title={commitTitle}
+                                  disabled={s.status !== 'draft'}
+                                  onClick={() => void skills.commit(s.id)}
+                                >
+                                  Коммит
+                                </button>
+                                <div className="relative ml-auto">
+                                  <button
+                                    ref={kebabRef}
+                                    type="button"
+                                    className={btnClass}
+                                    aria-label="Ещё действия"
+                                    aria-expanded={overflowOpen || confirmOpen}
+                                    onClick={() => {
+                                      setConfirmOpen(false)
+                                      setOverflowOpen((o) => !o)
+                                    }}
+                                  >
+                                    ⋯
+                                  </button>
+                                  {overflowOpen && !confirmOpen && (
+                                    <div className="absolute right-0 z-10 mt-1 min-w-[7rem] rounded border border-line bg-surface py-1 shadow-card">
+                                      <button
+                                        type="button"
+                                        className="block w-full px-3 py-1.5 text-left text-[11px] text-danger-ink hover:bg-surface-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand"
+                                        aria-label="Удалить"
+                                        onClick={() => {
+                                          clearRename()
+                                          setOverflowOpen(false)
+                                          setConfirmOpen(true)
+                                        }}
+                                      >
+                                        Удалить
+                                      </button>
+                                    </div>
+                                  )}
+                                </div>
+                              </div>
+                              {confirmOpen && (
+                                <div className="flex flex-wrap items-center gap-1.5">
+                                  <span className="text-[11px] text-ink-muted">
+                                    Удалить скил &laquo;{s.name}&raquo;?
+                                  </span>
+                                  <button
+                                    type="button"
+                                    autoFocus
+                                    className="btn-danger text-[11px]"
+                                    aria-label="Удалить"
+                                    onClick={() => {
+                                      setConfirmOpen(false)
+                                      onDelete(s.id)
+                                    }}
+                                  >
+                                    Удалить
+                                  </button>
+                                  <button
+                                    type="button"
+                                    className={btnClass}
+                                    aria-label="Отмена"
+                                    onClick={() => {
+                                      setConfirmOpen(false)
+                                      kebabRef.current?.focus()
+                                    }}
+                                  >
+                                    Отмена
+                                  </button>
+                                </div>
+                              )}
+                            </>
+                          )}
+                        </div>
                         {s.status === 'committed' && (
-                          <div className="relative flex w-full flex-col gap-1.5">
+                          <div className="relative flex w-full flex-col gap-1.5 border-t border-line pt-1.5">
                             {documents.length === 0 && (
                               <span className="text-[11px] text-ink-faint">нет документов</span>
                             )}
