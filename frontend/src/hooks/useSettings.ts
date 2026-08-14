@@ -24,7 +24,7 @@ function readLocal(): PersistedSettings | null {
   }
 }
 
-function writeLocal(s: PersistedSettings) {
+export function persistLocalSettings(s: PersistedSettings) {
   try {
     localStorage.setItem(LS_KEY, JSON.stringify(s))
   } catch {
@@ -64,7 +64,7 @@ export function useSettings(enabled = true) {
             if (cancelled) return
             setProvider(remote.provider)
             setModel(remote.model)
-            writeLocal({ provider: remote.provider, model: remote.model })
+            persistLocalSettings({ provider: remote.provider, model: remote.model })
           }
         }
         if (initProvider) {
@@ -106,7 +106,7 @@ export function useSettings(enabled = true) {
       const newModel = newModels[0]?.id ?? ''
       setModel(newModel)
       const next = { provider: newProvider, model: newModel }
-      writeLocal(next)
+      persistLocalSettings(next)
       await updateSettings(next)
     } finally {
       if (seq === providerChangeSeq.current) {
@@ -119,11 +119,16 @@ export function useSettings(enabled = true) {
     async (newModel: string) => {
       setModel(newModel)
       const next = { provider, model: newModel }
-      writeLocal(next)
+      persistLocalSettings(next)
       await updateSettings(next)
     },
     [provider],
   )
+
+  const refreshProviders = useCallback(async () => {
+    const ps = await listProviders()
+    setProviders(ps)
+  }, [])
 
   return {
     provider,
@@ -134,5 +139,6 @@ export function useSettings(enabled = true) {
     modelsLoading,
     changeProvider,
     changeModel,
+    refreshProviders,
   }
 }

@@ -1,5 +1,6 @@
 import { useId, useState, type FormEvent } from 'react'
-import { extractApiDetail, saveProviderKey, type SetupOut } from '../api.ts'
+import { extractApiDetail, getSetup, saveProviderKey, updateSettings, type SetupOut } from '../api.ts'
+import { persistLocalSettings } from '../hooks/useSettings.ts'
 
 type ProviderChoice = 'openrouter' | 'zai'
 
@@ -39,7 +40,17 @@ export function SetupKeyScreen({ onConfigured }: SetupKeyScreenProps) {
           ? { openrouter_api_key: trimmedKey }
           : { zai_api_key: trimmedKey }
       const result = await saveProviderKey(body)
-      onConfigured(result)
+      let next = result
+      try {
+        const settings = await updateSettings({ provider })
+        persistLocalSettings({ provider: settings.provider, model: settings.model })
+        try {
+          next = await getSetup()
+        } catch {
+        }
+      } catch {
+      }
+      onConfigured(next)
     } catch (err) {
       setError(extractApiDetail(err))
       setSubmitting(false)

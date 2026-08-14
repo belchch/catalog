@@ -25,6 +25,8 @@ import { Chat } from './components/Chat.tsx'
 import { CollapsibleSection } from './components/CollapsibleSection.tsx'
 import { DocumentList } from './components/DocumentList.tsx'
 import { ModelSelector } from './components/ModelSelector.tsx'
+import { SettingsIcon } from './components/icons.tsx'
+import { SettingsPanel } from './components/SettingsPanel.tsx'
 import { RescanReportModal } from './components/RescanReportModal.tsx'
 import { RunView } from './components/RunView.tsx'
 import { SessionsPanel } from './components/SessionsPanel.tsx'
@@ -122,9 +124,11 @@ export default function App() {
   const [artifactHighlight, setArtifactHighlight] = useState<ArtifactType | null>(null)
   const [gitSha, setGitSha] = useState('')
   const [pickerOpen, setPickerOpen] = useState(false)
+  const [settingsOpen, setSettingsOpen] = useState(false)
   const [rescanning, setRescanning] = useState(false)
   const [rescanReport, setRescanReport] = useState<ScanReport | null>(null)
   const workspacePathRef = useRef<string | null>(null)
+  const settingsButtonRef = useRef<HTMLButtonElement>(null)
 
   const handleSessionInvalid = useCallback(() => {
     writeStoredSessionId(null)
@@ -132,6 +136,19 @@ export default function App() {
     setEditingSkill(null)
     setArtifactHighlight(null)
   }, [])
+
+  const handleSettingsClose = useCallback(() => {
+    setSettingsOpen(false)
+    settingsButtonRef.current?.focus()
+  }, [])
+
+  const refreshSetup = setup.refresh
+  const refreshProviders = settingsHook.refreshProviders
+
+  const handleSettingsRefresh = useCallback(async () => {
+    await refreshSetup()
+    await refreshProviders()
+  }, [refreshSetup, refreshProviders])
 
   const planner = usePlannerSession(hasWorkspace ? sessionId : null, {
     onSessionInvalid: handleSessionInvalid,
@@ -536,17 +553,30 @@ export default function App() {
             </span>
           ) : null}
         </div>
-        <ModelSelector
-          provider={settingsHook.provider}
-          model={settingsHook.model}
-          providers={settingsHook.providers}
-          models={settingsHook.models}
-          loading={settingsHook.loading}
-          modelsLoading={settingsHook.modelsLoading}
-          onProviderChange={(p) => void settingsHook.changeProvider(p)}
-          onModelChange={(m) => void settingsHook.changeModel(m)}
-        />
-
+        <div className="flex shrink-0 items-center gap-2">
+          <ModelSelector
+            provider={settingsHook.provider}
+            model={settingsHook.model}
+            providers={settingsHook.providers}
+            models={settingsHook.models}
+            loading={settingsHook.loading}
+            modelsLoading={settingsHook.modelsLoading}
+            onProviderChange={(p) => void settingsHook.changeProvider(p)}
+            onModelChange={(m) => void settingsHook.changeModel(m)}
+          />
+          <button
+            ref={settingsButtonRef}
+            type="button"
+            className="btn-icon-ghost"
+            aria-label="Настройки"
+            title="Настройки"
+            aria-haspopup="dialog"
+            aria-expanded={settingsOpen}
+            onClick={() => setSettingsOpen(true)}
+          >
+            <SettingsIcon />
+          </button>
+        </div>
       </header>
       {notice && (
         <div className="catalog-notice px-5 py-2 text-xs">{notice}</div>
@@ -824,6 +854,13 @@ export default function App() {
           )}
         </main>
       </div>
+      {settingsOpen && (
+        <SettingsPanel
+          providers={setup.setup.providers}
+          onClose={handleSettingsClose}
+          onRefresh={handleSettingsRefresh}
+        />
+      )}
       {pickerOpen && (
         <WorkspacePicker
           recents={workspace.recents}

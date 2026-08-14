@@ -492,11 +492,25 @@ export interface SettingsOut {
   keys_configured?: boolean
 }
 
+export interface ProviderSetupOut {
+  id: string
+  name: string
+  configured: boolean
+  managed_by_env: boolean
+  active: boolean
+}
+
 export interface SetupOut {
   keys_configured: boolean
   provider: string
   openrouter_configured: boolean
   zai_configured: boolean
+  providers: ProviderSetupOut[]
+}
+
+export interface SettingsUpdate {
+  provider?: string
+  model?: string
 }
 
 export interface SetupKeysInput {
@@ -524,7 +538,7 @@ export function getProviderModels(providerId: string): Promise<ModelOut[]> {
   return jsonFetch<ModelOut[]>(`/providers/${encodeURIComponent(providerId)}/models`)
 }
 
-export function updateSettings(settings: SettingsOut): Promise<SettingsOut> {
+export function updateSettings(settings: SettingsUpdate): Promise<SettingsOut> {
   return jsonFetch<SettingsOut>('/settings', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
