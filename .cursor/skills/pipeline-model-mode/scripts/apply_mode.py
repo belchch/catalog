@@ -35,22 +35,22 @@ ROLES: list[tuple[str, str]] = [
 
 MODES: dict[str, dict[str, str]] = {
     "default": {
-        "catalog-generator": "cursor-grok-4.5[effort=high]",
-        "catalog-designer": "claude-opus-4-8[effort=high]",
+        "catalog-generator": "cursor-grok-4.6[effort=high]",
+        "catalog-designer": "claude-opus-5[effort=high]",
         "catalog-reviewer": "claude-sonnet-5[effort=high]",
-        "catalog-ui-reviewer": "gemini-3.5-flash",
+        "catalog-ui-reviewer": "gemini-3.7-flash",
     },
     "glm": {
         "catalog-generator": "glm-5-turbo",
         "catalog-designer": "glm-5.2",
         "catalog-reviewer": "claude-sonnet-5[effort=high]",
-        "catalog-ui-reviewer": "gemini-3.5-flash",
+        "catalog-ui-reviewer": "gemini-3.7-flash",
     },
     "grok": {
-        "catalog-generator": "cursor-grok-4.5[effort=high]",
-        "catalog-designer": "cursor-grok-4.5[effort=high]",
-        "catalog-reviewer": "cursor-grok-4.5[effort=high]",
-        "catalog-ui-reviewer": "cursor-grok-4.5[effort=high]",
+        "catalog-generator": "cursor-grok-4.6[effort=high]",
+        "catalog-designer": "cursor-grok-4.6[effort=high]",
+        "catalog-reviewer": "cursor-grok-4.6[effort=high]",
+        "catalog-ui-reviewer": "cursor-grok-4.6[effort=high]",
     },
 }
 

@@ -12,10 +12,10 @@ disable-model-invocation: true
 
 | Роль | Файл | `default` | `glm` | `grok` |
 |---|---|---|---|---|
-| catalog-generator | `.cursor/agents/catalog-generator.md` | `cursor-grok-4.5[effort=high]` | `glm-5-turbo` | `cursor-grok-4.5[effort=high]` |
-| catalog-designer | `.cursor/agents/catalog-designer.md` | `claude-opus-4-8[effort=high]` | `glm-5.2` | `cursor-grok-4.5[effort=high]` |
-| catalog-reviewer | `.cursor/agents/catalog-reviewer.md` | `claude-sonnet-5[effort=high]` | `claude-sonnet-5[effort=high]` | `cursor-grok-4.5[effort=high]` |
-| catalog-ui-reviewer | `.cursor/agents/catalog-ui-reviewer.md` | `gemini-3.5-flash` | `gemini-3.5-flash` | `cursor-grok-4.5[effort=high]` |
+| catalog-generator | `.cursor/agents/catalog-generator.md` | `cursor-grok-4.6[effort=high]` | `glm-5-turbo` | `cursor-grok-4.6[effort=high]` |
+| catalog-designer | `.cursor/agents/catalog-designer.md` | `claude-opus-5[effort=high]` | `glm-5.2` | `cursor-grok-4.6[effort=high]` |
+| catalog-reviewer | `.cursor/agents/catalog-reviewer.md` | `claude-sonnet-5[effort=high]` | `claude-sonnet-5[effort=high]` | `cursor-grok-4.6[effort=high]` |
+| catalog-ui-reviewer | `.cursor/agents/catalog-ui-reviewer.md` | `gemini-3.7-flash` | `gemini-3.7-flash` | `cursor-grok-4.6[effort=high]` |
 
 В `default` и `glm` у `reviewer` / `ui-reviewer` модели совпадают — пресеты оставлены в таблице явно. В `grok` все четыре роли на одном slug.
 
