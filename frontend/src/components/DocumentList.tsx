@@ -65,7 +65,7 @@ export function DocumentList({
               className={
                 'w-full truncate rounded px-2 py-1.5 text-left text-xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand ' +
                 (d.id === currentDocId
-                  ? 'bg-brand text-white'
+                  ? 'bg-[var(--sidebar-selected)] text-[var(--sidebar-selected-ink)]'
                   : 'bg-surface-muted text-ink-muted hover:bg-surface-hover')
               }
               title={d.title}

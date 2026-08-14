@@ -8,28 +8,28 @@
 
   --surface: #ffffff;
   --surface-muted: #f5f6f6;
-  --surface-sunken: #e7eaeb;
-  --surface-hover: #e9eff2;
-  --sidebar: #eef7ff;
-  --sidebar-line: #dce2e5;
-  --sidebar-ink: #394047;
-  --sidebar-brand-hover: #e1eff8;
-  --sidebar-selected: #d9ebf6;
-  --sidebar-selected-ink: #293b47;
-  --header-line: #e9e9e7;
-  --header-folder: #555b64;
+  --surface-sunken: #e0e0e0;
+  --surface-hover: #f0f0f0;
+  --sidebar: #f8f8f8;
+  --sidebar-line: #e8e8e8;
+  --sidebar-ink: #2e3236;
+  --sidebar-brand-hover: #f0f0f0;
+  --sidebar-selected: #ececec;
+  --sidebar-selected-ink: #1e2225;
+  --header-line: #ededed;
+  --header-folder: #585858;
   --notice-line: #f2d5aa;
   --notice-bg: #fff8ed;
   --notice-ink: #805314;
 
-  --line: #e4e6e5;
-  --line-strong: #b9c5cc;
+  --line: #ebebeb;
+  --line-strong: #c9c9c9;
   --line-brand: #4b9fcf;
 
   --ink: #292c31;
-  --ink-muted: #4f565d;
-  --ink-faint: #717981;
-  --ink-placeholder: #8e969c;
+  --ink-muted: #4e5257;
+  --ink-faint: #5f6368;
+  --ink-placeholder: #6b7075;
 
   --brand: #1d83c4;
   --brand-hover: #146fa9;
@@ -59,33 +59,34 @@
   --accent-soft: #efe6f8;
   --accent-ink: #7a3ea6;
 
-  --overlay: rgba(23, 33, 41, 0.35);
-  --shadow-card: 0 4px 18px rgba(42, 54, 62, 0.09);
+  --overlay: rgba(0, 0, 0, 0.32);
+  --shadow-card: 0 1px 2px rgba(16, 16, 16, 0.04), 0 10px 30px rgba(16, 16, 16, 0.06);
   --radius-control: 8px;
   --radius-card: 20px;
   --radius-card-lg: 24px;
 
   --user-bubble: #e6f2f9;
   --user-bubble-ink: #263640;
-  --md-code-bg: #f1f3f3;
-  --md-pre-bg: #f7f8f8;
-  --md-pre-line: #e4e7e6;
-  --md-table-line: #dfe3e2;
+  --md-code-bg: #f2f2f2;
+  --md-pre-bg: #f7f7f7;
+  --md-pre-line: #e6e6e6;
+  --md-table-line: #e1e1e1;
   --md-quote-line: #9cc6de;
-  --md-quote-ink: #667178;
-  --artifact-muted: #8c949a;
-  --artifact-title: #30343a;
-  --artifact-desc: #7c858c;
-  --artifact-label: #7d878e;
-  --artifact-item: #535b62;
-  --artifact-ready-meta: #899298;
+  --md-quote-ink: #6c6c6c;
+  --artifact-muted: #909090;
+  --artifact-title: #333333;
+  --artifact-desc: #838383;
+  --artifact-label: #838383;
+  --artifact-item: #585858;
+  --artifact-ready-meta: #8e8e8e;
   --artifact-open: #166ea7;
   --artifact-open-hover: #f4fafc;
-  --icon-button: #68737a;
-  --icon-button-hover: #f1f4f5;
+  --icon-button: #6e6e6e;
+  --icon-button-hover: #f1f1f1;
   --composer-fade: linear-gradient(0deg, var(--surface) 74%, rgba(255, 255, 255, 0.86));
   --header-bg: rgba(255, 255, 255, 0.96);
-  --search-bg: rgba(255, 255, 255, 0.6);
+  --search-bg: #ffffff;
+  --mark-bg: #3c4043;
 
   color: var(--ink);
   background: var(--surface);
@@ -215,7 +216,7 @@ button { -webkit-tap-highlight-color: transparent; }
 }
 .catalog-mark, .catalog-avatar {
   display: inline-flex; align-items: center; justify-content: center;
-  border-radius: 50%; background: var(--brand); color: var(--surface);
+  border-radius: 50%; background: var(--mark-bg); color: var(--surface);
 }
 .catalog-mark { width: 23px; height: 23px; font-size: 12px; font-weight: 700; }
 .catalog-sidebar__chevron { color: var(--ink-faint); font-size: 18px; font-weight: 400; }
@@ -227,7 +228,7 @@ button { -webkit-tap-highlight-color: transparent; }
 .catalog-search span:first-child { font-size: 20px; line-height: 1; }
 .catalog-new-chat {
   display: flex; align-items: center; gap: 10px; width: calc(100% - 16px);
-  margin: 0 8px 21px; padding: 9px 11px; border-radius: 9px;
+  margin: 0 8px 16px; padding: 8px 11px; border-radius: 9px;
   color: var(--ink); font-size: 15px; text-align: left;
 }
 .catalog-new-chat:hover { background: var(--sidebar-brand-hover); }
@@ -242,7 +243,7 @@ button { -webkit-tap-highlight-color: transparent; }
 
 .catalog-section-header {
   display: flex; align-items: center; justify-content: space-between; gap: 8px;
-  min-height: 34px; padding: 0 8px; border-radius: var(--radius-control);
+  min-height: 32px; padding: 0 8px; border-radius: var(--radius-control);
 }
 .catalog-section-header:hover { background: var(--sidebar-brand-hover); }
 .catalog-section-header__title {
@@ -261,9 +262,9 @@ button { -webkit-tap-highlight-color: transparent; }
 .catalog-message--assistant .md-body { color: var(--ink); }
 .catalog-message--user > div { background: var(--user-bubble); color: var(--user-bubble-ink); }
 .catalog-message--tool { color: var(--ink-faint); }
-.catalog-composer-area { border-top: 0; background: var(--composer-fade); }
+.catalog-composer-area { border-top: 0; background: var(--composer-fade); padding-bottom: 20px; }
 .catalog-composer {
-  padding: 11px 14px 10px; border: 1px solid var(--line); border-radius: var(--radius-card);
+  padding: 14px 16px 12px; border: 1px solid var(--line); border-radius: var(--radius-card);
   background: var(--surface); box-shadow: var(--shadow-card);
 }
 .catalog-composer textarea { border: 0; background: transparent; color: var(--ink); }

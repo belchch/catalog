@@ -40,7 +40,7 @@ export function SessionsPanel({
                 className={
                   'min-w-0 flex-1 rounded px-2 py-1.5 text-left text-xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand ' +
                   (active
-                    ? 'bg-brand text-white'
+                    ? 'bg-[var(--sidebar-selected)] text-[var(--sidebar-selected-ink)]'
                     : 'bg-surface-muted text-ink-muted hover:bg-surface-hover')
                 }
                 title={title}
@@ -59,7 +59,7 @@ export function SessionsPanel({
                 <span
                   className={
                     'mt-0.5 flex items-center gap-1 text-[10px] ' +
-                    (active ? 'text-white/80' : 'text-ink-faint')
+                    (active ? 'text-ink-muted' : 'text-ink-faint')
                   }
                 >
                   <span>{new Date(s.updated_at).toLocaleString()}</span>
