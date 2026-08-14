@@ -143,6 +143,7 @@ export default function App() {
   const skillsRefresh = skillsHook.refresh
   const workspaceRefreshCurrent = workspace.refreshCurrent
   const workspaceRefreshRecents = workspace.refreshRecents
+  const workspaceRefreshBlocked = workspace.refreshBlocked
   const workspaceRescan = workspace.rescan
 
   useEffect(() => {
@@ -167,7 +168,8 @@ export default function App() {
   const openPicker = useCallback(() => {
     setNotice(null)
     setPickerOpen(true)
-  }, [])
+    void workspaceRefreshBlocked()
+  }, [workspaceRefreshBlocked])
 
   const handleWorkspaceOpened = useCallback(() => {
     setPickerOpen(false)
@@ -187,7 +189,8 @@ export default function App() {
 
   const handleBusyConflict = useCallback((detail: string) => {
     setNotice(detail)
-  }, [])
+    void workspaceRefreshBlocked()
+  }, [workspaceRefreshBlocked])
 
   const handleRescan = useCallback(async () => {
     if (!hasWorkspace || rescanning) return
@@ -262,15 +265,17 @@ export default function App() {
       void docsRefresh()
     }
     void refreshSessionDocuments()
-  }, [run.finished, run.status, run.outputDocId, activeRunId, docsRefresh, refreshSessionDocuments])
+    void workspaceRefreshBlocked()
+  }, [run.finished, run.status, run.outputDocId, activeRunId, docsRefresh, refreshSessionDocuments, workspaceRefreshBlocked])
 
   const wasStreamingRef = useRef(false)
   useEffect(() => {
     if (wasStreamingRef.current && !planner.streaming) {
       void sessionsRefresh()
+      void workspaceRefreshBlocked()
     }
     wasStreamingRef.current = planner.streaming
-  }, [planner.streaming, sessionsRefresh])
+  }, [planner.streaming, sessionsRefresh, workspaceRefreshBlocked])
 
   const ensureSession = useCallback(async (): Promise<string> => {
     if (!hasWorkspace) throw new Error('Сначала откройте папку воркспейса')
@@ -827,6 +832,8 @@ export default function App() {
           onOpened={handleWorkspaceOpened}
           onClose={() => setPickerOpen(false)}
           onBusyConflict={handleBusyConflict}
+          blocked={workspace.blocked}
+          blockedReason={workspace.blockedReason}
         />
       )}
       {rescanReport && (

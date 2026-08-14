@@ -276,6 +276,17 @@ export function browseFs(path?: string): Promise<FsEntry[]> {
   return jsonFetch<FsEntry[]>(`/fs/browse${qs}`)
 }
 
+export type WorkspaceBusyReason = 'run' | 'session'
+
+export interface WorkspaceBusyOut {
+  busy: boolean
+  reason: WorkspaceBusyReason | null
+}
+
+export function getWorkspaceBusy(): Promise<WorkspaceBusyOut> {
+  return jsonFetch<WorkspaceBusyOut>('/workspaces/busy')
+}
+
 export function listDocuments(): Promise<DocumentOut[]> {
   return jsonFetch<DocumentOut[]>('/documents')
 }

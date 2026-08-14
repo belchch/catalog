@@ -1,10 +1,17 @@
 import { useCallback, useEffect, useState } from 'react'
-import type { FsEntry, ScanReport, WorkspaceOpenResult, WorkspaceOut } from '../api.ts'
+import type {
+  FsEntry,
+  ScanReport,
+  WorkspaceBusyReason,
+  WorkspaceOpenResult,
+  WorkspaceOut,
+} from '../api.ts'
 import {
   ApiError,
   browseFs,
   extractApiDetail,
   getCurrentWorkspace,
+  getWorkspaceBusy,
   listWorkspaces,
   openWorkspace,
   rescanWorkspace,
@@ -16,8 +23,11 @@ export interface UseWorkspaceResult {
   loading: boolean
   error: string | null
   busy: boolean
+  blocked: boolean
+  blockedReason: WorkspaceBusyReason | null
   refreshCurrent: () => Promise<WorkspaceOut | null>
   refreshRecents: () => Promise<void>
+  refreshBlocked: () => Promise<void>
   open: (path: string, confirm?: boolean) => Promise<WorkspaceOpenResult>
   rescan: () => Promise<ScanReport>
   browse: (path?: string) => Promise<FsEntry[]>
@@ -30,6 +40,21 @@ export function useWorkspace(): UseWorkspaceResult {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
+  const [blocked, setBlocked] = useState(false)
+  const [blockedReason, setBlockedReason] = useState<WorkspaceBusyReason | null>(
+    null,
+  )
+
+  const refreshBlocked = useCallback(async () => {
+    try {
+      const status = await getWorkspaceBusy()
+      setBlocked(status.busy)
+      setBlockedReason(status.busy ? status.reason : null)
+    } catch {
+      setBlocked(false)
+      setBlockedReason(null)
+    }
+  }, [])
 
   const refreshCurrent = useCallback(async () => {
     try {
@@ -71,6 +96,14 @@ export function useWorkspace(): UseWorkspaceResult {
       cancelled = true
     }
   }, [])
+
+  useEffect(() => {
+    const onFocus = () => {
+      void refreshBlocked()
+    }
+    window.addEventListener('focus', onFocus)
+    return () => window.removeEventListener('focus', onFocus)
+  }, [refreshBlocked])
 
   const open = useCallback(async (path: string, confirm = false) => {
     setBusy(true)
@@ -125,8 +158,11 @@ export function useWorkspace(): UseWorkspaceResult {
     loading,
     error,
     busy,
+    blocked,
+    blockedReason,
     refreshCurrent,
     refreshRecents,
+    refreshBlocked,
     open,
     rescan,
     browse,

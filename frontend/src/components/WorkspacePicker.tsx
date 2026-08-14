@@ -2,6 +2,7 @@ import { useCallback, useEffect, useId, useRef, useState } from 'react'
 import type {
   FsEntry,
   ScanReport,
+  WorkspaceBusyReason,
   WorkspaceOpenResult,
   WorkspaceOut,
 } from '../api.ts'
@@ -15,6 +16,8 @@ interface WorkspacePickerProps {
   onOpened: () => void
   onClose: () => void
   onBusyConflict: (detail: string) => void
+  blocked: boolean
+  blockedReason: WorkspaceBusyReason | null
 }
 
 type PendingPanel =
@@ -35,6 +38,34 @@ function formatLastOpened(value: string | null): string | null {
   return d.toLocaleString()
 }
 
+function blockedBannerText(reason: WorkspaceBusyReason | null): {
+  title: string
+  hint: string
+  short: string
+} {
+  const hint =
+    'Смотреть папки можно; открыть другую папку получится после завершения.'
+  if (reason === 'run') {
+    return {
+      title: 'Идёт выполнение скилла — переключение воркспейса недоступно',
+      hint,
+      short: 'Идёт выполнение скилла',
+    }
+  }
+  if (reason === 'session') {
+    return {
+      title: 'Активна сессия чата — переключение воркспейса недоступно',
+      hint,
+      short: 'Активна сессия чата',
+    }
+  }
+  return {
+    title: 'Воркспейс занят — переключение недоступно',
+    hint,
+    short: 'Воркспейс занят',
+  }
+}
+
 function parentDir(path: string): string {
   const trimmed = path.replace(/\/+$/, '')
   const idx = trimmed.lastIndexOf('/')
@@ -49,8 +80,11 @@ export function WorkspacePicker({
   onOpened,
   onClose,
   onBusyConflict,
+  blocked,
+  blockedReason,
 }: WorkspacePickerProps) {
   const titleId = useId()
+  const bannerId = useId()
   const closeRef = useRef<HTMLButtonElement>(null)
   const [stack, setStack] = useState<string[]>([])
   const [entries, setEntries] = useState<FsEntry[]>([])
@@ -63,6 +97,10 @@ export function WorkspacePicker({
   const currentBrowsePath = stack[stack.length - 1] ?? ''
   const atRoot = stack.length === 0
   const openablePath = currentBrowsePath || rootPath || (atRoot ? '.' : '')
+  const openDisabled = submitting || blocked
+  const banner = blocked ? blockedBannerText(blockedReason) : null
+  const openDescribedBy = blocked ? bannerId : undefined
+  const blockedTitle = banner?.short
 
   const loadBrowse = useCallback(
     async (path?: string) => {
@@ -103,7 +141,7 @@ export function WorkspacePicker({
   }, [onClose, submitting])
 
   const tryOpen = async (path: string, confirm = false) => {
-    if (submitting) return
+    if (submitting || blocked) return
     setSubmitting(true)
     if (!confirm) setPending(null)
     try {
@@ -179,6 +217,23 @@ export function WorkspacePicker({
           </button>
         </div>
 
+        {banner ? (
+          <div
+            id={bannerId}
+            role="status"
+            aria-live="polite"
+            className="mb-4 flex items-start gap-2 rounded border border-warning-line bg-warning-soft px-3 py-2 text-warning-ink"
+          >
+            <span aria-hidden="true" className="shrink-0">
+              ⚠
+            </span>
+            <div className="min-w-0">
+              <p className="text-xs font-medium">{banner.title}</p>
+              <p className="text-[11px] opacity-80">{banner.hint}</p>
+            </div>
+          </div>
+        ) : null}
+
         {recents.length > 0 ? (
           <section className="mb-4">
             <p className="mb-1 text-[11px] text-ink-faint">Недавние</p>
@@ -190,9 +245,10 @@ export function WorkspacePicker({
                     <button
                       type="button"
                       className="flex w-full items-center gap-2 rounded border border-line bg-surface-muted px-3 py-2 text-left hover:border-line-brand hover:bg-surface-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand disabled:cursor-not-allowed disabled:opacity-60"
-                      disabled={submitting}
+                      disabled={openDisabled}
                       onClick={() => void tryOpen(ws.path, false)}
-                      title={ws.path}
+                      title={blockedTitle ?? ws.path}
+                      aria-describedby={openDescribedBy}
                     >
                       <span className="min-w-0 flex-1">
                         <span className="block truncate text-xs text-ink">
@@ -235,8 +291,10 @@ export function WorkspacePicker({
             <button
               type="button"
               className="btn-secondary"
-              disabled={submitting || !openablePath}
+              disabled={openDisabled || !openablePath}
               onClick={() => void tryOpen(openablePath, false)}
+              title={blockedTitle}
+              aria-describedby={openDescribedBy}
             >
               Открыть эту папку
             </button>
@@ -271,8 +329,10 @@ export function WorkspacePicker({
                   <button
                     type="button"
                     className="btn-secondary mr-2 shrink-0"
-                    disabled={submitting}
+                    disabled={openDisabled}
                     onClick={() => void tryOpen(entry.path, false)}
+                    title={blockedTitle}
+                    aria-describedby={openDescribedBy}
                   >
                     Открыть
                   </button>
@@ -293,8 +353,10 @@ export function WorkspacePicker({
                   <button
                     type="button"
                     className="btn-primary"
-                    disabled={submitting}
+                    disabled={openDisabled}
                     onClick={() => void tryOpen(pending.path, true)}
+                    title={blockedTitle}
+                    aria-describedby={openDescribedBy}
                   >
                     {submitting ? '…' : 'Создать воркспейс'}
                   </button>
@@ -311,8 +373,10 @@ export function WorkspacePicker({
                   <button
                     type="button"
                     className="btn-primary"
-                    disabled={submitting}
+                    disabled={openDisabled}
                     onClick={() => void tryOpen(pending.path, true)}
+                    title={blockedTitle}
+                    aria-describedby={openDescribedBy}
                   >
                     {submitting ? 'Индексирую…' : 'Сделать воркспейсом и проиндексировать'}
                   </button>
