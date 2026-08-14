@@ -339,14 +339,14 @@ def test_reconcile_documents_endpoint(client, db) -> None:
 
     resp = client.post("/documents/reconcile")
     assert resp.status_code == 200
-    assert resp.json()["removed"] == [orphan_id]
+    assert resp.json()["removed"] == [orphan.path]
     assert get_document(db, orphan_id) is None
 
 
 def test_workspaces_rescan_endpoint(client, db) -> None:
     from pathlib import Path
 
-    from catalog.storage.repo_document import get_document
+    from catalog.storage.repo_document import list_documents
 
     workspace = Path(client.app.state.workspace)
     (workspace / "nested").mkdir()
@@ -357,17 +357,17 @@ def test_workspaces_rescan_endpoint(client, db) -> None:
     resp = client.post("/workspaces/rescan")
     assert resp.status_code == 200
     body = resp.json()
-    assert len(body["added"]) >= 1
+    assert "nested/a.md" in body["added"]
     assert any(p.endswith("skip.exe") or p == "skip.exe" for p in body["skipped"])
-    docs = {d["id"]: d for d in client.get("/documents").json()}
-    for doc_id in body["added"]:
-        assert doc_id in docs
+    indexed = {d.path for d in list_documents(db)}
+    for rel_path in body["added"]:
+        assert rel_path in indexed
     again = client.post("/workspaces/rescan").json()
     assert again["added"] == []
     assert again["updated"] == []
     assert again["renamed"] == []
     assert again["removed"] == []
-    assert get_document(db, body["added"][0]) is not None
+    assert "nested/a.md" in indexed
 
 
 # --------------------------------------------------------------------------- #

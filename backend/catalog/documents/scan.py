@@ -163,7 +163,7 @@ def scan_workspace(db: Database, workspace_dir: str | Path) -> ScanReport:
                 content_hash=file_hash,
             )
             if hash_changed:
-                report.updated.append(existing.id)
+                report.updated.append(entry.rel_path)
             continue
 
         file_hash = _ensure_hash(entry)
@@ -192,6 +192,7 @@ def scan_workspace(db: Database, workspace_dir: str | Path) -> ScanReport:
                 rename_candidate = meta_matches[0]
 
         if rename_candidate is not None:
+            old_path = rename_candidate.path
             update_document(
                 db,
                 rename_candidate.id,
@@ -201,7 +202,7 @@ def scan_workspace(db: Database, workspace_dir: str | Path) -> ScanReport:
                 content_hash=file_hash,
             )
             claimed_ids.add(rename_candidate.id)
-            report.renamed.append(rename_candidate.id)
+            report.renamed.append(f"{old_path} → {entry.rel_path}")
             continue
 
         row = create_document(
@@ -214,7 +215,7 @@ def scan_workspace(db: Database, workspace_dir: str | Path) -> ScanReport:
             content_hash=file_hash,
         )
         claimed_ids.add(row.id)
-        report.added.append(row.id)
+        report.added.append(entry.rel_path)
 
     for doc in docs:
         if doc.id in claimed_ids:
@@ -225,6 +226,6 @@ def scan_workspace(db: Database, workspace_dir: str | Path) -> ScanReport:
             continue
         deleted = delete_document(db, root, doc.id)
         if deleted is not None:
-            report.removed.append(deleted.id)
+            report.removed.append(deleted.path)
 
     return report

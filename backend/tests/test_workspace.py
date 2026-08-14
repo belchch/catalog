@@ -62,7 +62,7 @@ def test_reopen_same_workspace_refreshes_scan(
     (root / "late.md").write_text("hi", encoding="utf-8")
     manager.open(root, confirm_init=False)
     assert manager.last_scan is not None
-    assert len(manager.last_scan.added) == 1
+    assert manager.last_scan.added == ["late.md"]
     with manager.current.connect() as conn:
         paths = [r["path"] for r in conn.execute("SELECT path FROM document").fetchall()]
     assert paths == ["late.md"]

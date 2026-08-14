@@ -31,8 +31,7 @@ def test_scan_indexes_nested_and_skips(db: Database, tmp_path: Path) -> None:
     assert len(report.added) == 2
     assert "skip.exe" in report.skipped
     assert ".secret.md" in report.skipped
-    paths = {get_document(db, i).path for i in report.added}
-    assert paths == {"sub/deep/note.md", "table.csv"}
+    assert set(report.added) == {"sub/deep/note.md", "table.csv"}
 
     again = scan_workspace(db, tmp_path)
     assert again.added == []
@@ -94,7 +93,7 @@ def test_scan_rename_keeps_id_and_session(db: Database, tmp_path: Path) -> None:
     src.rename(dest)
 
     report = scan_workspace(db, tmp_path)
-    assert report.renamed == [row.id]
+    assert report.renamed == ["old.md → renamed.md"]
     assert report.added == []
     assert report.removed == []
     updated = get_document(db, row.id)
@@ -109,7 +108,7 @@ def test_scan_update_on_content_change(db: Database, tmp_path: Path) -> None:
     path.write_text("v2", encoding="utf-8")
 
     report = scan_workspace(db, tmp_path)
-    assert report.updated == [row.id]
+    assert report.updated == ["note.md"]
     refreshed = get_document(db, row.id)
     assert refreshed is not None
     assert refreshed.content_hash != row.content_hash
@@ -147,7 +146,7 @@ def test_scan_rename_without_content_hash_keeps_id(db: Database, tmp_path: Path)
     (tmp_path / "old.md").rename(tmp_path / "renamed.md")
 
     report = scan_workspace(db, tmp_path)
-    assert report.renamed == [row.id]
+    assert report.renamed == ["old.md → renamed.md"]
     assert report.added == []
     assert report.removed == []
     updated = get_document(db, row.id)
@@ -163,7 +162,7 @@ def test_scan_removes_missing(db: Database, tmp_path: Path) -> None:
     (tmp_path / gone.path).unlink()
 
     report = scan_workspace(db, tmp_path)
-    assert report.removed == [gone.id]
+    assert report.removed == [gone.path]
     assert get_document(db, gone.id) is None
     assert get_document(db, kept.id) is not None
 
