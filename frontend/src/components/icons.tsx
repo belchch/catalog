@@ -41,3 +41,16 @@ export function CheckIcon({ className }: IconProps) {
     </svg>
   )
 }
+
+export function SpinnerIcon({ className }: IconProps) {
+  return (
+    <svg
+      {...iconBase}
+      className={['animate-spin motion-reduce:animate-none', className]
+        .filter(Boolean)
+        .join(' ')}
+    >
+      <path d="M21 12a9 9 0 1 1-6.219-8.56" />
+    </svg>
+  )
+}
