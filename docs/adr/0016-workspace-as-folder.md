@@ -4,6 +4,7 @@
 - **Status:** Accepted
 - **Revises / partially supersedes:** ADR-0012 (отказ от dulwich git-репо и единого `catalog.db` в data-root как модели воркспейса; folder-picker становится end-user)
 - **Clarifies:** ADR-0005 (ФС = открытая папка пользователя; SQLite — workspace `index.db` + глобальная БД), ADR-0008 (FTS5 живёт в workspace `index.db`)
+- **Refined by:** ADR-0017 (устройство folder-picker: серверный обзор в пределах `APP_FS_ROOT`)
 
 > В Plane задача CATALOG-76 называла это «ADR-0013». Номер сдвинут на **0016**, потому что `0013-multi-provider-and-zai.md` уже занят (Accepted).
 
@@ -21,7 +22,7 @@ ADR-0012 зафиксировал data-root вне исходников (`APP_DA
    - **Workspace** (`.catalog/index.db`): таблицы `document`, `session`, `session_document`, `message`, `session_artifact`, `skill`, `skill_run` — тот же состав, что сейчас в `backend/app/storage/schema.py` для единой БД.
    - **Глобальная** (вне воркспейса, в app data / OS-каталоге настроек): настройки приложения и **реестр воркспейсов** (пути открытых/известных папок). Без бизнес-таблиц сессий/документов/скиллов.
 
-3. **Открытие и переключение.** Пользователь выбирает папку (end-user folder-picker). Переключение на другой воркспейс **блокируется**, пока есть активные `skill_run` со статусом `running`.
+3. **Открытие и переключение.** Пользователь выбирает папку (end-user folder-picker; как именно устроен выбор — ADR-0017). Переключение на другой воркспейс **блокируется**, пока есть активные `skill_run` со статусом `running`.
 
 4. **Три уровня проверки при открытии** (по порядку; следующий — только если предыдущий прошёл):
    1. Маркер `.catalog/` + `PRAGMA user_version` (совместимость схемы).

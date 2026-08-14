@@ -22,6 +22,7 @@
 | [0014](0014-script-skills.md) | Детерминированные script-скилы (kind=script) + sandbox | Accepted |
 | [0015](0015-session-artifacts.md) | Артефакты сессии (prompt/script/meta); build = упаковка без LLM | Accepted |
 | [0016](0016-workspace-as-folder.md) | Workspace-as-folder: воркспейс = папка; `.catalog/index.db` + глобальный реестр | Accepted |
+| [0017](0017-folder-picker-via-backend-browse.md) | Folder-picker — серверный обзор ФС (`/fs/browse` в пределах `APP_FS_ROOT`), не системный диалог | Accepted |
 
 ## Связанные материалы
 - Исходные транскрипции: `../pre-design/` (`opus-chat.json` — фундаментальные решения; `fable-review.json` — критика и уточнения).
