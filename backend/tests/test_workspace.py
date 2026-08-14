@@ -195,6 +195,53 @@ def test_stale_running_run_does_not_block_switch(
     assert stale["status"] == "cancelled"
 
 
+def test_switch_blocked_while_session_active(tmp_path: Path, app_db: Database) -> None:
+    session_busy = {"on": True}
+    manager = WorkspaceManager()
+    manager.bind(app_db=app_db, app_state=type("S", (), {})())
+    manager.set_busy_probe(lambda: session_busy["on"])
+    a = tmp_path / "a"
+    b = tmp_path / "b"
+    a.mkdir()
+    b.mkdir()
+    manager.open(a, confirm_init=True)
+    assert manager.has_running() == "session"
+    with pytest.raises(WorkspaceBusyError, match="planner session"):
+        manager.open(b, confirm_init=True)
+    session_busy["on"] = False
+    other = manager.open(b, confirm_init=True)
+    assert manager.root == b.resolve()
+    assert other is manager.current
+
+
+def test_run_reason_precedes_session(tmp_path: Path, app_db: Database) -> None:
+    manager = WorkspaceManager()
+    manager.bind(app_db=app_db, app_state=type("S", (), {})())
+    manager.set_busy_probe(lambda: True)
+    root = tmp_path / "folder"
+    root.mkdir()
+    db = manager.open(root, confirm_init=True)
+    with db.connect() as conn:
+        conn.execute(
+            "INSERT INTO skill_run(id, skill_id, status, started_at) "
+            "VALUES ('r1', 's1', 'running', ?)",
+            (_fresh_started_at(),),
+        )
+    assert manager.has_running() == "run"
+
+
+def test_close_blocked_while_session_active(tmp_path: Path, app_db: Database) -> None:
+    manager = WorkspaceManager()
+    manager.bind(app_db=app_db, app_state=type("S", (), {})())
+    manager.set_busy_probe(lambda: True)
+    root = tmp_path / "folder"
+    root.mkdir()
+    manager.open(root, confirm_init=True)
+    with pytest.raises(WorkspaceBusyError, match="planner session"):
+        manager.close()
+    assert manager.current is not None
+
+
 def test_close_clears_current(tmp_path: Path, app_db: Database) -> None:
     state = type("S", (), {})()
     manager = WorkspaceManager()

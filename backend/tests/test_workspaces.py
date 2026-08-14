@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from pathlib import Path
 
 from catalog.storage.db import Database
@@ -111,6 +112,26 @@ def test_switch_preserves_document_ids_and_session(
     assert [d.id for d in attached] == [doc_a_id]
 
 
+def _fresh_started_at() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def _insert_run(manager: WorkspaceManager, *, status: str, run_id: str = "r1") -> None:
+    assert manager.current is not None
+    with manager.current.connect() as conn:
+        conn.execute(
+            "INSERT INTO skill_run(id, skill_id, status, started_at) "
+            "VALUES (?, 's1', ?, ?)",
+            (run_id, status, _fresh_started_at()),
+        )
+
+
+def test_busy_without_open_workspace(client_no_workspace) -> None:
+    resp = client_no_workspace.get("/workspaces/busy")
+    assert resp.status_code == 200
+    assert resp.json() == {"busy": False, "reason": None}
+
+
 def test_open_blocked_while_run_active(client_no_workspace, tmp_path: Path) -> None:
     client = client_no_workspace
     a = tmp_path / "wa"
@@ -122,17 +143,14 @@ def test_open_blocked_while_run_active(client_no_workspace, tmp_path: Path) -> N
         == 200
     )
     manager: WorkspaceManager = client.app.state.workspace_manager
-    assert manager.current is not None
-    with manager.current.connect() as conn:
-        conn.execute(
-            "INSERT INTO skill_run(id, skill_id, status, started_at) "
-            "VALUES ('r1', 's1', 'running', '2026-01-01T00:00:00Z')"
-        )
+    _insert_run(manager, status="running")
 
     blocked = client.post(
         "/workspaces/open", json={"path": str(b), "confirm": True}
     )
     assert blocked.status_code == 409
+    assert "skill_run" in blocked.json()["detail"]
+    assert client.get("/workspaces/busy").json() == {"busy": True, "reason": "run"}
 
     with manager.current.connect() as conn:
         conn.execute("UPDATE skill_run SET status = 'ok' WHERE id = 'r1'")
@@ -140,6 +158,128 @@ def test_open_blocked_while_run_active(client_no_workspace, tmp_path: Path) -> N
     ok = client.post("/workspaces/open", json={"path": str(b), "confirm": True})
     assert ok.status_code == 200
     assert ok.json()["status"] == "ok"
+
+
+def test_open_blocked_while_run_pending(client_no_workspace, tmp_path: Path) -> None:
+    client = client_no_workspace
+    a = tmp_path / "wa"
+    b = tmp_path / "wb"
+    a.mkdir()
+    b.mkdir()
+    assert (
+        client.post("/workspaces/open", json={"path": str(a), "confirm": True}).status_code
+        == 200
+    )
+    manager: WorkspaceManager = client.app.state.workspace_manager
+    _insert_run(manager, status="pending")
+
+    blocked = client.post(
+        "/workspaces/open", json={"path": str(b), "confirm": True}
+    )
+    assert blocked.status_code == 409
+    assert client.get("/workspaces/busy").json() == {"busy": True, "reason": "run"}
+
+
+def test_browse_and_rescan_ok_while_run_active(
+    client_no_workspace, tmp_path: Path
+) -> None:
+    client = client_no_workspace
+    folder = tmp_path / "busyfs"
+    folder.mkdir()
+    (folder / "child").mkdir()
+    assert (
+        client.post(
+            "/workspaces/open", json={"path": str(folder), "confirm": True}
+        ).status_code
+        == 200
+    )
+    manager: WorkspaceManager = client.app.state.workspace_manager
+    _insert_run(manager, status="running")
+
+    browse = client.get("/fs/browse", params={"path": str(folder)})
+    assert browse.status_code == 200
+    rescan = client.post("/workspaces/rescan")
+    assert rescan.status_code == 200
+    assert client.get("/workspaces/busy").json() == {"busy": True, "reason": "run"}
+
+
+def test_reopen_same_folder_ok_while_run_active(
+    client_no_workspace, tmp_path: Path
+) -> None:
+    client = client_no_workspace
+    folder = tmp_path / "same"
+    folder.mkdir()
+    assert (
+        client.post(
+            "/workspaces/open", json={"path": str(folder), "confirm": True}
+        ).status_code
+        == 200
+    )
+    manager: WorkspaceManager = client.app.state.workspace_manager
+    _insert_run(manager, status="running")
+
+    again = client.post(
+        "/workspaces/open", json={"path": str(folder), "confirm": True}
+    )
+    assert again.status_code == 200
+    assert again.json()["status"] == "ok"
+
+
+def test_open_blocked_while_ws_session_active(
+    client_no_workspace, tmp_path: Path
+) -> None:
+    client = client_no_workspace
+    a = tmp_path / "wsa"
+    b = tmp_path / "wsb"
+    a.mkdir()
+    b.mkdir()
+    assert (
+        client.post("/workspaces/open", json={"path": str(a), "confirm": True}).status_code
+        == 200
+    )
+    session_id = client.post("/sessions").json()["id"]
+
+    with client.websocket_connect(f"/sessions/{session_id}") as ws:
+        frame = ws.receive_json()
+        assert frame["type"] == "suggestions"
+        busy = client.get("/workspaces/busy")
+        assert busy.status_code == 200
+        assert busy.json() == {"busy": True, "reason": "session"}
+        blocked = client.post(
+            "/workspaces/open", json={"path": str(b), "confirm": True}
+        )
+        assert blocked.status_code == 409
+        assert "session" in blocked.json()["detail"]
+
+    assert client.get("/workspaces/busy").json() == {"busy": False, "reason": None}
+    ok = client.post("/workspaces/open", json={"path": str(b), "confirm": True})
+    assert ok.status_code == 200
+    assert ok.json()["status"] == "ok"
+
+
+def test_busy_clears_after_ws_handler_error(
+    client_no_workspace, tmp_path: Path
+) -> None:
+    client = client_no_workspace
+    folder = tmp_path / "wserr"
+    folder.mkdir()
+    assert (
+        client.post(
+            "/workspaces/open", json={"path": str(folder), "confirm": True}
+        ).status_code
+        == 200
+    )
+    session_id = client.post("/sessions").json()["id"]
+
+    with client.websocket_connect(f"/sessions/{session_id}") as ws:
+        assert ws.receive_json()["type"] == "suggestions"
+        ws.send_text("сделай план")
+        while True:
+            frame = ws.receive_json()
+            if frame.get("type") == "error":
+                break
+
+    assert client.get("/workspaces/busy").json() == {"busy": False, "reason": None}
 
 
 def test_rescan_report(client_no_workspace, tmp_path: Path) -> None:

@@ -404,6 +404,30 @@ def test_ws_session_planner(client, provider, db) -> None:
     assert roles.count("assistant") >= 1
 
 
+def test_workspace_busy_while_planner_ws_active(client, settings) -> None:
+    other = Path(settings.fs_root) / "other-ws"
+    other.mkdir()
+    session_id = client.post("/sessions").json()["id"]
+
+    with client.websocket_connect(f"/sessions/{session_id}") as ws:
+        assert ws.receive_json()["type"] == "suggestions"
+        assert client.get("/workspaces/busy").json() == {
+            "busy": True,
+            "reason": "session",
+        }
+        blocked = client.post(
+            "/workspaces/open", json={"path": str(other), "confirm": True}
+        )
+        assert blocked.status_code == 409
+
+    assert client.get("/workspaces/busy").json() == {"busy": False, "reason": None}
+    opened = client.post(
+        "/workspaces/open", json={"path": str(other), "confirm": True}
+    )
+    assert opened.status_code == 200
+    assert opened.json()["status"] == "ok"
+
+
 def test_ws_session_attach_documents_and_prompt(client, provider, db) -> None:
     session_id = client.post("/sessions").json()["id"]
     doc_a = _upload(client, "alpha.md", b"# Alpha\n")

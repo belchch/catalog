@@ -22,6 +22,7 @@ import asyncio
 import json
 import re
 from contextlib import suppress
+from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Response, WebSocket, WebSocketDisconnect
 
@@ -632,123 +633,137 @@ def _ws_session_tools(
     return tools
 
 
+def _inc_active_ws_sessions(state: Any) -> None:
+    current = getattr(state, "active_ws_sessions", 0)
+    state.active_ws_sessions = current + 1
+
+
+def _dec_active_ws_sessions(state: Any) -> None:
+    current = getattr(state, "active_ws_sessions", 0)
+    state.active_ws_sessions = max(0, current - 1)
+
+
 @router.websocket("/sessions/{session_id}")
 async def session_ws(
     websocket: WebSocket,
     session_id: str,
 ) -> None:
     await websocket.accept()
-
-    settings: Settings = websocket.app.state.settings
-    manager = websocket.app.state.workspace_manager
-    if manager.current is None or manager.root is None:
-        await websocket.send_json({"type": "error", "message": "workspace not open"})
-        await websocket.close()
-        return
-
-    db = manager.current
-    workspace = str(manager.root)
-    if get_session(db, session_id) is None:
-        await websocket.send_json({"type": "error", "message": "session not found"})
-        await websocket.close()
-        return
-
-    base_tools: ToolRegistry | None = getattr(websocket.app.state, "tools", None)
-    if base_tools is None:
-        await websocket.send_json({"type": "error", "message": "workspace not open"})
-        await websocket.close()
-        return
-
-    if not list_messages(db, session_id):
-        await websocket.send_json({"type": "suggestions", "items": STARTER_SUGGESTIONS})
-
-    buffered: str | None = None
+    state = websocket.app.state
+    _inc_active_ws_sessions(state)
     try:
-        while True:
-            manager = websocket.app.state.workspace_manager
-            db = manager.current
-            if db is None or manager.root is None:
-                await websocket.send_json({"type": "error", "message": "workspace not open"})
-                await websocket.close()
-                return
-            workspace = str(manager.root)
-            if get_session(db, session_id) is None:
-                await websocket.send_json({"type": "error", "message": "session not found"})
-                await websocket.close()
-                return
-            base_tools = getattr(websocket.app.state, "tools", None)
-            if base_tools is None:
-                await websocket.send_json({"type": "error", "message": "workspace not open"})
-                await websocket.close()
-                return
-            tools = _ws_session_tools(db, workspace, session_id, base_tools, websocket)
+        settings: Settings = state.settings
+        manager = state.workspace_manager
+        if manager.current is None or manager.root is None:
+            await websocket.send_json({"type": "error", "message": "workspace not open"})
+            await websocket.close()
+            return
 
-            if buffered is not None:
-                raw = buffered
-                buffered = None
-            else:
-                raw = await _receive_text_with_keepalive(websocket)
+        db = manager.current
+        workspace = str(manager.root)
+        if get_session(db, session_id) is None:
+            await websocket.send_json({"type": "error", "message": "session not found"})
+            await websocket.close()
+            return
 
-            if _is_cancel_frame(raw) or _is_keepalive_frame(raw):
-                continue
+        base_tools: ToolRegistry | None = getattr(state, "tools", None)
+        if base_tools is None:
+            await websocket.send_json({"type": "error", "message": "workspace not open"})
+            await websocket.close()
+            return
 
-            content, doc_ids = _parse_user_payload(raw)
-            if doc_ids:
-                attach_documents(db, session_id, doc_ids)
-                await websocket.send_json(_session_docs_frame(db, session_id))
-            add_message(db, session_id=session_id, role="user", content=content)
+        if not list_messages(db, session_id):
+            await websocket.send_json({"type": "suggestions", "items": STARTER_SUGGESTIONS})
 
-            messages = _conversation_messages(db, session_id)
+        buffered: str | None = None
+        try:
+            while True:
+                manager = state.workspace_manager
+                db = manager.current
+                if db is None or manager.root is None:
+                    await websocket.send_json({"type": "error", "message": "workspace not open"})
+                    await websocket.close()
+                    return
+                workspace = str(manager.root)
+                if get_session(db, session_id) is None:
+                    await websocket.send_json({"type": "error", "message": "session not found"})
+                    await websocket.close()
+                    return
+                base_tools = getattr(state, "tools", None)
+                if base_tools is None:
+                    await websocket.send_json({"type": "error", "message": "workspace not open"})
+                    await websocket.close()
+                    return
+                tools = _ws_session_tools(db, workspace, session_id, base_tools, websocket)
 
-            provider = websocket.app.state.provider
-            model = (
-                getattr(websocket.app.state, "active_model", None)
-                or settings.default_model
-            )
+                if buffered is not None:
+                    raw = buffered
+                    buffered = None
+                else:
+                    raw = await _receive_text_with_keepalive(websocket)
 
-            session_row = get_session(db, session_id)
-            timeout = (
-                session_row.llm_timeout_seconds
-                if session_row is not None
-                else DEFAULT_LLM_TIMEOUT_SECONDS
-            )
-            with llm_timeout_context(float(timeout)):
-                final_text, final_capped, cancelled, buffered = await _run_planner_turn(
-                    websocket,
-                    provider=provider,
-                    model=model,
-                    messages=messages,
-                    tools=tools,
-                    db=db,
-                    session_id=session_id,
-                    system_prompt=_planner_system_prompt(db, session_id),
+                if _is_cancel_frame(raw) or _is_keepalive_frame(raw):
+                    continue
+
+                content, doc_ids = _parse_user_payload(raw)
+                if doc_ids:
+                    attach_documents(db, session_id, doc_ids)
+                    await websocket.send_json(_session_docs_frame(db, session_id))
+                add_message(db, session_id=session_id, role="user", content=content)
+
+                messages = _conversation_messages(db, session_id)
+
+                provider = state.provider
+                model = (
+                    getattr(state, "active_model", None)
+                    or settings.default_model
                 )
 
-            if final_text:
-                clean_text, items = parse_suggestions(final_text)
-                await websocket.send_json({"type": "token", "delta": clean_text})
-                add_message(
-                    db,
-                    session_id=session_id,
-                    role="assistant",
-                    content=clean_text,
+                session_row = get_session(db, session_id)
+                timeout = (
+                    session_row.llm_timeout_seconds
+                    if session_row is not None
+                    else DEFAULT_LLM_TIMEOUT_SECONDS
                 )
-                if items:
-                    await websocket.send_json({"type": "suggestions", "items": items})
+                with llm_timeout_context(float(timeout)):
+                    final_text, final_capped, cancelled, buffered = await _run_planner_turn(
+                        websocket,
+                        provider=provider,
+                        model=model,
+                        messages=messages,
+                        tools=tools,
+                        db=db,
+                        session_id=session_id,
+                        system_prompt=_planner_system_prompt(db, session_id),
+                    )
 
-            if cancelled:
-                await websocket.send_json({"type": "finish", "status": "cancelled"})
-                continue
+                if final_text:
+                    clean_text, items = parse_suggestions(final_text)
+                    await websocket.send_json({"type": "token", "delta": clean_text})
+                    add_message(
+                        db,
+                        session_id=session_id,
+                        role="assistant",
+                        content=clean_text,
+                    )
+                    if items:
+                        await websocket.send_json({"type": "suggestions", "items": items})
 
-            await websocket.send_json(
-                {
-                    "type": "finish",
-                    "capped": final_capped,
-                    "status": "capped" if final_capped else "ok",
-                }
-            )
-    except WebSocketDisconnect:
-        pass
-    except Exception as exc:  # noqa: BLE001 — report over the socket, then close
-        await websocket.send_json({"type": "error", "message": str(exc)})
-        await websocket.close()
+                if cancelled:
+                    await websocket.send_json({"type": "finish", "status": "cancelled"})
+                    continue
+
+                await websocket.send_json(
+                    {
+                        "type": "finish",
+                        "capped": final_capped,
+                        "status": "capped" if final_capped else "ok",
+                    }
+                )
+        except WebSocketDisconnect:
+            pass
+        except Exception as exc:  # noqa: BLE001 — report over the socket, then close
+            await websocket.send_json({"type": "error", "message": str(exc)})
+            await websocket.close()
+    finally:
+        _dec_active_ws_sessions(state)

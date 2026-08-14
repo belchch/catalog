@@ -8,6 +8,7 @@ from catalog.api.deps import get_settings, get_workspace_manager
 from catalog.api.schemas import (
     FsEntry,
     ScanReport,
+    WorkspaceBusyOut,
     WorkspaceOpenRequest,
     WorkspaceOpenResult,
     WorkspaceOut,
@@ -36,6 +37,16 @@ async def list_workspaces(
     manager: WorkspaceManager = Depends(get_workspace_manager),
 ) -> list[WorkspaceOut]:
     return [WorkspaceOut(**row) for row in manager.list_registry()]
+
+
+@router.get("/workspaces/busy", response_model=WorkspaceBusyOut)
+async def workspace_busy(
+    manager: WorkspaceManager = Depends(get_workspace_manager),
+) -> WorkspaceBusyOut:
+    if manager.current is None:
+        return WorkspaceBusyOut(busy=False, reason=None)
+    reason = manager.has_running()
+    return WorkspaceBusyOut(busy=reason is not None, reason=reason)
 
 
 @router.get("/workspaces/current", response_model=WorkspaceOut | None)

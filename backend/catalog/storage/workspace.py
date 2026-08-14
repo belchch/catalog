@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import shutil
 import uuid
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -70,11 +71,15 @@ class WorkspaceManager:
         self.last_scan: ScanReport | None = None
         self._app_db: Database | None = None
         self._app_state: Any | None = None
+        self._session_busy_probe: Callable[[], bool] | None = None
 
     def bind(self, *, app_db: Database, app_state: Any) -> None:
         self._app_db = app_db
         self._app_state = app_state
         self._sync_app_state()
+
+    def set_busy_probe(self, probe: Callable[[], bool]) -> None:
+        self._session_busy_probe = probe
 
     def validate(self, path: Path) -> None:
         root = path.resolve()
@@ -194,14 +199,23 @@ class WorkspaceManager:
         self.root = None
         self.last_scan = None
 
-    def has_running(self) -> bool:
-        if self.current is None:
-            return False
-        return has_running_runs(self.current)
+    def has_running(self) -> Literal["run", "session"] | None:
+        if self.current is not None and has_running_runs(self.current):
+            return "run"
+        if self._session_busy_probe is not None and self._session_busy_probe():
+            return "session"
+        return None
 
     def _assert_no_running(self) -> None:
-        if self.has_running():
-            raise WorkspaceBusyError("cannot switch workspace while a skill_run is running")
+        reason = self.has_running()
+        if reason == "run":
+            raise WorkspaceBusyError(
+                "cannot switch workspace while a skill_run is running"
+            )
+        if reason == "session":
+            raise WorkspaceBusyError(
+                "cannot switch workspace while a planner session is active"
+            )
 
     def list_registry(self) -> list[dict[str, str | None]]:
         if self._app_db is None:

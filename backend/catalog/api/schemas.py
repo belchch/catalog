@@ -33,6 +33,11 @@ class WorkspaceOpenResult(BaseModel):
     scan: ScanReport | None = None
 
 
+class WorkspaceBusyOut(BaseModel):
+    busy: bool
+    reason: Literal["run", "session"] | None = None
+
+
 class FsEntry(BaseModel):
     name: str
     path: str
