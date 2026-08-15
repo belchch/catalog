@@ -146,8 +146,12 @@ export default function App() {
     id: string
     skippedDocIds: string[]
   }> | null>(null)
+  const sessionEpochRef = useRef(0)
 
   const handleSessionInvalid = useCallback(() => {
+    sessionEpochRef.current += 1
+    creatingSessionRef.current = null
+    sessionIdRef.current = null
     writeStoredSessionId(null)
     setSessionId(null)
     setEditingSkill(null)
@@ -190,6 +194,9 @@ export default function App() {
     const nextPath = workspace.current?.path ?? null
     const prevPath = workspacePathRef.current
     if (prevPath !== null && nextPath !== prevPath) {
+      sessionEpochRef.current += 1
+      creatingSessionRef.current = null
+      sessionIdRef.current = null
       setSessionId(null)
       setActiveRunId(null)
       setEditingSkill(null)
@@ -323,15 +330,20 @@ export default function App() {
       }
       if (creatingSessionRef.current) {
         const created = await creatingSessionRef.current
-        return { id: created.id, skippedDocIds: [] }
+        return { id: created.id, skippedDocIds: created.skippedDocIds }
       }
+      const epoch = sessionEpochRef.current
       const pending = createSession(docIds).then((created) => {
+        const skippedDocIds = created.skipped_doc_ids ?? []
+        if (sessionEpochRef.current !== epoch) {
+          return { id: created.id, skippedDocIds }
+        }
         sessionIdRef.current = created.id
         setSessionId(created.id)
         void sessions.refresh()
         return {
           id: created.id,
-          skippedDocIds: created.skipped_doc_ids ?? [],
+          skippedDocIds,
         }
       })
       creatingSessionRef.current = pending
@@ -353,8 +365,10 @@ export default function App() {
         return
       }
       setNotice(null)
+      const epoch = sessionEpochRef.current
       void ensureSession(docIds)
         .then((created) => {
+          if (sessionEpochRef.current !== epoch) return
           const skipped = new Set(created.skippedDocIds)
           const filteredIds = docIds?.filter((id) => !skipped.has(id))
           const filteredDocs = docs?.filter((d) => !skipped.has(d.id))
@@ -377,6 +391,9 @@ export default function App() {
   const handleSelectSession = useCallback(
     (id: string) => {
       if (id === sessionId) return
+      sessionEpochRef.current += 1
+      creatingSessionRef.current = null
+      sessionIdRef.current = id
       setActiveRunId(null)
       setEditingSkill(null)
       setSessionId(id)
@@ -385,6 +402,9 @@ export default function App() {
   )
 
   const handleNewChat = useCallback(() => {
+    sessionEpochRef.current += 1
+    creatingSessionRef.current = null
+    sessionIdRef.current = null
     setActiveRunId(null)
     setEditingSkill(null)
     setSessionId(null)
@@ -396,6 +416,9 @@ export default function App() {
       try {
         await sessions.remove(id)
         if (id === sessionId) {
+          sessionEpochRef.current += 1
+          creatingSessionRef.current = null
+          sessionIdRef.current = null
           setActiveRunId(null)
           setEditingSkill(null)
           setSessionId(null)
@@ -411,6 +434,9 @@ export default function App() {
     setNotice(null)
     try {
       const started = await startEditSession(skillId)
+      sessionEpochRef.current += 1
+      creatingSessionRef.current = null
+      sessionIdRef.current = started.session_id
       setActiveRunId(null)
       setSessionId(started.session_id)
       setEditingSkill({ skillId: started.skill_id, name })
@@ -425,6 +451,9 @@ export default function App() {
       try {
         await skillsHook.remove(skillId)
         if (editingSkill?.skillId === skillId) {
+          sessionEpochRef.current += 1
+          creatingSessionRef.current = null
+          sessionIdRef.current = null
           setEditingSkill(null)
           setSessionId(null)
         }
@@ -554,7 +583,9 @@ export default function App() {
       setNotice(null)
       setSavedResultDoc(null)
       try {
+        const epoch = sessionEpochRef.current
         const { id: sid } = await ensureSession()
+        if (sessionEpochRef.current !== epoch) return
         const runId = await skillsHook.apply(skillId, docIds, mode, sid, prompt)
         setActiveRunId(runId)
       } catch (e) {
