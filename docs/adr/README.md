@@ -23,6 +23,7 @@
 | [0015](0015-session-artifacts.md) | Артефакты сессии (prompt/script/meta); build = упаковка без LLM | Accepted |
 | [0016](0016-workspace-as-folder.md) | Workspace-as-folder: воркспейс = папка; `.catalog/index.db` + глобальный реестр | Accepted |
 | [0017](0017-folder-picker-via-backend-browse.md) | Folder-picker — серверный обзор ФС (`/fs/browse` в пределах `APP_FS_ROOT`), не системный диалог | Accepted |
+| [0018](0018-pipeline-skills.md) | Pipeline-скилы (kind=pipeline): python + LLM в одном скиле | Accepted |
 
 ## Связанные материалы
 - Исходные транскрипции: `../pre-design/` (`opus-chat.json` — фундаментальные решения; `fable-review.json` — критика и уточнения).

@@ -124,9 +124,13 @@ def test_attach_documents_idempotent(db: Database) -> None:
     a = create_document(db, title="Alpha", path="documents/a.md", kind="md")
     b = create_document(db, title="Beta", path="documents/b.md", kind="md")
 
-    attach_documents(db, session_id, [a.id, b.id])
-    attach_documents(db, session_id, [a.id, b.id])
-    attach_documents(db, session_id, ["missing-id"])
+    assert attach_documents(db, session_id, [a.id, b.id]) == []
+    assert attach_documents(db, session_id, [a.id, b.id]) == []
+    assert attach_documents(db, session_id, ["missing-id"]) == ["missing-id"]
+    assert attach_documents(db, session_id, [a.id, "missing-id", "missing-id"]) == [
+        "missing-id"
+    ]
+    assert attach_documents(db, session_id, []) == []
 
     docs = list_session_documents(db, session_id)
     assert [d.id for d in docs] == [a.id, b.id]

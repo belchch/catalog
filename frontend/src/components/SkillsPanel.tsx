@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react'
 import type { ApplyMode, DocumentOut, SkillOut } from '../api.ts'
 import type { UseSkillsResult } from '../hooks/useSkills.ts'
 import { DocumentCombobox } from './DocumentCombobox.tsx'
-import { CommitIcon, MoreHorizontalIcon, PencilIcon } from './icons.tsx'
+import { CodeIcon, CommitIcon, PencilIcon, TrashIcon } from './icons.tsx'
 
 interface SkillsPanelProps {
   skills: UseSkillsResult
@@ -160,7 +160,6 @@ export function SkillsPanel({
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [query, setQuery] = useState('')
   const [confirmOpen, setConfirmOpen] = useState(false)
-  const [overflowOpen, setOverflowOpen] = useState(false)
   const [descExpanded, setDescExpanded] = useState(false)
   const [renameId, setRenameId] = useState<string | null>(null)
   const [renameValue, setRenameValue] = useState('')
@@ -169,9 +168,8 @@ export function SkillsPanel({
   const optionRefs = useRef<Record<string, HTMLDivElement | null>>({})
   const listRef = useRef<HTMLUListElement | null>(null)
   const renameTriggerRef = useRef<HTMLButtonElement | null>(null)
-  const kebabRef = useRef<HTMLButtonElement | null>(null)
+  const deleteBtnRef = useRef<HTMLButtonElement | null>(null)
   const focusRenameTriggerRef = useRef(false)
-  const focusKebabRef = useRef(false)
   const validDocIds = new Set(documents.map((d) => d.id))
 
   const filtered = useMemo(
@@ -189,14 +187,12 @@ export function SkillsPanel({
     if (!skills.skills.some((s) => s.id === selectedId)) {
       setSelectedId(null)
       setConfirmOpen(false)
-      setOverflowOpen(false)
       setDescExpanded(false)
       return
     }
     if (!filtered.some((s) => s.id === selectedId)) {
       setSelectedId(null)
       setConfirmOpen(false)
-      setOverflowOpen(false)
       setDescExpanded(false)
     }
   }, [skills.skills, filtered, selectedId])
@@ -213,12 +209,6 @@ export function SkillsPanel({
   }, [renameId])
 
   useEffect(() => {
-    if (!focusKebabRef.current || !overflowOpen) return
-    focusKebabRef.current = false
-    kebabRef.current?.focus()
-  }, [overflowOpen, selectedId])
-
-  useEffect(() => {
     if (selectedId == null) return
     const onMouseDown = (e: MouseEvent) => {
       if (renameSavingRef.current) return
@@ -228,7 +218,6 @@ export function SkillsPanel({
       setRenameId(null)
       setRenameValue('')
       setRenameSaving(false)
-      setOverflowOpen(false)
       setConfirmOpen(false)
       setSelectedId(null)
     }
@@ -265,7 +254,6 @@ export function SkillsPanel({
 
   const startRename = (skill: SkillOut) => {
     setConfirmOpen(false)
-    setOverflowOpen(false)
     setRenameId(skill.id)
     setRenameValue(skill.name)
     renameSavingRef.current = false
@@ -293,19 +281,13 @@ export function SkillsPanel({
   const selectSkill = (id: string) => {
     setSelectedId(id)
     clearRename()
-    setOverflowOpen(false)
     setConfirmOpen(false)
   }
 
   const escapeCascade = (): boolean => {
     if (confirmOpen) {
       setConfirmOpen(false)
-      kebabRef.current?.focus()
-      return true
-    }
-    if (overflowOpen) {
-      setOverflowOpen(false)
-      kebabRef.current?.focus()
+      deleteBtnRef.current?.focus()
       return true
     }
     if (renameId != null) {
@@ -329,7 +311,6 @@ export function SkillsPanel({
     const nextId = filtered[next]!.id
     setSelectedId(nextId)
     clearRename()
-    setOverflowOpen(false)
     setConfirmOpen(false)
     requestAnimationFrame(() => {
       optionRefs.current[nextId]?.scrollIntoView({ block: 'nearest' })
@@ -451,7 +432,7 @@ export function SkillsPanel({
                       aria-label={`${s.name}, ${statusTitle}`}
                       title={`${s.name} (${statusTitle})`}
                       className={
-                        'group flex h-8 cursor-pointer items-center gap-2 overflow-hidden whitespace-nowrap rounded border-l-2 px-2 text-xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand ' +
+                        'flex h-8 cursor-pointer items-center gap-2 overflow-hidden whitespace-nowrap rounded border-l-2 px-2 text-xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand ' +
                         (isSelected
                           ? 'border-brand bg-brand-soft text-ink'
                           : 'border-transparent text-ink-muted hover:bg-surface-hover')
@@ -490,62 +471,6 @@ export function SkillsPanel({
                         title={arityInfo.title}
                       >
                         {arityInfo.symbol}
-                      </span>
-                      <span
-                        className={
-                          'catalog-skill-row__actions flex shrink-0 items-center gap-0.5 transition-opacity duration-150 motion-reduce:transition-none ' +
-                          (isSelected
-                            ? 'opacity-100'
-                            : 'opacity-0 group-hover:opacity-100 group-focus-within:opacity-100')
-                        }
-                      >
-                        <button
-                          type="button"
-                          className="btn-icon-ghost size-6"
-                          tabIndex={isSelected ? 0 : -1}
-                          aria-label="Редактировать скил"
-                          title="Редактировать скил"
-                          onClick={(e) => {
-                            e.stopPropagation()
-                            selectSkill(s.id)
-                            clearRename()
-                            onEdit(s.id, s.name)
-                          }}
-                        >
-                          <PencilIcon />
-                        </button>
-                        <button
-                          type="button"
-                          className="btn-icon-ghost size-6"
-                          tabIndex={isSelected ? 0 : -1}
-                          aria-label="Коммит"
-                          title={commitTitle}
-                          disabled={s.status !== 'draft'}
-                          onClick={(e) => {
-                            e.stopPropagation()
-                            selectSkill(s.id)
-                            void skills.commit(s.id)
-                          }}
-                        >
-                          <CommitIcon />
-                        </button>
-                        <button
-                          type="button"
-                          className="btn-icon-ghost size-6"
-                          tabIndex={isSelected ? 0 : -1}
-                          aria-label="Ещё действия"
-                          title="Ещё действия"
-                          aria-expanded={isSelected && overflowOpen}
-                          onClick={(e) => {
-                            e.stopPropagation()
-                            focusKebabRef.current = true
-                            selectSkill(s.id)
-                            setConfirmOpen(false)
-                            setOverflowOpen(true)
-                          }}
-                        >
-                          <MoreHorizontalIcon />
-                        </button>
                       </span>
                     </div>
 
@@ -587,11 +512,6 @@ export function SkillsPanel({
                               if (!container.isConnected) return
                               const active = document.activeElement
                               if (container.contains(active)) return
-                              const rowActions = container
-                                .closest('li')
-                                ?.querySelector('.catalog-skill-row__actions')
-                              if (rowActions?.contains(active)) return
-                              setOverflowOpen(false)
                               setConfirmOpen(false)
                             })
                           }}
@@ -659,68 +579,53 @@ export function SkillsPanel({
                             </div>
                           ) : (
                             <>
-                              <div className="flex flex-wrap items-center gap-1.5">
+                              <div className="flex items-center gap-1.5">
                                 <button
                                   ref={renameTriggerRef}
                                   type="button"
-                                  className={btnClass}
+                                  className="btn-icon-soft"
                                   aria-label="Переименовать"
+                                  title="Переименовать"
                                   onClick={() => startRename(s)}
                                 >
-                                  Переименовать
+                                  <PencilIcon />
                                 </button>
                                 <button
                                   type="button"
-                                  className={btnClass}
-                                  aria-label="Редактировать"
+                                  className="btn-icon-soft-brand"
+                                  aria-label="Редактировать скил"
+                                  title="Редактировать скил"
                                   onClick={() => {
                                     clearRename()
                                     onEdit(s.id, s.name)
                                   }}
                                 >
-                                  Редактировать
+                                  <CodeIcon />
                                 </button>
                                 <button
                                   type="button"
-                                  className={btnClass}
+                                  className="btn-icon-soft-success"
                                   aria-label="Коммит"
                                   title={commitTitle}
                                   disabled={s.status !== 'draft'}
                                   onClick={() => void skills.commit(s.id)}
                                 >
-                                  Коммит
+                                  <CommitIcon />
                                 </button>
-                                <div className="relative ml-auto">
-                                  <button
-                                    ref={kebabRef}
-                                    type="button"
-                                    className={btnClass}
-                                    aria-label="Ещё действия"
-                                    aria-expanded={overflowOpen || confirmOpen}
-                                    onClick={() => {
-                                      setConfirmOpen(false)
-                                      setOverflowOpen((o) => !o)
-                                    }}
-                                  >
-                                    ⋯
-                                  </button>
-                                  {overflowOpen && !confirmOpen && (
-                                    <div className="absolute right-0 z-10 mt-1 min-w-[7rem] rounded border border-line bg-surface py-1 shadow-card">
-                                      <button
-                                        type="button"
-                                        className="block w-full px-3 py-1.5 text-left text-[11px] text-danger-ink hover:bg-surface-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand"
-                                        aria-label="Удалить"
-                                        onClick={() => {
-                                          clearRename()
-                                          setOverflowOpen(false)
-                                          setConfirmOpen(true)
-                                        }}
-                                      >
-                                        Удалить
-                                      </button>
-                                    </div>
-                                  )}
-                                </div>
+                                <button
+                                  ref={deleteBtnRef}
+                                  type="button"
+                                  className="btn-icon-soft-danger ml-auto"
+                                  aria-label="Удалить скил"
+                                  title="Удалить скил"
+                                  aria-expanded={confirmOpen}
+                                  onClick={() => {
+                                    clearRename()
+                                    setConfirmOpen(true)
+                                  }}
+                                >
+                                  <TrashIcon />
+                                </button>
                               </div>
                               {confirmOpen && (
                                 <div className="flex flex-wrap items-center gap-1.5">
@@ -745,7 +650,7 @@ export function SkillsPanel({
                                     aria-label="Отмена"
                                     onClick={() => {
                                       setConfirmOpen(false)
-                                      kebabRef.current?.focus()
+                                      deleteBtnRef.current?.focus()
                                     }}
                                   >
                                     Отмена

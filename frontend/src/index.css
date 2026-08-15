@@ -150,6 +150,34 @@ button { -webkit-tap-highlight-color: transparent; }
     @apply disabled:cursor-not-allowed disabled:opacity-40;
     @apply disabled:hover:bg-transparent disabled:hover:text-ink-faint;
   }
+  .btn-icon-soft {
+    @apply inline-flex size-7 shrink-0 items-center justify-center rounded-control border border-line-strong bg-surface-muted text-ink-muted transition-colors;
+    @apply hover:bg-surface-hover hover:text-ink;
+    @apply focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand;
+    @apply disabled:cursor-not-allowed disabled:opacity-40;
+    @apply disabled:hover:bg-surface-muted disabled:hover:text-ink-muted;
+  }
+  .btn-icon-soft-brand {
+    @apply inline-flex size-7 shrink-0 items-center justify-center rounded-control border border-line-brand bg-brand-soft text-brand-ink transition-colors;
+    @apply hover:border-brand hover:bg-brand hover:text-white;
+    @apply focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand;
+    @apply disabled:cursor-not-allowed disabled:opacity-40;
+    @apply disabled:hover:border-line-brand disabled:hover:bg-brand-soft disabled:hover:text-brand-ink;
+  }
+  .btn-icon-soft-success {
+    @apply inline-flex size-7 shrink-0 items-center justify-center rounded-control border border-success-line bg-success-soft text-success-ink transition-colors;
+    @apply hover:border-success hover:bg-success hover:text-white;
+    @apply focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand;
+    @apply disabled:cursor-not-allowed disabled:opacity-40;
+    @apply disabled:hover:border-success-line disabled:hover:bg-success-soft disabled:hover:text-success-ink;
+  }
+  .btn-icon-soft-danger {
+    @apply inline-flex size-7 shrink-0 items-center justify-center rounded-control border border-danger-line bg-danger-soft text-danger-ink transition-colors;
+    @apply hover:border-danger hover:bg-danger hover:text-white;
+    @apply focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand;
+    @apply disabled:cursor-not-allowed disabled:opacity-40;
+    @apply disabled:hover:border-danger-line disabled:hover:bg-danger-soft disabled:hover:text-danger-ink;
+  }
 
   .badge {
     @apply inline-flex items-center rounded px-1.5 py-0.5 text-[10px] uppercase;
@@ -208,7 +236,7 @@ button { -webkit-tap-highlight-color: transparent; }
   background: var(--notice-bg);
   color: var(--notice-ink);
 }
-.catalog-layout { min-height: 0; }
+.catalog-layout { min-height: 0; grid-template-rows: minmax(0, 1fr); }
 .catalog-main { background: var(--surface); }
 
 .catalog-sidebar {
@@ -272,7 +300,6 @@ button { -webkit-tap-highlight-color: transparent; }
 
 @media (hover: none) {
   .catalog-message--user .catalog-message-commands { opacity: 1; }
-  .catalog-skill-row__actions { opacity: 1; }
 }
 .catalog-composer-area { border-top: 0; background: var(--composer-fade); padding-bottom: 20px; }
 .catalog-composer {

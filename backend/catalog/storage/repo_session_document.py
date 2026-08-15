@@ -10,10 +10,12 @@ def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-def attach_documents(db: Database, session_id: str, doc_ids: list[str]) -> None:
+def attach_documents(db: Database, session_id: str, doc_ids: list[str]) -> list[str]:
     if not doc_ids:
-        return
+        return []
     now = _now_iso()
+    skipped: list[str] = []
+    seen_missing: set[str] = set()
     with db.connect() as conn:
         for doc_id in doc_ids:
             exists = conn.execute(
@@ -21,12 +23,16 @@ def attach_documents(db: Database, session_id: str, doc_ids: list[str]) -> None:
                 (doc_id,),
             ).fetchone()
             if exists is None:
+                if doc_id not in seen_missing:
+                    skipped.append(doc_id)
+                    seen_missing.add(doc_id)
                 continue
             conn.execute(
                 "INSERT OR IGNORE INTO session_document(session_id, document_id, attached_at) "
                 "VALUES (?, ?, ?)",
                 (session_id, doc_id, now),
             )
+    return skipped
 
 
 def detach_documents(db: Database, session_id: str, doc_ids: list[str]) -> int:

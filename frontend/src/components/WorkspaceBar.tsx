@@ -1,3 +1,5 @@
+import { RefreshIcon, SpinnerIcon } from './icons.tsx'
+
 interface WorkspaceBarProps {
   path: string | null
   displayName: string | null
@@ -45,13 +47,17 @@ export function WorkspaceBar({
         {hasWorkspace ? (
           <button
             type="button"
-            className="shrink-0 rounded px-2 py-1.5 text-sm hover:bg-[var(--sidebar-brand-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand disabled:cursor-not-allowed disabled:opacity-50"
+            className="inline-flex size-8 shrink-0 items-center justify-center rounded hover:bg-[var(--sidebar-brand-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand disabled:cursor-not-allowed disabled:opacity-50"
             onClick={onRescan}
             disabled={rescanning}
             aria-label="Пересканировать"
             aria-busy={rescanning}
           >
-            {rescanning ? '…' : '⟳'}
+            {rescanning ? (
+              <SpinnerIcon className="size-[18px]" />
+            ) : (
+              <RefreshIcon className="size-[18px]" />
+            )}
           </button>
         ) : null}
       </div>

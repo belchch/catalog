@@ -68,6 +68,18 @@ function writeStoredSessionId(id: string | null): void {
 
 const DEFAULT_SESSION_TIMEOUT = 60
 
+function skippedDocsNotice(skippedIds: string[], docs?: DocumentOut[]): string {
+  const titles = skippedIds.map((id) => {
+    const title = docs?.find((d) => d.id === id)?.title
+    return title && title.length > 0 ? title : id
+  })
+  if (titles.length === 1) {
+    return `Документ «${titles[0]}» не добавлен в сессию: не найден в воркспейсе.`
+  }
+  const listed = titles.map((t) => `«${t}»`).join(', ')
+  return `Не добавлены в сессию: ${listed} — документы не найдены в воркспейсе.`
+}
+
 function highlightFromDetail(detail: string): ArtifactType | null {
   const d = detail.toLowerCase()
   if (d.includes('meta')) return 'meta'
@@ -129,8 +141,17 @@ export default function App() {
   const [rescanReport, setRescanReport] = useState<ScanReport | null>(null)
   const workspacePathRef = useRef<string | null>(null)
   const settingsButtonRef = useRef<HTMLButtonElement>(null)
+  const sessionIdRef = useRef<string | null>(sessionId)
+  const creatingSessionRef = useRef<Promise<{
+    id: string
+    skippedDocIds: string[]
+  }> | null>(null)
+  const sessionEpochRef = useRef(0)
 
   const handleSessionInvalid = useCallback(() => {
+    sessionEpochRef.current += 1
+    creatingSessionRef.current = null
+    sessionIdRef.current = null
     writeStoredSessionId(null)
     setSessionId(null)
     setEditingSkill(null)
@@ -165,12 +186,17 @@ export default function App() {
 
   useEffect(() => {
     writeStoredSessionId(sessionId)
+    sessionIdRef.current = sessionId
+    creatingSessionRef.current = null
   }, [sessionId])
 
   useEffect(() => {
     const nextPath = workspace.current?.path ?? null
     const prevPath = workspacePathRef.current
     if (prevPath !== null && nextPath !== prevPath) {
+      sessionEpochRef.current += 1
+      creatingSessionRef.current = null
+      sessionIdRef.current = null
       setSessionId(null)
       setActiveRunId(null)
       setEditingSkill(null)
@@ -294,30 +320,80 @@ export default function App() {
     wasStreamingRef.current = planner.streaming
   }, [planner.streaming, sessionsRefresh, workspaceRefreshBlocked])
 
-  const ensureSession = useCallback(async (): Promise<string> => {
-    if (!hasWorkspace) throw new Error('Сначала откройте папку воркспейса')
-    if (sessionId) return sessionId
-    const created = await createSession()
-    setSessionId(created.id)
-    void sessions.refresh()
-    return created.id
-  }, [hasWorkspace, sessionId, sessions])
-
-  const handleSend = useCallback(
-    async (text: string, docIds?: string[]) => {
+  const ensureSession = useCallback(
+    async (
+      docIds?: string[],
+    ): Promise<{ id: string; skippedDocIds: string[] }> => {
+      if (!hasWorkspace) throw new Error('Сначала откройте папку воркспейса')
+      if (sessionIdRef.current) {
+        return { id: sessionIdRef.current, skippedDocIds: [] }
+      }
+      if (creatingSessionRef.current) {
+        const created = await creatingSessionRef.current
+        return { id: created.id, skippedDocIds: created.skippedDocIds }
+      }
+      const epoch = sessionEpochRef.current
+      const pending = createSession(docIds).then((created) => {
+        const skippedDocIds = created.skipped_doc_ids ?? []
+        if (sessionEpochRef.current !== epoch) {
+          return { id: created.id, skippedDocIds }
+        }
+        sessionIdRef.current = created.id
+        setSessionId(created.id)
+        void sessions.refresh()
+        return {
+          id: created.id,
+          skippedDocIds,
+        }
+      })
+      creatingSessionRef.current = pending
       try {
-        await ensureSession()
-        planner.send(text, docIds)
+        return await pending
       } catch (e) {
-        setNotice(e instanceof Error ? e.message : String(e))
+        creatingSessionRef.current = null
+        throw e
       }
     },
-    [ensureSession, planner],
+    [hasWorkspace, sessions],
+  )
+
+  const handleSend = useCallback(
+    (text: string, docIds?: string[], docs?: DocumentOut[]) => {
+      if (sessionId) {
+        setNotice(null)
+        planner.send(text, docIds, docs)
+        return
+      }
+      setNotice(null)
+      const epoch = sessionEpochRef.current
+      void ensureSession(docIds)
+        .then((created) => {
+          if (sessionEpochRef.current !== epoch) return
+          const skipped = new Set(created.skippedDocIds)
+          const filteredIds = docIds?.filter((id) => !skipped.has(id))
+          const filteredDocs = docs?.filter((d) => !skipped.has(d.id))
+          if (created.skippedDocIds.length > 0) {
+            setNotice(skippedDocsNotice(created.skippedDocIds, docs))
+          }
+          planner.send(
+            text,
+            filteredIds && filteredIds.length > 0 ? filteredIds : undefined,
+            filteredDocs && filteredDocs.length > 0 ? filteredDocs : undefined,
+          )
+        })
+        .catch((e: unknown) => {
+          setNotice(e instanceof Error ? e.message : String(e))
+        })
+    },
+    [sessionId, ensureSession, planner],
   )
 
   const handleSelectSession = useCallback(
     (id: string) => {
       if (id === sessionId) return
+      sessionEpochRef.current += 1
+      creatingSessionRef.current = null
+      sessionIdRef.current = id
       setActiveRunId(null)
       setEditingSkill(null)
       setSessionId(id)
@@ -326,6 +402,9 @@ export default function App() {
   )
 
   const handleNewChat = useCallback(() => {
+    sessionEpochRef.current += 1
+    creatingSessionRef.current = null
+    sessionIdRef.current = null
     setActiveRunId(null)
     setEditingSkill(null)
     setSessionId(null)
@@ -337,6 +416,9 @@ export default function App() {
       try {
         await sessions.remove(id)
         if (id === sessionId) {
+          sessionEpochRef.current += 1
+          creatingSessionRef.current = null
+          sessionIdRef.current = null
           setActiveRunId(null)
           setEditingSkill(null)
           setSessionId(null)
@@ -352,6 +434,9 @@ export default function App() {
     setNotice(null)
     try {
       const started = await startEditSession(skillId)
+      sessionEpochRef.current += 1
+      creatingSessionRef.current = null
+      sessionIdRef.current = started.session_id
       setActiveRunId(null)
       setSessionId(started.session_id)
       setEditingSkill({ skillId: started.skill_id, name })
@@ -366,6 +451,9 @@ export default function App() {
       try {
         await skillsHook.remove(skillId)
         if (editingSkill?.skillId === skillId) {
+          sessionEpochRef.current += 1
+          creatingSessionRef.current = null
+          sessionIdRef.current = null
           setEditingSkill(null)
           setSessionId(null)
         }
@@ -495,7 +583,9 @@ export default function App() {
       setNotice(null)
       setSavedResultDoc(null)
       try {
-        const sid = await ensureSession()
+        const epoch = sessionEpochRef.current
+        const { id: sid } = await ensureSession()
+        if (sessionEpochRef.current !== epoch) return
         const runId = await skillsHook.apply(skillId, docIds, mode, sid, prompt)
         setActiveRunId(runId)
       } catch (e) {
@@ -579,7 +669,9 @@ export default function App() {
         </div>
       </header>
       {notice && (
-        <div className="catalog-notice px-5 py-2 text-xs">{notice}</div>
+        <div className="catalog-notice shrink-0 px-5 py-2 text-xs" role="status" aria-live="polite">
+          {notice}
+        </div>
       )}
       <div className="catalog-layout grid flex-1 grid-cols-1 overflow-hidden lg:grid-cols-[360px_minmax(0,1fr)]">
         <aside className="catalog-sidebar flex flex-col overflow-y-auto p-3">
@@ -699,7 +791,7 @@ export default function App() {
             </span>
           </div>
         </aside>
-        <main className="catalog-main overflow-hidden">
+        <main className="catalog-main h-full min-h-0 overflow-hidden">
           {activeRunId ? (
             <RunView
               run={run}
@@ -728,7 +820,7 @@ export default function App() {
               </div>
             </div>
           ) : (
-            <div className="flex h-full flex-col overflow-hidden">
+            <div className="flex h-full min-h-0 flex-col overflow-hidden">
               <div
                 role="tablist"
                 aria-label="Область main"
@@ -768,12 +860,12 @@ export default function App() {
                   role={isLg ? undefined : 'tabpanel'}
                   aria-label={isLg ? undefined : 'Чат'}
                   className={
-                    'min-w-0 flex-1 overflow-hidden ' +
+                    'min-h-0 min-w-0 flex-1 overflow-hidden ' +
                     (showChat ? 'flex' : 'hidden') +
                     ' lg:flex'
                   }
                 >
-                  <div className="flex h-full w-full flex-col overflow-hidden">
+                  <div className="flex h-full min-h-0 w-full flex-col overflow-hidden">
                     <Chat
                       messages={planner.messages}
                       streaming={planner.streaming}
@@ -808,7 +900,7 @@ export default function App() {
                   role={isLg ? undefined : 'tabpanel'}
                   aria-label={isLg ? undefined : 'Черновик'}
                   className={
-                    'catalog-draft-area w-full overflow-hidden lg:w-[408px] lg:shrink-0 ' +
+                    'catalog-draft-area min-h-0 w-full overflow-hidden lg:w-[408px] lg:shrink-0 ' +
                     (showDraft ? 'flex' : 'hidden') +
                     ' lg:flex'
                   }

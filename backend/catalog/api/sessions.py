@@ -22,9 +22,9 @@ import asyncio
 import json
 import re
 from contextlib import suppress
-from typing import Any
+from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, HTTPException, Response, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, Body, Depends, HTTPException, Response, WebSocket, WebSocketDisconnect
 
 from catalog.agent import run_agent
 from catalog.agent.events import FinishEvent, ToolResultEvent
@@ -36,6 +36,7 @@ from catalog.api.schemas import (
     MessageOut,
     SessionArtifactOut,
     SessionCreated,
+    SessionCreateRequest,
     SessionOut,
     SessionUpdate,
     SkillMetaPatchRequest,
@@ -227,8 +228,14 @@ def _conversation_messages(db: Database, session_id: str) -> list[Message]:
 
 
 @router.post("/sessions", response_model=SessionCreated)
-async def create_session_endpoint(db: Database = Depends(get_workspace_db)) -> SessionCreated:
-    return SessionCreated(id=create_session(db))
+async def create_session_endpoint(
+    body: Annotated[SessionCreateRequest | None, Body()] = None,
+    db: Database = Depends(get_workspace_db),
+) -> SessionCreated:
+    session_id = create_session(db)
+    doc_ids = [doc_id for doc_id in (body.doc_ids if body is not None else []) if doc_id]
+    skipped = attach_documents(db, session_id, doc_ids)
+    return SessionCreated(id=session_id, skipped_doc_ids=skipped)
 
 
 def _session_out(row) -> SessionOut:

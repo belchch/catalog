@@ -127,8 +127,13 @@ class CommitOut(BaseModel):
     status: str
 
 
+class SessionCreateRequest(BaseModel):
+    doc_ids: list[str] = Field(default_factory=list)
+
+
 class SessionCreated(BaseModel):
     id: str
+    skipped_doc_ids: list[str] = Field(default_factory=list)
 
 
 class SessionOut(BaseModel):

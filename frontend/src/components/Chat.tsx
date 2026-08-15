@@ -21,7 +21,7 @@ interface ChatProps {
   documents: DocumentOut[]
   sessionDocuments: DocumentOut[]
   sessionId: string | null
-  onSend: (text: string, docIds?: string[]) => void
+  onSend: (text: string, docIds?: string[], docs?: DocumentOut[]) => void
   onCancel: () => void
   onReconnect: () => void
   onRemoveDocument?: (docId: string) => void
@@ -63,11 +63,14 @@ export function Chat({
 }: ChatProps) {
   const [input, setInput] = useState('')
   const [selectedDocIds, setSelectedDocIds] = useState<string[]>([])
-  const bottomRef = useRef<HTMLDivElement>(null)
+  const scrollRef = useRef<HTMLDivElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
 
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
+    if (messages.length === 0) return
+    const el = scrollRef.current
+    if (!el) return
+    el.scrollTop = el.scrollHeight
   }, [messages])
 
   useEffect(() => {
@@ -81,11 +84,19 @@ export function Chat({
     el.style.height = `${el.scrollHeight}px`
   }, [input])
 
+  const selectedDocs = selectedDocIds
+    .map((id) => documents.find((d) => d.id === id))
+    .filter((d): d is DocumentOut => d != null)
+
   const submit = () => {
     const text = input.trim()
     if (streaming) return
     if (!text && selectedDocIds.length === 0) return
-    onSend(text, selectedDocIds.length > 0 ? selectedDocIds : undefined)
+    onSend(
+      text,
+      selectedDocIds.length > 0 ? selectedDocIds : undefined,
+      selectedDocs.length > 0 ? selectedDocs : undefined,
+    )
     setInput('')
     setSelectedDocIds([])
   }
@@ -98,23 +109,25 @@ export function Chat({
       ? STARTER_SUGGESTIONS
       : suggestions
 
-  const selectedDocs = selectedDocIds
-    .map((id) => documents.find((d) => d.id === id))
-    .filter((d): d is DocumentOut => d != null)
-
   const removeSelected = (id: string) => {
     if (streaming) return
     setSelectedDocIds((prev) => prev.filter((x) => x !== id))
   }
 
   return (
-    <div className="catalog-chat flex h-full flex-col">
+    <div className="catalog-chat flex h-full min-h-0 flex-col">
       {editingSkillName && (
-        <div className="bg-brand-soft px-4 py-1.5 text-xs text-brand-ink">
+        <div className="shrink-0 bg-brand-soft px-4 py-1.5 text-xs text-brand-ink">
           Редактирование: {editingSkillName}
         </div>
       )}
-      <div className="catalog-chat__scroll flex-1 overflow-y-auto px-5 py-6">
+      <div
+        ref={scrollRef}
+        role="region"
+        tabIndex={0}
+        aria-label="История сообщений"
+        className="catalog-chat__scroll min-h-0 flex-1 overflow-y-auto px-5 py-6 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand"
+      >
         <div className="catalog-chat__content">
         {messages.length === 0 && (
           <p className="catalog-chat__empty mt-16 text-center text-sm text-ink-faint">
@@ -155,10 +168,9 @@ export function Chat({
           </div>
         )}
         {error && <div className="my-2 text-xs text-danger-ink">Ошибка: {error}</div>}
-        <div ref={bottomRef} />
         </div>
       </div>
-      <div className="catalog-composer-area p-4">
+      <div className="catalog-composer-area shrink-0 p-4">
         <div className="catalog-composer">
         {sessionDocuments.length > 0 && (
           <section className="mb-2" aria-label="Документы в сессии">
@@ -168,7 +180,7 @@ export function Chat({
             <p className="mb-1 text-[11px] text-ink-faint">
               Агент видит только эти документы
             </p>
-            <ul className="flex flex-wrap gap-1.5" role="list">
+            <ul className="flex flex-wrap gap-1.5" role="list" aria-live="polite">
               {sessionDocuments.map((d) => (
                 <li key={d.id} role="listitem" className="chip">
                   <span className="badge-neutral">{d.kind}</span>
@@ -187,35 +199,37 @@ export function Chat({
             </ul>
           </section>
         )}
-        <div className="mb-2 flex flex-wrap items-center gap-1.5">
-          {selectedDocs.map((d) => (
-            <span key={d.id} className="chip-brand">
-              <span className="badge-neutral">{d.kind}</span>
-              <span className="truncate">{d.title}</span>
-              <button
-                type="button"
-                className="ml-0.5 text-ink-faint hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand disabled:cursor-not-allowed disabled:text-ink-faint"
-                aria-label={`Убрать ${d.title}`}
-                disabled={streaming}
-                onClick={() => removeSelected(d.id)}
-              >
-                ×
-              </button>
-            </span>
-          ))}
-          <div className="w-44 max-w-[12rem]">
-            <DocumentCombobox
-              multiple
-              documents={documents}
-              values={selectedDocIds}
-              onChange={setSelectedDocIds}
-              ariaLabel="Добавить документы в сессию"
-              placeholder="+ документ"
-              disabled={streaming}
-              placement="top"
-              triggerClassName="chip flex w-full justify-between text-left hover:border-line-brand focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand disabled:cursor-not-allowed disabled:bg-surface-muted disabled:text-ink-faint"
-            />
+        {selectedDocs.length > 0 && (
+          <div className="mb-1.5 flex max-h-[5.625rem] flex-wrap items-center gap-1.5 overflow-y-auto overscroll-contain">
+            {selectedDocs.map((d) => (
+              <span key={d.id} className="chip-brand">
+                <span className="badge-neutral">{d.kind}</span>
+                <span className="truncate">{d.title}</span>
+                <button
+                  type="button"
+                  className="ml-0.5 text-ink-faint hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand disabled:cursor-not-allowed disabled:text-ink-faint"
+                  aria-label={`Убрать ${d.title}`}
+                  disabled={streaming}
+                  onClick={() => removeSelected(d.id)}
+                >
+                  ×
+                </button>
+              </span>
+            ))}
           </div>
+        )}
+        <div className="mb-2 w-44 max-w-[12rem]">
+          <DocumentCombobox
+            multiple
+            documents={documents}
+            values={selectedDocIds}
+            onChange={setSelectedDocIds}
+            ariaLabel="Добавить документы в сессию"
+            placeholder="+ документ"
+            disabled={streaming}
+            placement="top"
+            triggerClassName="chip flex w-full justify-between text-left hover:border-line-brand focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand disabled:cursor-not-allowed disabled:bg-surface-muted disabled:text-ink-faint"
+          />
         </div>
         {visibleSuggestions.length > 0 && (
           <div

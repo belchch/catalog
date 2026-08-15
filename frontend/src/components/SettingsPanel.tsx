@@ -323,7 +323,7 @@ function ProviderRow({
       </div>
       {showForm ? (
         <form className="mt-2" aria-busy={saving} onSubmit={handleSubmit}>
-          <div className="flex items-start gap-2">
+          <div className="flex items-center gap-2">
             <label htmlFor={inputId} className="sr-only">
               API-ключ {provider.name}
             </label>
@@ -331,7 +331,8 @@ function ProviderRow({
               ref={inputRef}
               id={inputId}
               type="password"
-              className="field min-w-0 flex-1"
+              className="field min-w-0 flex-1 border border-line-strong bg-surface disabled:opacity-60"
+              placeholder="Вставьте API-ключ"
               autoComplete="off"
               spellCheck={false}
               value={value}
