@@ -44,6 +44,14 @@ export function SetupKeyScreen({ onConfigured }: SetupKeyScreenProps) {
       try {
         const settings = await updateSettings({ provider })
         persistLocalSettings({ provider: settings.provider, model: settings.model })
+        next = {
+          ...result,
+          provider: settings.provider,
+          providers: result.providers.map((item) => ({
+            ...item,
+            active: item.id === settings.provider,
+          })),
+        }
         try {
           next = await getSetup()
         } catch {
