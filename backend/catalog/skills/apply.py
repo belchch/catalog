@@ -436,7 +436,8 @@ async def _apply_core(
                         entry.data["step_id"] = step.id
                     current = text or ""
                     last_text = current
-                    last_capped = capped
+                    if index == len(skill.steps) - 1:
+                        last_capped = capped
                 else:
                     raise ValueError(
                         f"unknown pipeline step type: {step.type!r}"

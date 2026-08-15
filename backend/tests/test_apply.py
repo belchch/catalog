@@ -24,6 +24,7 @@ from catalog.llm.base import (
     Message,
     ModelInfo,
     StreamDelta,
+    ToolCall,
     ToolSpec,
 )
 from catalog.skills.apply import apply_skill, apply_skill_collect
@@ -1048,6 +1049,77 @@ def test_apply_pipeline_stops_on_middle_step_failure(
     step_ids = {e.get("data", {}).get("step_id") for e in trace}
     assert "suffix" not in step_ids
     assert "upper" in step_ids
+
+
+def test_apply_pipeline_finish_ignores_early_step_cap(
+    db: Database, workspace: Path
+) -> None:
+    skill = SkillConfig(
+        name="pipe-early-cap",
+        description="early llm caps, later script finishes",
+        system_prompt="",
+        allowed_tools=[],
+        model="test/model",
+        max_iterations=1,
+        kind="pipeline",
+        verify_checks=[VerifyCheck("max_length", {"max": 1})],
+        steps=[
+            PipelineStep(
+                id="note",
+                type="llm",
+                input="documents",
+                system_prompt="rewrite",
+                allowed_tools=["read_document"],
+            ),
+            PipelineStep(
+                id="suffix",
+                type="script",
+                input="previous",
+                code="result = (document or '') + '\\nEND'\n",
+            ),
+        ],
+    )
+    skill_id = create_skill(
+        db, name=skill.name, description=skill.description, config=skill
+    )
+    input_doc_id = _ingest_input(db, workspace)
+    provider = ScriptProvider(
+        [
+            CompletionResult(
+                content="PARTIAL",
+                tool_calls=[
+                    ToolCall(
+                        id="c1",
+                        name="read_document",
+                        arguments={"doc_id": input_doc_id},
+                    )
+                ],
+                finish_reason="tool_calls",
+            )
+        ]
+    )
+
+    events = asyncio.run(
+        _collect_events(
+            apply_skill(
+                provider=provider,
+                db=db,
+                workspace_dir=str(workspace),
+                skill=skill,
+                skill_id=skill_id,
+                input_doc_ids=[input_doc_id],
+                base_tools=build_document_tools(db, workspace),
+            )
+        )
+    )
+
+    finish_events = [e for e in events if isinstance(e, FinishEvent)]
+    assert finish_events
+    inner = finish_events[0]
+    assert inner.capped is True
+    final = finish_events[-1]
+    assert final.finish_reason == "verify_failed"
+    assert final.capped is False
 
 
 def test_apply_pipeline_llm_step_uses_step_provider(
