@@ -1,5 +1,5 @@
 import { useRef, useState } from 'react'
-import type { DocumentOut } from '../api.ts'
+import { extractApiDetail, type DocumentOut } from '../api.ts'
 import type { UseDocumentsResult } from '../hooks/useDocuments.ts'
 
 interface DocumentListProps {
@@ -26,7 +26,7 @@ export function DocumentList({
     try {
       await docs.upload(file)
     } catch (e) {
-      setErr(e instanceof Error ? e.message : String(e))
+      setErr(extractApiDetail(e))
     } finally {
       setUploading(false)
       if (inputRef.current) inputRef.current.value = ''
@@ -49,13 +49,17 @@ export function DocumentList({
         <input
           ref={inputRef}
           type="file"
-          accept=".md,.docx,.pdf,.csv,.xlsx"
-          className="hidden"
+          accept=".md,.docx,.pdf,.csv,.xlsx,.xls,.ods,.tsv"
+          className="sr-only"
           disabled={disabled}
           onChange={(e) => void onFile(e.target.files?.[0])}
         />
       </label>
-      {err && <p className="text-xs text-danger-ink">{err}</p>}
+      {err && (
+        <p role="alert" className="text-xs text-danger-ink break-words">
+          {err}
+        </p>
+      )}
       {docs.error && <p className="text-xs text-danger-ink">{docs.error}</p>}
       <ul className="flex flex-col gap-1">
         {docs.documents.map((d: DocumentOut) => (
