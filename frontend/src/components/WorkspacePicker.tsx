@@ -8,7 +8,7 @@ import type {
 } from '../api.ts'
 import { ApiError, extractApiDetail } from '../api.ts'
 import { ScanReportView } from './ScanReportView.tsx'
-import { SpinnerIcon } from './icons.tsx'
+import { FolderIcon, SpinnerIcon } from './icons.tsx'
 
 interface WorkspacePickerProps {
   recents: WorkspaceOut[]
@@ -571,7 +571,7 @@ export function WorkspacePicker({
                         onClick={() => goInto(entry.path)}
                         title={entry.path}
                       >
-                        <span aria-hidden="true">▱</span>
+                        <FolderIcon className="size-4 shrink-0 text-ink-faint" />
                         <span className="min-w-0 truncate text-xs text-ink">
                           {entry.name}
                         </span>

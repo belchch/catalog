@@ -1,4 +1,4 @@
-import { RefreshIcon, SpinnerIcon } from './icons.tsx'
+import { FolderIcon, RefreshIcon, SpinnerIcon } from './icons.tsx'
 
 interface WorkspaceFooterProps {
   path: string | null
@@ -35,12 +35,7 @@ export function WorkspaceFooter({
         aria-haspopup="dialog"
         aria-label={label}
       >
-        <span
-          aria-hidden="true"
-          className="shrink-0 text-[18px] leading-none text-ink-faint"
-        >
-          ▱
-        </span>
+        <FolderIcon className="size-[18px] shrink-0 text-ink-faint" />
         <span
           className={
             'truncate ' + (hasWorkspace ? '' : 'font-normal text-ink-faint')

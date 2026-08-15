@@ -30,7 +30,7 @@ import { Chat } from './components/Chat.tsx'
 import { CollapsibleSection } from './components/CollapsibleSection.tsx'
 import { DocumentList } from './components/DocumentList.tsx'
 import { ModelSelector } from './components/ModelSelector.tsx'
-import { PlusIcon, SettingsIcon } from './components/icons.tsx'
+import { FolderIcon, PlusIcon, SettingsIcon } from './components/icons.tsx'
 import { SettingsPanel } from './components/SettingsPanel.tsx'
 import { RescanReportModal } from './components/RescanReportModal.tsx'
 import { RunView } from './components/RunView.tsx'
@@ -688,7 +688,7 @@ export default function App() {
     <div className="catalog-shell flex h-screen flex-col">
       <header className="catalog-header flex shrink-0 items-center justify-between px-5">
         <div className="flex min-w-0 items-center gap-3">
-          <span className="catalog-header__folder" aria-hidden="true">▱</span>
+          <FolderIcon className="catalog-header__folder size-5 shrink-0" />
           <h1 className="truncate text-base font-semibold">Catalog — планировщик скиллов</h1>
           {gitSha ? (
             <span className="shrink-0 font-mono text-xs text-ink-faint" title="git sha">
@@ -819,8 +819,8 @@ export default function App() {
           ) : !hasWorkspace ? (
             <div className="flex h-full items-center justify-center p-6">
               <div className="max-w-sm text-center">
-                <div className="mb-3 text-3xl text-ink-faint" aria-hidden="true">
-                  ▱
+                <div className="mb-3 flex justify-center text-ink-faint">
+                  <FolderIcon className="size-9" />
                 </div>
                 <h2 className="mb-1 text-sm font-semibold text-ink">
                   Воркспейс не открыт
