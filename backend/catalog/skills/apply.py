@@ -45,6 +45,7 @@ from catalog.documents.obsidian import (
     rewrite_wiki_links,
 )
 from catalog.llm.base import LLMProvider, Message
+from catalog.llm.factory import provider_for_skill
 from catalog.skills.config import PipelineStep, SkillConfig, ensure_read_document_tool
 from catalog.skills.repo_run import claim_run, create_run, finish_run, get_run
 from catalog.skills.script_runner import ScriptRuntimeError, run_script_async
@@ -172,6 +173,7 @@ async def _apply_core(
     provider_name: str = "",
     persist: bool = True,
     user_prompt: str | None = None,
+    providers: dict[str, LLMProvider] | None = None,
 ) -> AsyncIterator[AgentEvent]:
     """Shared apply loop: streams events, fills ``trace`` and ``outcome``.
 
@@ -410,8 +412,11 @@ async def _apply_core(
                     text = None
                     capped = False
                     before = len(trace.entries)
+                    step_provider = provider_for_skill(
+                        providers, provider, step.provider or skill.provider
+                    )
                     async for event in _run_agent_core(
-                        provider=provider,
+                        provider=step_provider,
                         model=step.model or skill.model,
                         system_prompt=step.system_prompt,
                         messages=messages,
@@ -687,6 +692,7 @@ async def apply_skill(
     provider_name: str = "",
     persist: bool = True,
     user_prompt: str | None = None,
+    providers: dict[str, LLMProvider] | None = None,
 ) -> AsyncIterator[AgentEvent]:
     """Run a skill over one or more documents, streaming :data:`AgentEvent` items.
 
@@ -727,6 +733,7 @@ async def apply_skill(
         provider_name=provider_name,
         persist=persist,
         user_prompt=user_prompt,
+        providers=providers,
     ):
         yield event
 
@@ -745,6 +752,7 @@ async def apply_skill_collect(
     provider_name: str = "",
     persist: bool = True,
     user_prompt: str | None = None,
+    providers: dict[str, LLMProvider] | None = None,
 ) -> ApplyResult:
     """Drain :func:`apply_skill` and return the final :class:`ApplyResult`."""
     trace = Trace()
@@ -764,6 +772,7 @@ async def apply_skill_collect(
         provider_name=provider_name,
         persist=persist,
         user_prompt=user_prompt,
+        providers=providers,
     ):
         pass
     return ApplyResult(

@@ -1050,6 +1050,54 @@ def test_apply_pipeline_stops_on_middle_step_failure(
     assert "upper" in step_ids
 
 
+def test_apply_pipeline_llm_step_uses_step_provider(
+    db: Database, workspace: Path
+) -> None:
+    skill = SkillConfig(
+        name="pipe-provider",
+        description="llm step pins zai",
+        system_prompt="",
+        allowed_tools=[],
+        model="test/model",
+        provider="openrouter",
+        kind="pipeline",
+        steps=[
+            PipelineStep(
+                id="note",
+                type="llm",
+                input="documents",
+                system_prompt="rewrite",
+                allowed_tools=["read_document"],
+                provider="zai",
+            ),
+        ],
+    )
+    skill_id = create_skill(
+        db, name=skill.name, description=skill.description, config=skill
+    )
+    input_doc_id = _ingest_input(db, workspace)
+    run_provider = ScriptProvider([_result("SHOULD NOT RUN")])
+    step_provider = ScriptProvider([_result("FROM ZAI")])
+
+    result = asyncio.run(
+        apply_skill_collect(
+            provider=run_provider,
+            db=db,
+            workspace_dir=str(workspace),
+            skill=skill,
+            skill_id=skill_id,
+            input_doc_ids=[input_doc_id],
+            base_tools=build_document_tools(db, workspace),
+            providers={"openrouter": run_provider, "zai": step_provider},
+        )
+    )
+
+    assert result.status == "ok"
+    assert "FROM ZAI" in (result.result_text or "")
+    assert step_provider.seen_messages
+    assert not run_provider.seen_messages
+
+
 def test_tool_registry_filter() -> None:
     reg = ToolRegistry()
     reg.register(

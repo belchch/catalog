@@ -468,7 +468,11 @@ async def patch_session_artifact_endpoint(
     if artifact_type == "steps":
         parsed, errors = parse_steps_content(req.content)
         if not errors:
-            errors.extend(validate_pipeline_steps(parsed, tools.names()))
+            errors.extend(
+                validate_pipeline_steps(
+                    parsed, tools.names(), require_content=False
+                )
+            )
         payload = {"steps": [pipeline_step_to_dict(s) for s in parsed]}
         row = upsert_artifact(
             db,

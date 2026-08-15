@@ -599,6 +599,33 @@ def test_save_skill_steps_writes_valid_artifact(mem_db: Database) -> None:
     assert [s["id"] for s in payload["steps"]] == ["upper", "note"]
 
 
+def test_save_skill_steps_allows_empty_content(mem_db: Database) -> None:
+    session_id = create_session(mem_db)
+    tools = build_artifact_tools(
+        mem_db, session_id, available_tools=["read_document"]
+    )
+    _, save_steps = tools.get("save_skill_steps")
+
+    async def _run():
+        return await save_steps(
+            steps=[
+                {"id": "upper", "type": "script", "input": "documents"},
+                {
+                    "id": "note",
+                    "type": "llm",
+                    "input": "previous",
+                    "allowed_tools": ["read_document"],
+                },
+            ]
+        )
+
+    result = asyncio.run(_run())
+    assert result["ok"] is True
+    row = get_artifact(mem_db, session_id, "steps")
+    assert row is not None
+    assert row.is_valid is True
+
+
 def test_save_skill_steps_rejects_bad_script(mem_db: Database) -> None:
     session_id = create_session(mem_db)
     tools = build_artifact_tools(
@@ -666,3 +693,95 @@ def test_build_pipeline_from_artifacts(client, provider, db) -> None:
     assert [s.id for s in skill.config.steps] == ["upper", "note"]
     assert skill.config.allowed_tools == []
     assert provider.requests == []
+
+
+def test_patch_steps_allows_empty_content(client) -> None:
+    session_id = client.post("/sessions").json()["id"]
+    steps = {
+        "steps": [
+            {"id": "upper", "type": "script", "input": "documents"},
+            {"id": "note", "type": "llm", "input": "previous"},
+        ]
+    }
+    patch = client.patch(
+        f"/sessions/{session_id}/artifacts/steps",
+        json={"content": json.dumps(steps, ensure_ascii=False)},
+    )
+    assert patch.status_code == 200, patch.text
+    assert patch.json()["is_valid"] is True
+
+
+def test_build_pipeline_from_split_artifacts(client, provider, db) -> None:
+    session_id = client.post("/sessions").json()["id"]
+    client.patch(
+        f"/sessions/{session_id}/skill-meta",
+        json={
+            "name": "Pipe",
+            "description": "filled from script/prompt artifacts",
+            "kind": "pipeline",
+        },
+    )
+    steps = {
+        "steps": [
+            {"id": "upper", "type": "script", "input": "documents"},
+            {
+                "id": "note",
+                "type": "llm",
+                "input": "previous",
+                "allowed_tools": ["read_document"],
+            },
+        ]
+    }
+    patch = client.patch(
+        f"/sessions/{session_id}/artifacts/steps",
+        json={"content": json.dumps(steps, ensure_ascii=False)},
+    )
+    assert patch.status_code == 200, patch.text
+    assert patch.json()["is_valid"] is True
+    script = client.patch(
+        f"/sessions/{session_id}/artifacts/script",
+        json={"content": "result = document.upper()\n"},
+    )
+    assert script.json()["is_valid"] is True
+    prompt = client.patch(
+        f"/sessions/{session_id}/artifacts/prompt",
+        json={"content": "rewrite the text"},
+    )
+    assert prompt.json()["is_valid"] is True
+    provider.script = []
+    resp = client.post(f"/sessions/{session_id}/skills")
+    assert resp.status_code == 200, resp.text
+    skill = get_skill(db, resp.json()["skill_id"])
+    assert skill is not None
+    assert skill.config.kind == "pipeline"
+    assert [s.id for s in skill.config.steps] == ["upper", "note"]
+    assert skill.config.steps[0].code == "result = document.upper()\n"
+    assert skill.config.steps[1].system_prompt == "rewrite the text"
+    assert provider.requests == []
+
+
+def test_build_pipeline_rejects_unfilled_empty_steps(client, provider) -> None:
+    session_id = client.post("/sessions").json()["id"]
+    client.patch(
+        f"/sessions/{session_id}/skill-meta",
+        json={
+            "name": "Pipe",
+            "description": "empty steps stay empty",
+            "kind": "pipeline",
+        },
+    )
+    steps = {
+        "steps": [
+            {"id": "upper", "type": "script", "input": "documents"},
+            {"id": "note", "type": "llm", "input": "previous"},
+        ]
+    }
+    client.patch(
+        f"/sessions/{session_id}/artifacts/steps",
+        json={"content": json.dumps(steps, ensure_ascii=False)},
+    )
+    provider.script = []
+    resp = client.post(f"/sessions/{session_id}/skills")
+    assert resp.status_code == 422
+    detail = resp.json()["detail"].lower()
+    assert "invalid" in detail or "empty" in detail

@@ -285,6 +285,7 @@ async def run_stream_ws(websocket: WebSocket, run_id: str) -> None:
                     provider_name=resolved_provider_name,
                     persist=run["persist"],
                     user_prompt=run.get("user_prompt"),
+                    providers=providers,
                 )
             )
             receive_task = asyncio.create_task(websocket.receive_text())
@@ -359,6 +360,7 @@ async def _stream_apply(
     provider_name: str,
     persist: bool = True,
     user_prompt: str | None = None,
+    providers: dict[str, LLMProvider] | None = None,
 ) -> None:
     """Drive ``apply_skill`` and forward every event frame to the socket."""
     async for event in apply_skill(
@@ -374,6 +376,7 @@ async def _stream_apply(
         provider_name=provider_name,
         persist=persist,
         user_prompt=user_prompt,
+        providers=providers,
     ):
         frame = agent_event_to_frame(event)
         if frame is not None:

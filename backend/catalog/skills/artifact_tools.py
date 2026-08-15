@@ -74,7 +74,10 @@ def _validate_meta_fields(
 
 
 def validate_pipeline_steps(
-    steps: list[PipelineStep], available_tools: list[str]
+    steps: list[PipelineStep],
+    available_tools: list[str],
+    *,
+    require_content: bool = True,
 ) -> list[str]:
     errors: list[str] = []
     if not steps:
@@ -94,12 +97,13 @@ def validate_pipeline_steps(
         if step.input not in PIPELINE_STEP_INPUTS:
             errors.append(f"step {label}: unknown input {step.input!r}")
         if step.type == "script":
-            try:
-                validate_script(step.code)
-            except ScriptValidationError as exc:
-                errors.append(f"step {label}: {exc}")
+            if require_content or step.code.strip():
+                try:
+                    validate_script(step.code)
+                except ScriptValidationError as exc:
+                    errors.append(f"step {label}: {exc}")
         elif step.type == "llm":
-            if not step.system_prompt.strip():
+            if require_content and not step.system_prompt.strip():
                 errors.append(f"step {label}: llm prompt is empty")
             for name in step.allowed_tools:
                 if name not in available_tools:
@@ -228,7 +232,11 @@ def build_artifact_tools(
         except (TypeError, ValueError) as exc:
             errors.append(str(exc))
         if not errors:
-            errors.extend(validate_pipeline_steps(parsed, available_tools))
+            errors.extend(
+                validate_pipeline_steps(
+                    parsed, available_tools, require_content=False
+                )
+            )
         payload = {"steps": [pipeline_step_to_dict(s) for s in parsed]}
         is_valid = not errors
         error = "; ".join(errors) if errors else None
