@@ -501,7 +501,7 @@ def test_ws_session_planner(client, provider, db) -> None:
     assert roles.count("assistant") >= 1
 
 
-def test_workspace_busy_while_planner_ws_active(client, settings) -> None:
+def test_workspace_idle_ws_does_not_block_switch(client, settings) -> None:
     other = Path(settings.fs_root) / "other-ws"
     other.mkdir()
     session_id = client.post("/sessions").json()["id"]
@@ -509,20 +509,16 @@ def test_workspace_busy_while_planner_ws_active(client, settings) -> None:
     with client.websocket_connect(f"/sessions/{session_id}") as ws:
         assert ws.receive_json()["type"] == "suggestions"
         assert client.get("/workspaces/busy").json() == {
-            "busy": True,
-            "reason": "session",
+            "busy": False,
+            "reason": None,
         }
-        blocked = client.post(
+        opened = client.post(
             "/workspaces/open", json={"path": str(other), "confirm": True}
         )
-        assert blocked.status_code == 409
+        assert opened.status_code == 200
+        assert opened.json()["status"] == "ok"
 
     assert client.get("/workspaces/busy").json() == {"busy": False, "reason": None}
-    opened = client.post(
-        "/workspaces/open", json={"path": str(other), "confirm": True}
-    )
-    assert opened.status_code == 200
-    assert opened.json()["status"] == "ok"
 
 
 def test_ws_session_attach_documents_and_prompt(client, provider, db) -> None:
@@ -825,12 +821,14 @@ def test_ws_session_cancel(client, provider, db) -> None:
             frames.append(frame)
             if frame.get("type") == "finish":
                 break
+        assert client.get("/workspaces/busy").json() == {"busy": False, "reason": None}
 
     finish = frames[-1]
     assert finish["type"] == "finish"
     assert finish["status"] == "cancelled"
     # The provider observed the cancellation at its await point.
     assert blocking.was_cancelled is True
+    assert client.app.state.active_planner_turns == 0
 
     # The session is still alive: a follow-up message completes normally.
     provider.script = [_completion("готово")]

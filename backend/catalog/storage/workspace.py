@@ -214,7 +214,7 @@ class WorkspaceManager:
             )
         if reason == "session":
             raise WorkspaceBusyError(
-                "cannot switch workspace while a planner session is active"
+                "cannot switch workspace while an agent reply is in progress"
             )
 
     def list_registry(self) -> list[dict[str, str | None]]:

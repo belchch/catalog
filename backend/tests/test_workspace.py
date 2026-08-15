@@ -206,7 +206,7 @@ def test_switch_blocked_while_session_active(tmp_path: Path, app_db: Database) -
     b.mkdir()
     manager.open(a, confirm_init=True)
     assert manager.has_running() == "session"
-    with pytest.raises(WorkspaceBusyError, match="planner session"):
+    with pytest.raises(WorkspaceBusyError, match="agent reply"):
         manager.open(b, confirm_init=True)
     session_busy["on"] = False
     other = manager.open(b, confirm_init=True)
@@ -237,7 +237,7 @@ def test_close_blocked_while_session_active(tmp_path: Path, app_db: Database) ->
     root = tmp_path / "folder"
     root.mkdir()
     manager.open(root, confirm_init=True)
-    with pytest.raises(WorkspaceBusyError, match="planner session"):
+    with pytest.raises(WorkspaceBusyError, match="agent reply"):
         manager.close()
     assert manager.current is not None
 

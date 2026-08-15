@@ -88,10 +88,10 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     )
     if not stored_provider and not stored_model:
         set_app_settings(app_db, provider=active_name, model=app.state.active_model)
-    app.state.active_ws_sessions = 0
+    app.state.active_planner_turns = 0
     manager = WorkspaceManager()
     manager.bind(app_db=app_db, app_state=app.state)
-    manager.set_busy_probe(lambda: app.state.active_ws_sessions > 0)
+    manager.set_busy_probe(lambda: app.state.active_planner_turns > 0)
     app.state.workspace_manager = manager
     app.state.settings = settings
     try:

@@ -225,7 +225,7 @@ def test_reopen_same_folder_ok_while_run_active(
     assert again.json()["status"] == "ok"
 
 
-def test_open_blocked_while_ws_session_active(
+def test_open_ok_while_ws_session_idle(
     client_no_workspace, tmp_path: Path
 ) -> None:
     client = client_no_workspace
@@ -244,17 +244,108 @@ def test_open_blocked_while_ws_session_active(
         assert frame["type"] == "suggestions"
         busy = client.get("/workspaces/busy")
         assert busy.status_code == 200
-        assert busy.json() == {"busy": True, "reason": "session"}
+        assert busy.json() == {"busy": False, "reason": None}
+        ok = client.post("/workspaces/open", json={"path": str(b), "confirm": True})
+        assert ok.status_code == 200
+        assert ok.json()["status"] == "ok"
+
+    assert client.get("/workspaces/busy").json() == {"busy": False, "reason": None}
+
+
+def test_open_blocked_while_planner_turn_active(
+    client_no_workspace, tmp_path: Path
+) -> None:
+    from tests.conftest import HoldCompleteProvider
+
+    client = client_no_workspace
+    a = tmp_path / "wta"
+    b = tmp_path / "wtb"
+    a.mkdir()
+    b.mkdir()
+    assert (
+        client.post("/workspaces/open", json={"path": str(a), "confirm": True}).status_code
+        == 200
+    )
+    hold = HoldCompleteProvider()
+    client.app.state.provider = hold
+    session_id = client.post("/sessions").json()["id"]
+
+    with client.websocket_connect(f"/sessions/{session_id}") as ws:
+        assert ws.receive_json()["type"] == "suggestions"
+        ws.send_text("долгий вопрос")
+        assert hold.entered.wait(timeout=2)
+        assert client.app.state.active_planner_turns == 1
+        assert client.get("/workspaces/busy").json() == {
+            "busy": True,
+            "reason": "session",
+        }
         blocked = client.post(
             "/workspaces/open", json={"path": str(b), "confirm": True}
         )
         assert blocked.status_code == 409
-        assert "session" in blocked.json()["detail"]
+        assert "agent reply" in blocked.json()["detail"]
+        hold.release.set()
+        while True:
+            if ws.receive_json().get("type") == "finish":
+                break
+        assert client.app.state.active_planner_turns == 0
+        assert client.get("/workspaces/busy").json() == {"busy": False, "reason": None}
 
-    assert client.get("/workspaces/busy").json() == {"busy": False, "reason": None}
     ok = client.post("/workspaces/open", json={"path": str(b), "confirm": True})
     assert ok.status_code == 200
     assert ok.json()["status"] == "ok"
+
+
+def test_idle_ws_tabs_do_not_block_switch(
+    client_no_workspace, tmp_path: Path
+) -> None:
+    client = client_no_workspace
+    a = tmp_path / "mta"
+    b = tmp_path / "mtb"
+    a.mkdir()
+    b.mkdir()
+    assert (
+        client.post("/workspaces/open", json={"path": str(a), "confirm": True}).status_code
+        == 200
+    )
+    first = client.post("/sessions").json()["id"]
+    second = client.post("/sessions").json()["id"]
+
+    with client.websocket_connect(f"/sessions/{first}") as ws1:
+        with client.websocket_connect(f"/sessions/{second}") as ws2:
+            assert ws1.receive_json()["type"] == "suggestions"
+            assert ws2.receive_json()["type"] == "suggestions"
+            assert client.get("/workspaces/busy").json() == {
+                "busy": False,
+                "reason": None,
+            }
+            ok = client.post(
+                "/workspaces/open", json={"path": str(b), "confirm": True}
+            )
+            assert ok.status_code == 200
+            assert ok.json()["status"] == "ok"
+
+
+def test_close_ok_while_ws_session_idle(
+    client_no_workspace, tmp_path: Path
+) -> None:
+    client = client_no_workspace
+    folder = tmp_path / "closeidle"
+    folder.mkdir()
+    assert (
+        client.post(
+            "/workspaces/open", json={"path": str(folder), "confirm": True}
+        ).status_code
+        == 200
+    )
+    session_id = client.post("/sessions").json()["id"]
+    manager: WorkspaceManager = client.app.state.workspace_manager
+
+    with client.websocket_connect(f"/sessions/{session_id}") as ws:
+        assert ws.receive_json()["type"] == "suggestions"
+        assert manager.has_running() is None
+        manager.close()
+        assert manager.current is None
 
 
 def test_busy_clears_after_ws_handler_error(
@@ -279,6 +370,7 @@ def test_busy_clears_after_ws_handler_error(
             if frame.get("type") == "error":
                 break
 
+    assert client.app.state.active_planner_turns == 0
     assert client.get("/workspaces/busy").json() == {"busy": False, "reason": None}
 
 

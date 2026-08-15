@@ -19,6 +19,8 @@ thread-safe; the ``db`` fixture opens that same file for direct seeding.
 
 from __future__ import annotations
 
+import asyncio
+import threading
 from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
@@ -87,6 +89,30 @@ class FakeProvider:
         reasoning: str = "",
     ) -> Any:
         yield StreamDelta(content="")
+
+
+class HoldCompleteProvider(FakeProvider):
+    def __init__(self, result: CompletionResult | None = None) -> None:
+        super().__init__(script=[])
+        self.entered = threading.Event()
+        self.release = threading.Event()
+        self.result = result or CompletionResult(
+            content="hold-done", tool_calls=[], finish_reason="stop"
+        )
+
+    async def complete(
+        self,
+        model: str,
+        messages: list[Message],
+        tools: list[ToolSpec] | None = None,
+        temperature: float = 0.0,
+        tool_choice: str = "auto",
+        reasoning: str = "",
+    ) -> CompletionResult:
+        self.entered.set()
+        while not self.release.is_set():
+            await asyncio.sleep(0.01)
+        return self.result
 
 
 _PROVIDER: LLMProvider = FakeProvider([])  # type: ignore[assignment]
