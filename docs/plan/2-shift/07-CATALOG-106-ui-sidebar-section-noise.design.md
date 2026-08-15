@@ -81,9 +81,11 @@ export function PlusIcon({ className }: IconProps) {
 | Секция | Кнопки | `aria-label` / `title` | Иконка | `disabled` |
 |---|---|---|---|---|
 | Сессии | новый чат | `Новый чат` | `PlusIcon` | `!hasWorkspace \|\| sessions.loading` |
-| Сессии | обновить | `Обновить сессии` | `RefreshIcon` / `SpinnerIcon` при `sessions.loading` | `!hasWorkspace` |
-| Документы | обновить | `Обновить документы` | `RefreshIcon` / `SpinnerIcon` при `docs.loading` | `!hasWorkspace` |
-| Скиллы | обновить | `Обновить скиллы` | `RefreshIcon` / `SpinnerIcon` при `skillsHook.loading` | `!hasWorkspace` |
+| ~~Сессии~~ | ~~обновить~~ | ~~`Обновить сессии`~~ | ~~`RefreshIcon` / `SpinnerIcon` при `sessions.loading`~~ | ~~`!hasWorkspace`~~ |
+| ~~Документы~~ | ~~обновить~~ | ~~`Обновить документы`~~ | ~~`RefreshIcon` / `SpinnerIcon` при `docs.loading`~~ | ~~`!hasWorkspace`~~ |
+| ~~Скиллы~~ | ~~обновить~~ | ~~`Обновить скиллы`~~ | ~~`RefreshIcon` / `SpinnerIcon` при `skillsHook.loading`~~ | ~~`!hasWorkspace`~~ |
+
+> Строки про кнопки обновления отменены CATALOG-109: кнопки удалены из заголовков секций, в «Сессиях» остаётся только «Новый чат».
 
 Иконки в заголовках — базового размера `icons.tsx` (16px), без `className`. Обработчики (`handleNewChat`, `X.refresh()`) не меняются.
 
@@ -210,7 +212,7 @@ position: sticky; top: 0; z-index: 1; background: var(--sidebar);
 
 - Скрытие через `opacity` оставляет кнопки в дереве доступности и в порядке табуляции — скринридер и клавиатура видят их всегда, независимо от `hover`. `aria-hidden` на группе actions ставить нельзя.
 - `focus-within` на строке заголовка — обязательное условие: без него зрячий клавиатурный пользователь получил бы фокус на невидимой кнопке.
-- Каждая icon-кнопка имеет `aria-label` **и** `title` (подсказка мышью + имя для SR). Метки уникальны: «Новый чат», «Обновить сессии», «Обновить документы», «Обновить скиллы».
+- Каждая icon-кнопка имеет `aria-label` **и** `title` (подсказка мышью + имя для SR). Метки уникальны: «Новый чат» (метки «Обновить …» отменены CATALOG-109).
 - Кнопки обновления несут `aria-busy` вместо `disabled` на время запроса — фокус не теряется при нажатии с клавиатуры. `SpinnerIcon` уже уважает `motion-reduce`.
 - Счётчик входит в доступное имя кнопки-заголовка: «Сессии 12». Это осмысленно, поэтому `aria-hidden` на бейдже не ставим; `aria-expanded` / `aria-controls` не меняются.
 - Тач-цель icon-кнопки 28px — ниже 44px, но сайдбар доступен только с ≥1024px, где основной ввод — мышь; в футере тач-цель остаётся 32px, как в CATALOG-104.
@@ -241,7 +243,7 @@ position: sticky; top: 0; z-index: 1; background: var(--sidebar);
 - [ ] В `App.tsx` переданы `count` для трёх секций: длины `sessions.sessions`, `docs.documents`, `skillsHook.skills`.
 - [ ] В заголовках секций нет `btn-secondary` и текстовых подписей на кнопках: четыре кнопки — icon-кнопки с классом `catalog-sidebar__icon-button size-7`.
 - [ ] Иконки кнопок: `PlusIcon` у «Новый чат», `RefreshIcon` у обновления, `SpinnerIcon` при `loading` соответствующего хука; `PlusIcon` добавлен в `icons.tsx` через общий `iconBase`.
-- [ ] У каждой icon-кнопки заголовка есть уникальные `aria-label` и `title` («Новый чат», «Обновить сессии», «Обновить документы», «Обновить скиллы»), у кнопок обновления — `aria-busy={loading}`.
+- [ ] У icon-кнопки заголовка «Сессии» есть уникальные `aria-label` и `title` («Новый чат») (часть про кнопки обновления отменена CATALOG-109).
 - [ ] Кнопки обновления `disabled` только при `!hasWorkspace`; `loading` в условие `disabled` не входит.
 - [ ] `.catalog-sidebar__icon-button` определён один раз и применён и в заголовках секций, и на рескан-кнопке `WorkspaceFooter.tsx`; длинная Tailwind-цепочка рескана удалена.
 - [ ] Класс не задаёт `width`/`height`: размер приходит утилитой — `size-8` в футере (32px сохранён), `size-7` в заголовках.
