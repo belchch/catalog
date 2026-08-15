@@ -752,6 +752,57 @@ def test_build_pipeline_from_artifacts_despite_track_intent(
     assert [s.id for s in skill.config.steps] == ["upper", "note"]
 
 
+def test_build_invalid_pipeline_meta_with_track_intent_returns_422(
+    client, provider, db
+) -> None:
+    session_id = client.post("/sessions").json()["id"]
+    meta = client.patch(
+        f"/sessions/{session_id}/skill-meta",
+        json={
+            "name": "Pipe",
+            "description": "invalid pipeline meta",
+            "kind": "pipeline",
+            "verify_checks": [{"check": "not_a_real_check"}],
+        },
+    )
+    assert meta.status_code == 200, meta.text
+    assert meta.json()["is_valid"] is False
+    steps = {
+        "steps": [
+            {
+                "id": "upper",
+                "type": "script",
+                "input": "documents",
+                "code": "result = document.upper()\n",
+            }
+        ]
+    }
+    patch = client.patch(
+        f"/sessions/{session_id}/artifacts/steps",
+        json={"content": json.dumps(steps, ensure_ascii=False)},
+    )
+    assert patch.status_code == 200, patch.text
+    assert patch.json()["is_valid"] is True
+    select = client.post(
+        f"/sessions/{session_id}/skill-tracks/select",
+        json={
+            "track": {
+                "name": "Pipe",
+                "description": "linear",
+                "operation": "прогнать шаги pipeline",
+                "input_arity": 1,
+                "rationale": "черновик уже pipeline",
+            }
+        },
+    )
+    assert select.status_code == 200, select.text
+    provider.script = []
+    resp = client.post(f"/sessions/{session_id}/skills")
+    assert resp.status_code == 422, resp.text
+    assert "meta" in resp.json()["detail"].lower()
+    assert provider.requests == []
+
+
 def test_patch_steps_allows_empty_content(client) -> None:
     session_id = client.post("/sessions").json()["id"]
     steps = {

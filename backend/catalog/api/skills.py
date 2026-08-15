@@ -292,7 +292,7 @@ def _has_track_intent(messages_raw: list[dict]) -> bool:
 
 def _session_has_pipeline_draft(db: Database, session_id: str) -> bool:
     meta_row = get_artifact(db, session_id, "meta")
-    if meta_row is None or not meta_row.is_valid:
+    if meta_row is None:
         return False
     try:
         meta = json.loads(meta_row.content)
