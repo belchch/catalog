@@ -406,6 +406,11 @@ async def _apply_core(
                         input_doc_ids=input_doc_ids,
                         doc_texts=doc_texts,
                     )
+                    if runtime_prompt is not None:
+                        start_content = (
+                            f"{start_content}\n\nУточнение к заданию:\n"
+                            f"{runtime_prompt}"
+                        )
                     messages: list[Message] = [
                         Message(role="user", content=start_content)
                     ]

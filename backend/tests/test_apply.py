@@ -949,6 +949,38 @@ def test_apply_pipeline_script_llm_script(db: Database, workspace: Path) -> None
     assert step_ids == {"upper", "note", "suffix"}
 
 
+def test_apply_pipeline_user_prompt_in_llm_step(
+    db: Database, workspace: Path
+) -> None:
+    skill = _pipeline_skill()
+    skill_id = create_skill(
+        db, name=skill.name, description=skill.description, config=skill
+    )
+    input_doc_id = _ingest_input(db, workspace)
+    provider = ScriptProvider([_result("NOTED: SOURCE TEXT")])
+    clarification = "Сфокусируйся на рисках."
+
+    result = asyncio.run(
+        apply_skill_collect(
+            provider=provider,
+            db=db,
+            workspace_dir=str(workspace),
+            skill=skill,
+            skill_id=skill_id,
+            input_doc_ids=[input_doc_id],
+            base_tools=build_document_tools(db, workspace),
+            user_prompt=clarification,
+        )
+    )
+
+    assert result.status == "ok"
+    assert provider.seen_messages
+    user_msgs = [m for m in provider.seen_messages[0] if m.role == "user"]
+    assert user_msgs
+    assert clarification in (user_msgs[0].content or "")
+    assert "Уточнение к заданию" in (user_msgs[0].content or "")
+
+
 def test_apply_pipeline_emits_step_id_on_events(
     db: Database, workspace: Path
 ) -> None:
