@@ -50,6 +50,56 @@ def artifacts_frame(db: Database, session_id: str) -> dict[str, Any]:
     }
 
 
+VERIFY_CHECK_PARAMS_HINT = (
+    "verify_checks params: non_empty/markdown_well_formed/"
+    "no_leftover_placeholders (no params); "
+    "min_length requires params.min (unit chars|lines); "
+    "max_length requires params.max (unit chars|lines); "
+    "regex_matches requires params.pattern; "
+    "has_section requires params.heading (optional level); "
+    "has_field requires params.key; "
+    "table_parses optional params.min_rows/min_cols."
+)
+
+
+def validate_verify_check_entry(
+    vc: object, available_checks: list[str]
+) -> list[str]:
+    errors: list[str] = []
+    if not isinstance(vc, dict):
+        errors.append("verify check must be an object")
+        return errors
+    check_id = vc.get("check")
+    if isinstance(check_id, str) and (
+        check_id == "custom" or check_id.startswith("custom:")
+    ):
+        if check_id == "custom":
+            params = vc.get("params") or {}
+            if not isinstance(params, dict) or not params.get("id"):
+                errors.append("custom check requires params.id")
+        elif check_id == "custom:" or len(check_id) <= len("custom:"):
+            errors.append("custom check id is empty")
+        return errors
+    if not check_id or check_id not in available_checks:
+        errors.append(f"unknown verify check: {check_id!r}")
+        return errors
+    params = vc.get("params") or {}
+    if not isinstance(params, dict):
+        errors.append(f"{check_id}: params must be an object")
+        return errors
+    if check_id == "min_length" and params.get("min") is None:
+        errors.append("min_length requires params.min")
+    if check_id == "max_length" and params.get("max") is None:
+        errors.append("max_length requires params.max")
+    if check_id == "regex_matches" and not params.get("pattern"):
+        errors.append("regex_matches requires params.pattern")
+    if check_id == "has_section" and not params.get("heading"):
+        errors.append("has_section requires params.heading")
+    if check_id == "has_field" and not params.get("key"):
+        errors.append("has_field requires params.key")
+    return errors
+
+
 def _validate_meta_fields(
     *,
     kind: str,
@@ -67,9 +117,7 @@ def _validate_meta_fields(
             if name not in available_tools:
                 errors.append(f"unknown tool: {name!r}")
     for vc in verify_checks:
-        check_id = vc.get("check") if isinstance(vc, dict) else None
-        if not check_id or check_id not in available_checks:
-            errors.append(f"unknown verify check: {check_id!r}")
+        errors.extend(validate_verify_check_entry(vc, available_checks))
     return errors
 
 
@@ -311,7 +359,8 @@ def build_artifact_tools(
                 "Set skill metadata for this session: name, description, kind "
                 "(agent|script|pipeline), optional input_arity, allowed_tools, "
                 "verify_checks. For pipeline, allowed_tools belong on steps, "
-                "not here. Call when kind/name are clear."
+                "not here. Call when kind/name are clear. "
+                + VERIFY_CHECK_PARAMS_HINT
             ),
             parameters={
                 "type": "object",
@@ -332,7 +381,10 @@ def build_artifact_tools(
                         "items": {
                             "type": "object",
                             "properties": {
-                                "check": {"type": "string"},
+                                "check": {
+                                    "type": "string",
+                                    "enum": list(available_checks),
+                                },
                                 "params": {"type": "object"},
                             },
                             "required": ["check"],

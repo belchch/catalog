@@ -1,13 +1,17 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   ApiError,
+  attachSessionTools,
   buildSkill,
   createSession,
   extractApiDetail,
   getHealth,
   getSession,
+  getSessionTools,
   isBuildTimeoutError,
+  listSkills,
   proposeSkillTracks,
+  removeSessionTool,
   saveRunResult,
   selectSkillTrack,
   startEditSession,
@@ -16,6 +20,7 @@ import {
   type ArtifactType,
   type DocumentOut,
   type ScanReport,
+  type SkillOut,
   type SkillPreview,
   type SkillTrack,
 } from './api.ts'
@@ -127,6 +132,10 @@ export default function App() {
   const [activeRunId, setActiveRunId] = useState<string | null>(null)
   const [settingsSkill, setSettingsSkill] = useState<{ skillId: string; preview: SkillPreview } | null>(null)
   const [editingSkill, setEditingSkill] = useState<{ skillId: string; name: string } | null>(null)
+  const [toolsOpen, setToolsOpen] = useState(false)
+  const [sessionTools, setSessionTools] = useState<SkillOut[]>([])
+  const [allSkillsForTools, setAllSkillsForTools] = useState<SkillOut[]>([])
+  const [toolsLoading, setToolsLoading] = useState(false)
   const [savedResultDoc, setSavedResultDoc] = useState<DocumentOut | null>(null)
   const [savingResult, setSavingResult] = useState(false)
   const [openSessions, setOpenSessions] = useState(false)
@@ -208,6 +217,49 @@ export default function App() {
     }
     workspacePathRef.current = nextPath
   }, [workspace.current?.path])
+
+  useEffect(() => {
+    setToolsOpen(false)
+    setSessionTools([])
+    if (!sessionId || !hasWorkspace) return
+    let cancelled = false
+    setToolsLoading(true)
+    void Promise.all([getSessionTools(sessionId), listSkills()])
+      .then(([attached, all]) => {
+        if (cancelled) return
+        setSessionTools(attached)
+        setAllSkillsForTools(all.filter((s) => s.status === 'committed' || s.status === 'draft'))
+      })
+      .catch(() => {
+        if (cancelled) return
+        setSessionTools([])
+      })
+      .finally(() => {
+        if (!cancelled) setToolsLoading(false)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [sessionId, hasWorkspace])
+
+  const handleToggleSessionTool = useCallback(
+    async (skillId: string, enabled: boolean) => {
+      if (!sessionId) return
+      setNotice(null)
+      try {
+        if (enabled) {
+          const next = await attachSessionTools(sessionId, [skillId])
+          setSessionTools(next)
+        } else {
+          await removeSessionTool(sessionId, skillId)
+          setSessionTools((prev) => prev.filter((s) => s.id !== skillId))
+        }
+      } catch (e) {
+        setNotice(e instanceof Error ? e.message : String(e))
+      }
+    },
+    [sessionId],
+  )
 
   const openPicker = useCallback(() => {
     setNotice(null)
@@ -894,6 +946,16 @@ export default function App() {
                         setBuildError(null)
                         setBuildErrorIsTimeout(false)
                       }}
+                      attachedSkillCount={sessionTools.length}
+                      onOpenTools={() => setToolsOpen((v) => !v)}
+                      toolsOpen={toolsOpen}
+                      onCloseTools={() => setToolsOpen(false)}
+                      availableSkills={allSkillsForTools}
+                      attachedSkillIds={sessionTools.map((s) => s.id)}
+                      onToggleTool={(id, enabled) => {
+                        void handleToggleSessionTool(id, enabled)
+                      }}
+                      toolsLoading={toolsLoading}
                     />
                   </div>
                 </div>

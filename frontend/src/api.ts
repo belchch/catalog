@@ -34,6 +34,8 @@ export interface RunOut {
   trace: unknown[] | null
   // Raw agent/script output, kept even when persist=false (CATALOG-18).
   result_text: string | null
+  parent_run_id?: string | null
+  children?: RunOut[]
 }
 
 /** Output mode for applying a skill (CATALOG-18): "в док" vs "на экран". */
@@ -359,6 +361,76 @@ export async function removeSessionDocument(
   throw new Error(`${res.status} ${res.statusText}${body ? `: ${body}` : ''}`)
 }
 
+export function getSessionTools(sessionId: string): Promise<SkillOut[]> {
+  return jsonFetch<SkillOut[]>(`/sessions/${sessionId}/tools`)
+}
+
+export interface CustomCheckOut {
+  id: string
+  name: string
+  prompt: string
+  hidden: boolean
+  created_at: string
+}
+
+export function listCustomChecks(): Promise<CustomCheckOut[]> {
+  return jsonFetch<CustomCheckOut[]>('/custom-checks')
+}
+
+export function listVerifyCheckCatalog(): Promise<{
+  builtin: string[]
+  labels: Record<string, string>
+}> {
+  return jsonFetch('/verify-checks')
+}
+
+export function createCustomCheck(body: {
+  name: string
+  prompt: string
+}): Promise<CustomCheckOut> {
+  return jsonFetch<CustomCheckOut>('/custom-checks', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  })
+}
+
+export function trialCustomCheck(body: {
+  prompt: string
+  sample: string
+}): Promise<{ passed: boolean; failures: string[] }> {
+  return jsonFetch('/custom-checks/trial', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  })
+}
+
+export function attachSessionTools(
+  sessionId: string,
+  skillIds: string[],
+): Promise<SkillOut[]> {
+  return jsonFetch<SkillOut[]>(`/sessions/${sessionId}/tools`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ skill_ids: skillIds }),
+  })
+}
+
+export async function removeSessionTool(
+  sessionId: string,
+  skillId: string,
+): Promise<void> {
+  const res = await fetch(
+    `${API_URL}/sessions/${sessionId}/tools/${skillId}`,
+    { method: 'DELETE' },
+  )
+  if (res.status === 204) return
+  const body = await res.text().catch(() => '')
+  if (res.status === 404 && body.includes('skill not attached')) return
+  throw new Error(`${res.status} ${res.statusText}${body ? `: ${body}` : ''}`)
+}
+
 export async function deleteSession(sessionId: string): Promise<void> {
   const res = await fetch(`${API_URL}/sessions/${sessionId}`, { method: 'DELETE' })
   if (!res.ok) {
@@ -658,7 +730,7 @@ export interface SkillMetaPatch {
   kind: string
   input_arity: number | null
   allowed_tools: string[]
-  verify_checks: { check: string }[]
+  verify_checks: { check: string; params?: Record<string, unknown> }[]
 }
 
 export function getSessionArtifacts(sessionId: string): Promise<SessionArtifact[]> {

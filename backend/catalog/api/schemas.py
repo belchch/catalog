@@ -116,6 +116,8 @@ class RunOut(BaseModel):
     trace: list | None = None
     # Raw agent/script output, kept even when persist=False (CATALOG-18).
     result_text: str | None = None
+    parent_run_id: str | None = None
+    children: list["RunOut"] = Field(default_factory=list)
 
 
 class BuildSkillRequest(BaseModel):

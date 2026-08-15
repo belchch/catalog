@@ -337,6 +337,13 @@ button { -webkit-tap-highlight-color: transparent; }
   padding: 14px 16px 12px; border: 1px solid var(--line); border-radius: var(--radius-card);
   background: var(--surface); box-shadow: var(--shadow-card);
 }
+.catalog-composer--attached {
+  border-top-left-radius: 0;
+  border-top-right-radius: 0;
+}
+.catalog-chat__header {
+  background: var(--header-bg);
+}
 .catalog-composer textarea { border: 0; background: transparent; color: var(--ink); }
 .catalog-composer textarea:focus { box-shadow: none; }
 .catalog-composer textarea::placeholder { color: var(--ink-placeholder); }

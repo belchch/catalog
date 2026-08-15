@@ -63,6 +63,14 @@ CREATE TABLE IF NOT EXISTS session_document(
   FOREIGN KEY (session_id) REFERENCES session(id),
   FOREIGN KEY (document_id) REFERENCES document(id)
 );
+CREATE TABLE IF NOT EXISTS session_skill(
+  session_id TEXT NOT NULL,
+  skill_id TEXT NOT NULL,
+  attached_at TEXT NOT NULL,
+  PRIMARY KEY (session_id, skill_id),
+  FOREIGN KEY (session_id) REFERENCES session(id),
+  FOREIGN KEY (skill_id) REFERENCES skill(id)
+);
 CREATE TABLE IF NOT EXISTS message(
   id INTEGER PRIMARY KEY AUTOINCREMENT, session_id TEXT NOT NULL,
   role TEXT NOT NULL, content TEXT, tool_name TEXT, tool_call_id TEXT,
@@ -82,7 +90,8 @@ CREATE TABLE IF NOT EXISTS skill_run(
   trace_json TEXT, started_at TEXT NOT NULL, ended_at TEXT,
   persist INTEGER NOT NULL DEFAULT 1,                            -- 1 = auto-persist result_md (CATALOG-18)
   result_text TEXT,                                              -- raw agent/script output, kept even when persist=0
-  user_prompt TEXT
+  user_prompt TEXT,
+  parent_run_id TEXT                                             -- nested skill-as-tool run (ADR-0019)
 );
 CREATE TABLE IF NOT EXISTS session_artifact(
   session_id TEXT NOT NULL,
@@ -94,6 +103,14 @@ CREATE TABLE IF NOT EXISTS session_artifact(
   updated_at TEXT NOT NULL,
   PRIMARY KEY (session_id, type),
   FOREIGN KEY (session_id) REFERENCES session(id)
+);
+CREATE TABLE IF NOT EXISTS custom_check(
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  prompt TEXT NOT NULL,
+  hidden INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
 );
 """
 
@@ -123,5 +140,10 @@ ADDITIVE_MIGRATIONS: list[tuple[str, str, str]] = [
         "document",
         "extracted_text",
         "ALTER TABLE document ADD COLUMN extracted_text TEXT",
+    ),
+    (
+        "skill_run",
+        "parent_run_id",
+        "ALTER TABLE skill_run ADD COLUMN parent_run_id TEXT",
     ),
 ]
