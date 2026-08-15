@@ -290,6 +290,17 @@ def _has_track_intent(messages_raw: list[dict]) -> bool:
     return False
 
 
+def _session_has_pipeline_draft(db: Database, session_id: str) -> bool:
+    meta_row = get_artifact(db, session_id, "meta")
+    if meta_row is None or not meta_row.is_valid:
+        return False
+    try:
+        meta = json.loads(meta_row.content)
+    except (TypeError, ValueError, json.JSONDecodeError):
+        return False
+    return isinstance(meta, dict) and meta.get("kind") == "pipeline"
+
+
 def _format_track_intent_message(track: SkillTrack) -> str:
     arity = (
         str(track.input_arity) if track.input_arity is not None else "любое"
@@ -719,7 +730,9 @@ async def build_skill_from_session(
 ) -> str:
     model_default = default_model or settings.default_model
     messages_raw = list_messages(db, session_id)
-    force_llm = _has_track_intent(messages_raw)
+    force_llm = _has_track_intent(messages_raw) and not _session_has_pipeline_draft(
+        db, session_id
+    )
     if not force_llm:
         packed = _build_skill_from_artifacts(
             db=db,

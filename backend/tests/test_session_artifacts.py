@@ -695,6 +695,63 @@ def test_build_pipeline_from_artifacts(client, provider, db) -> None:
     assert provider.requests == []
 
 
+def test_build_pipeline_from_artifacts_despite_track_intent(
+    client, provider, db
+) -> None:
+    session_id = client.post("/sessions").json()["id"]
+    client.patch(
+        f"/sessions/{session_id}/skill-meta",
+        json={
+            "name": "Pipe",
+            "description": "from artifacts after track",
+            "kind": "pipeline",
+        },
+    )
+    steps = {
+        "steps": [
+            {
+                "id": "upper",
+                "type": "script",
+                "input": "documents",
+                "code": "result = document.upper()\n",
+            },
+            {
+                "id": "note",
+                "type": "llm",
+                "input": "previous",
+                "system_prompt": "rewrite the text",
+                "allowed_tools": ["read_document"],
+            },
+        ]
+    }
+    patch = client.patch(
+        f"/sessions/{session_id}/artifacts/steps",
+        json={"content": json.dumps(steps, ensure_ascii=False)},
+    )
+    assert patch.status_code == 200, patch.text
+    select = client.post(
+        f"/sessions/{session_id}/skill-tracks/select",
+        json={
+            "track": {
+                "name": "Pipe",
+                "description": "linear",
+                "operation": "прогнать шаги pipeline",
+                "input_arity": 1,
+                "rationale": "черновик уже pipeline",
+            }
+        },
+    )
+    assert select.status_code == 200, select.text
+    provider.script = []
+    resp = client.post(f"/sessions/{session_id}/skills")
+    assert resp.status_code == 200, resp.text
+    assert provider.requests == []
+    skill = get_skill(db, resp.json()["skill_id"])
+    assert skill is not None
+    assert skill.config.kind == "pipeline"
+    assert [s.id for s in skill.config.steps] == ["upper", "note"]
+
+
 def test_patch_steps_allows_empty_content(client) -> None:
     session_id = client.post("/sessions").json()["id"]
     steps = {
