@@ -141,6 +141,11 @@ export default function App() {
   const [rescanReport, setRescanReport] = useState<ScanReport | null>(null)
   const workspacePathRef = useRef<string | null>(null)
   const settingsButtonRef = useRef<HTMLButtonElement>(null)
+  const sessionIdRef = useRef<string | null>(sessionId)
+  const creatingSessionRef = useRef<Promise<{
+    id: string
+    skippedDocIds: string[]
+  }> | null>(null)
 
   const handleSessionInvalid = useCallback(() => {
     writeStoredSessionId(null)
@@ -177,6 +182,8 @@ export default function App() {
 
   useEffect(() => {
     writeStoredSessionId(sessionId)
+    sessionIdRef.current = sessionId
+    creatingSessionRef.current = null
   }, [sessionId])
 
   useEffect(() => {
@@ -311,16 +318,31 @@ export default function App() {
       docIds?: string[],
     ): Promise<{ id: string; skippedDocIds: string[] }> => {
       if (!hasWorkspace) throw new Error('Сначала откройте папку воркспейса')
-      if (sessionId) return { id: sessionId, skippedDocIds: [] }
-      const created = await createSession(docIds)
-      setSessionId(created.id)
-      void sessions.refresh()
-      return {
-        id: created.id,
-        skippedDocIds: created.skipped_doc_ids ?? [],
+      if (sessionIdRef.current) {
+        return { id: sessionIdRef.current, skippedDocIds: [] }
+      }
+      if (creatingSessionRef.current) {
+        const created = await creatingSessionRef.current
+        return { id: created.id, skippedDocIds: [] }
+      }
+      const pending = createSession(docIds).then((created) => {
+        sessionIdRef.current = created.id
+        setSessionId(created.id)
+        void sessions.refresh()
+        return {
+          id: created.id,
+          skippedDocIds: created.skipped_doc_ids ?? [],
+        }
+      })
+      creatingSessionRef.current = pending
+      try {
+        return await pending
+      } catch (e) {
+        creatingSessionRef.current = null
+        throw e
       }
     },
-    [hasWorkspace, sessionId, sessions],
+    [hasWorkspace, sessions],
   )
 
   const handleSend = useCallback(
