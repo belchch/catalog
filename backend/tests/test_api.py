@@ -479,6 +479,18 @@ def test_ws_session_attach_documents_and_prompt(client, provider, db) -> None:
     assert "beta" in system.content
 
 
+def test_create_session_attaches_doc_ids_before_response(client) -> None:
+    doc_id = _upload(client, "first.md", b"# First\n")
+    resp = client.post("/sessions", json={"doc_ids": [doc_id, "missing-id"]})
+    assert resp.status_code == 200
+    body = resp.json()
+    session_id = body["id"]
+    assert body["skipped_doc_ids"] == ["missing-id"]
+    listing = client.get(f"/sessions/{session_id}/documents")
+    assert listing.status_code == 200
+    assert [d["id"] for d in listing.json()] == [doc_id]
+
+
 def test_get_session_documents_404(client) -> None:
     resp = client.get("/sessions/missing/documents")
     assert resp.status_code == 404
