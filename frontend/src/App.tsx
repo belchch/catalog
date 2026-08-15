@@ -25,7 +25,7 @@ import { Chat } from './components/Chat.tsx'
 import { CollapsibleSection } from './components/CollapsibleSection.tsx'
 import { DocumentList } from './components/DocumentList.tsx'
 import { ModelSelector } from './components/ModelSelector.tsx'
-import { SettingsIcon } from './components/icons.tsx'
+import { PlusIcon, RefreshIcon, SettingsIcon, SpinnerIcon } from './components/icons.tsx'
 import { SettingsPanel } from './components/SettingsPanel.tsx'
 import { RescanReportModal } from './components/RescanReportModal.tsx'
 import { RunView } from './components/RunView.tsx'
@@ -694,23 +694,29 @@ export default function App() {
             title="Сессии"
             open={openSessions}
             onToggle={setOpenSessions}
+            count={sessions.sessions.length}
             actions={
               <>
                 <button
                   type="button"
-                  className="btn-secondary"
+                  className="catalog-sidebar__icon-button size-7"
                   onClick={handleNewChat}
                   disabled={!hasWorkspace || sessions.loading}
+                  aria-label="Новый чат"
+                  title="Новый чат"
                 >
-                  + Новый чат
+                  <PlusIcon />
                 </button>
                 <button
                   type="button"
-                  className="btn-secondary"
+                  className="catalog-sidebar__icon-button size-7"
                   onClick={() => void sessions.refresh()}
-                  disabled={!hasWorkspace || sessions.loading}
+                  disabled={!hasWorkspace}
+                  aria-label="Обновить сессии"
+                  title="Обновить сессии"
+                  aria-busy={sessions.loading}
                 >
-                  {sessions.loading ? '…' : 'Обновить'}
+                  {sessions.loading ? <SpinnerIcon /> : <RefreshIcon />}
                 </button>
               </>
             }
@@ -726,14 +732,18 @@ export default function App() {
             title="Документы"
             open={openDocs}
             onToggle={setOpenDocs}
+            count={docs.documents.length}
             actions={
               <button
                 type="button"
-                className="btn-secondary"
+                className="catalog-sidebar__icon-button size-7"
                 onClick={() => void docs.refresh()}
-                disabled={!hasWorkspace || docs.loading}
+                disabled={!hasWorkspace}
+                aria-label="Обновить документы"
+                title="Обновить документы"
+                aria-busy={docs.loading}
               >
-                {docs.loading ? '…' : 'Обновить'}
+                {docs.loading ? <SpinnerIcon /> : <RefreshIcon />}
               </button>
             }
           >
@@ -748,14 +758,18 @@ export default function App() {
             title="Скиллы"
             open={openSkills}
             onToggle={setOpenSkills}
+            count={skillsHook.skills.length}
             actions={
               <button
                 type="button"
-                className="btn-secondary"
+                className="catalog-sidebar__icon-button size-7"
                 onClick={() => void skillsHook.refresh()}
-                disabled={!hasWorkspace || skillsHook.loading}
+                disabled={!hasWorkspace}
+                aria-label="Обновить скиллы"
+                title="Обновить скиллы"
+                aria-busy={skillsHook.loading}
               >
-                {skillsHook.loading ? '…' : 'Обновить'}
+                {skillsHook.loading ? <SpinnerIcon /> : <RefreshIcon />}
               </button>
             }
           >

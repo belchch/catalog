@@ -5,6 +5,7 @@ interface CollapsibleSectionProps {
   open: boolean
   onToggle: (next: boolean) => void
   actions?: ReactNode
+  count?: number
   children: ReactNode
 }
 
@@ -13,6 +14,7 @@ export function CollapsibleSection({
   open,
   onToggle,
   actions,
+  count,
   children,
 }: CollapsibleSectionProps) {
   const panelId = useId()
@@ -31,8 +33,11 @@ export function CollapsibleSection({
             {open ? '▾' : '▸'}
           </span>
           <span>{title}</span>
+          {typeof count === 'number' && count > 0 && (
+            <span className="badge-neutral tabular-nums">{count}</span>
+          )}
         </button>
-        {actions && <div className="flex items-center gap-1">{actions}</div>}
+        {actions && <div className="catalog-section-header__actions">{actions}</div>}
       </div>
       {open && (
         <div

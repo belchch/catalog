@@ -58,7 +58,7 @@ export function WorkspaceFooter({
       {hasWorkspace ? (
         <button
           type="button"
-          className="inline-flex size-8 shrink-0 items-center justify-center rounded-control hover:bg-[var(--sidebar-brand-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand disabled:cursor-not-allowed disabled:opacity-50"
+          className="catalog-sidebar__icon-button size-8"
           onClick={onRescan}
           disabled={rescanning}
           aria-label="Пересканировать"
