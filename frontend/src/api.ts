@@ -554,7 +554,94 @@ export function updateSettings(settings: SettingsUpdate): Promise<SettingsOut> {
   })
 }
 
-export type ArtifactType = 'prompt' | 'script' | 'meta'
+export type ArtifactType = 'prompt' | 'script' | 'meta' | 'steps'
+
+export type SkillKind = 'agent' | 'script' | 'pipeline'
+
+export type PipelineStepType = 'script' | 'llm'
+
+export type PipelineStepInput = 'documents' | 'previous'
+
+export interface PipelineStepDraft {
+  id: string
+  type: PipelineStepType
+  input: PipelineStepInput
+  code: string
+  system_prompt: string
+  allowed_tools: string[]
+  model: string
+  provider: string
+  reasoning: string
+}
+
+export function parseStepsArtifact(content: string): {
+  steps: PipelineStepDraft[]
+  parseError: string | null
+} {
+  const trimmed = content.trim()
+  if (!trimmed) return { steps: [], parseError: null }
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(trimmed)
+  } catch {
+    return { steps: [], parseError: 'steps must be JSON' }
+  }
+  let rawList: unknown
+  if (Array.isArray(parsed)) {
+    rawList = parsed
+  } else if (parsed && typeof parsed === 'object') {
+    const obj = parsed as Record<string, unknown>
+    if ('steps' in obj) {
+      rawList = obj.steps
+    } else {
+      return { steps: [], parseError: 'steps must be a list' }
+    }
+  } else {
+    return { steps: [], parseError: 'steps must be a list' }
+  }
+  if (!Array.isArray(rawList)) {
+    return { steps: [], parseError: 'steps must be a list' }
+  }
+  const steps: PipelineStepDraft[] = []
+  for (let i = 0; i < rawList.length; i++) {
+    const item = rawList[i]
+    if (!item || typeof item !== 'object' || Array.isArray(item)) continue
+    steps.push(normalizePipelineStep(item as Record<string, unknown>, i))
+  }
+  return { steps, parseError: null }
+}
+
+function normalizePipelineStep(
+  data: Record<string, unknown>,
+  index: number,
+): PipelineStepDraft {
+  const rawType = typeof data.type === 'string' ? data.type.trim().toLowerCase() : ''
+  const rawInput = typeof data.input === 'string' ? data.input : ''
+  const rawTools = data.allowed_tools
+  const tools = Array.isArray(rawTools) ? rawTools.map(String) : []
+  const prompt =
+    typeof data.system_prompt === 'string' && data.system_prompt
+      ? data.system_prompt
+      : typeof data.prompt === 'string'
+        ? data.prompt
+        : ''
+  return {
+    id: typeof data.id === 'string' ? data.id : '',
+    type: rawType === 'llm' ? 'llm' : 'script',
+    input:
+      rawInput === 'documents' || rawInput === 'previous'
+        ? rawInput
+        : index === 0
+          ? 'documents'
+          : 'previous',
+    code: typeof data.code === 'string' ? data.code : '',
+    system_prompt: prompt,
+    allowed_tools: tools,
+    model: typeof data.model === 'string' ? data.model : '',
+    provider: typeof data.provider === 'string' ? data.provider : '',
+    reasoning: typeof data.reasoning === 'string' ? data.reasoning : '',
+  }
+}
 
 export interface SessionArtifact {
   type: ArtifactType
@@ -580,7 +667,7 @@ export function getSessionArtifacts(sessionId: string): Promise<SessionArtifact[
 
 export function patchArtifact(
   sessionId: string,
-  type: 'prompt' | 'script' | 'meta',
+  type: ArtifactType,
   content: string,
 ): Promise<SessionArtifact> {
   return jsonFetch<SessionArtifact>(`/sessions/${sessionId}/artifacts/${type}`, {

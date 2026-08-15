@@ -1,12 +1,14 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react'
-import type {
-  ArtifactType,
-  SessionArtifact,
-  SkillMetaPatch,
+import { useEffect, useId, useRef, useState, type ReactNode } from 'react'
+import {
+  parseStepsArtifact,
+  type ArtifactType,
+  type SessionArtifact,
+  type SkillKind,
+  type SkillMetaPatch,
 } from '../api.ts'
+import { StepsList } from './StepsList.tsx'
 
 type InputArity = 1 | 2 | null
-type SkillKind = 'agent' | 'script'
 type SectionSaving = ArtifactType | null
 
 interface MetaDraft {
@@ -40,6 +42,7 @@ const ARITY_OPTIONS: { value: InputArity; label: string }[] = [
 const KIND_OPTIONS: { value: SkillKind; label: string }[] = [
   { value: 'agent', label: 'agent' },
   { value: 'script', label: 'script' },
+  { value: 'pipeline', label: 'pipeline' },
 ]
 
 const EMPTY_META: MetaDraft = {
@@ -64,7 +67,8 @@ function parseMetaContent(content: string): MetaDraft {
   if (!content.trim()) return { ...EMPTY_META }
   try {
     const parsed = JSON.parse(content) as Record<string, unknown>
-    const kind = parsed.kind === 'script' ? 'script' : 'agent'
+    const kind: SkillKind =
+      parsed.kind === 'script' || parsed.kind === 'pipeline' ? parsed.kind : 'agent'
     const arityRaw = parsed.input_arity
     const inputArity: InputArity =
       arityRaw === 1 || arityRaw === 2 || arityRaw === null ? arityRaw : 1
@@ -109,7 +113,7 @@ function metaToPatch(draft: MetaDraft): SkillMetaPatch {
     description: draft.description,
     kind: draft.kind,
     input_arity: draft.inputArity,
-    allowed_tools: draft.kind === 'script' ? [] : tools,
+    allowed_tools: draft.kind === 'agent' ? tools : [],
     verify_checks: checks,
   }
 }
@@ -158,15 +162,18 @@ export function ArtifactsPanel({
   const [nameClientError, setNameClientError] = useState(false)
 
   const metaRef = useRef<HTMLDivElement>(null)
+  const stepsRef = useRef<HTMLDivElement>(null)
   const promptRef = useRef<HTMLTextAreaElement>(null)
   const scriptRef = useRef<HTMLTextAreaElement>(null)
   const nameRef = useRef<HTMLInputElement>(null)
+  const stepsHeadingId = useId()
   const dirtyRef = useRef({ meta: false, prompt: false, script: false })
   const flashTimers = useRef<Partial<Record<ArtifactType, ReturnType<typeof setTimeout>>>>({})
 
   const promptArt = findArtifact(artifacts, 'prompt')
   const scriptArt = findArtifact(artifacts, 'script')
   const metaArt = findArtifact(artifacts, 'meta')
+  const stepsArt = findArtifact(artifacts, 'steps')
 
   const dirtyMeta = metaSnapshot(metaDraft) !== serverMetaSnap
   const dirtyPrompt = promptDraft !== serverPrompt
@@ -213,6 +220,11 @@ export function ArtifactsPanel({
 
   useEffect(() => {
     if (!highlightType) return
+    if (highlightType === 'steps') {
+      stepsRef.current?.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
+      stepsRef.current?.focus()
+      return
+    }
     const el =
       highlightType === 'meta'
         ? nameRef.current
@@ -242,6 +254,8 @@ export function ArtifactsPanel({
 
   const kind = metaDraft.kind
   const hasMeta = Boolean(metaArt?.content.trim())
+  const parsedSteps = parseStepsArtifact(stepsArt?.content ?? '')
+  const showSteps = Boolean(stepsArt) || kind === 'pipeline'
 
   const flashSaved = (type: ArtifactType) => {
     setSavedFlash((prev) => ({ ...prev, [type]: true }))
@@ -331,7 +345,16 @@ export function ArtifactsPanel({
     const highlighted = highlightType === type
     return (
       <div
-        ref={type === 'meta' ? metaRef : undefined}
+        ref={
+          type === 'meta' ? metaRef : type === 'steps' ? stepsRef : undefined
+        }
+        role={type === 'steps' ? 'group' : undefined}
+        aria-labelledby={type === 'steps' ? stepsHeadingId : undefined}
+        tabIndex={type === 'steps' ? -1 : undefined}
+        aria-invalid={type === 'steps' && invalid ? true : undefined}
+        aria-describedby={
+          type === 'steps' && invalid ? 'steps-error' : undefined
+        }
         className={
           'rounded-md border bg-surface p-3 ' +
           (invalid ? 'border-danger-line ' : 'border-line ') +
@@ -574,7 +597,7 @@ export function ArtifactsPanel({
                 type="text"
                 className={`mt-1 ${fieldCls}`}
                 value={metaDraft.allowedTools}
-                disabled={inputsDisabled || metaDraft.kind === 'script'}
+                disabled={inputsDisabled || metaDraft.kind !== 'agent'}
                 placeholder="tool1, tool2"
                 onChange={(e) => {
                   setMetaDraft((d) => ({ ...d, allowedTools: e.target.value }))
@@ -584,6 +607,11 @@ export function ArtifactsPanel({
               {metaDraft.kind === 'script' && (
                 <span className="mt-1 block text-[10px] text-ink-faint">
                   не используется для script
+                </span>
+              )}
+              {metaDraft.kind === 'pipeline' && (
+                <span className="mt-1 block text-[10px] text-ink-faint">
+                  задаётся на шагах
                 </span>
               )}
             </label>
@@ -615,6 +643,46 @@ export function ArtifactsPanel({
           </>
         ))}
 
+        {showSteps &&
+          sectionShell('steps', stepsArt?.is_valid === false, (
+            <>
+              <div className="mb-2 flex items-center justify-between gap-2">
+                <h3
+                  id={stepsHeadingId}
+                  className="text-[11px] uppercase tracking-wide text-ink-faint"
+                >
+                  Steps
+                </h3>
+                {statusRow(stepsArt)}
+              </div>
+              <p className="mb-1 text-[10px] text-ink-faint">
+                Только просмотр — шаги меняются в чате
+              </p>
+              {parsedSteps.steps.length > 0 ? (
+                <StepsList steps={parsedSteps.steps} />
+              ) : !parsedSteps.parseError ? (
+                <p className="text-[11px] text-ink-faint">
+                  Шагов пока нет — планировщик добавит их инструментом `save_skill_steps`.
+                </p>
+              ) : null}
+              {(stepsArt?.error || parsedSteps.parseError) && (
+                <p id="steps-error" className="mt-1 text-[11px] text-danger-ink">
+                  {stepsArt?.error || parsedSteps.parseError}
+                </p>
+              )}
+              {parsedSteps.parseError && stepsArt && (
+                <details className="mt-1">
+                  <summary className="cursor-pointer text-[11px] text-ink-faint">
+                    сырой JSON
+                  </summary>
+                  <pre className="mt-1 overflow-auto max-h-40 whitespace-pre-wrap break-words rounded bg-surface-muted p-1.5 font-mono text-[11px] text-ink-muted">
+                    {stepsArt.content}
+                  </pre>
+                </details>
+              )}
+            </>
+          ))}
+
         {sectionShell('prompt', promptArt?.is_valid === false, (
           <>
             <div className="mb-2 flex items-center justify-between gap-2">
@@ -624,6 +692,11 @@ export function ArtifactsPanel({
             {hasMeta && kind === 'script' && (
               <p className="mb-1 text-[10px] text-ink-faint">
                 нужен только для kind=agent
+              </p>
+            )}
+            {hasMeta && kind === 'pipeline' && (
+              <p className="mb-1 text-[10px] text-ink-faint">
+                pipeline: подставится в первый llm-шаг без своего промпта
               </p>
             )}
             <textarea
@@ -669,6 +742,11 @@ export function ArtifactsPanel({
             {hasMeta && kind === 'agent' && (
               <p className="mb-1 text-[10px] text-ink-faint">
                 нужен только для kind=script
+              </p>
+            )}
+            {hasMeta && kind === 'pipeline' && (
+              <p className="mb-1 text-[10px] text-ink-faint">
+                pipeline: подставится в первый script-шаг без своего кода
               </p>
             )}
             <textarea

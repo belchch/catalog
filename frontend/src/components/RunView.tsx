@@ -1,6 +1,7 @@
 import type { DocumentOut } from '../api.ts'
 import type { UseRunStreamResult } from '../hooks/useRunStream.ts'
 import { MarkdownView } from './MarkdownView.tsx'
+import { segmentTraceSteps } from '../lib/traceSegments.ts'
 import { TraceSteps } from './TraceSteps.tsx'
 
 interface RunViewProps {
@@ -31,6 +32,7 @@ export function RunView({
     ? documents.find((d) => d.id === outputDocId) ?? (savedDoc?.id === outputDocId ? savedDoc : null)
     : null
   const canSaveResult = run.finished && statusOk && !outputDocId && !!run.resultText
+  const groupCount = segmentTraceSteps(run.steps).filter((seg) => seg.kind === 'group').length
   return (
     <div className="flex h-full flex-col">
       <div className="flex items-center justify-between border-b border-line px-4 py-2">
@@ -62,7 +64,12 @@ export function RunView({
       </div>
       <div className="grid flex-1 grid-cols-1 gap-3 overflow-hidden p-3 md:grid-cols-2">
         <div className="overflow-y-auto rounded-md border border-line bg-surface-muted p-3">
-          <h3 className="mb-2 text-xs font-semibold uppercase text-ink-faint">Лента шагов</h3>
+          <div className="mb-2 flex items-center justify-between gap-2">
+            <h3 className="text-xs font-semibold uppercase text-ink-faint">Лента шагов</h3>
+            {groupCount >= 1 && (
+              <span className="text-[10px] text-ink-faint">шагов: {groupCount}</span>
+            )}
+          </div>
           {/* CATALOG-16: run meta header — model/provider/kind/prompt up front. */}
           {run.meta && (
             <div className="mb-2 rounded border border-line bg-surface-muted p-2 font-mono text-[10px] text-ink-faint">
@@ -94,7 +101,7 @@ export function RunView({
               )}
             </div>
           )}
-          <TraceSteps steps={run.steps} />
+          <TraceSteps steps={run.steps} running={!run.finished} />
           {run.error && <p className="mt-2 text-xs text-danger-ink">Ошибка: {run.error}</p>}
           {run.closed && !run.finished && (
             <p className="mt-2 text-xs text-warning-ink">Соединение закрыто</p>

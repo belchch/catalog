@@ -36,6 +36,7 @@ export interface RunStep {
   returnValue?: string
   duration?: number
   error?: string
+  stepId?: string
 }
 
 export interface UseRunStreamResult {
@@ -91,6 +92,7 @@ export function useRunStream(runId: string | null): UseRunStreamResult {
             kind: 'step',
             text: `Итерация ${e.iteration}`,
             iteration: e.iteration,
+            stepId: e.step_id,
           },
         ])
         break
@@ -105,6 +107,7 @@ export function useRunStream(runId: string | null): UseRunStreamResult {
             id: uniqueId('call'),
             kind: 'tool_call',
             text: `→ ${e.name}(${formatToolArgs(e.arguments)})`,
+            stepId: e.step_id,
           },
         ])
         break
@@ -119,6 +122,7 @@ export function useRunStream(runId: string | null): UseRunStreamResult {
             text: `← ${e.name}`,
             ok: e.ok,
             result: formatToolResult(e.result),
+            stepId: e.step_id,
           },
         ])
         break
@@ -132,6 +136,7 @@ export function useRunStream(runId: string | null): UseRunStreamResult {
             passed: e.passed,
             failures: e.failures,
             iteration: e.iteration,
+            stepId: e.step_id,
           },
         ])
         break
@@ -152,6 +157,7 @@ export function useRunStream(runId: string | null): UseRunStreamResult {
             returnValue: e.return_value,
             duration: e.duration,
             error: e.error,
+            stepId: e.step_id,
           },
         ])
         break
@@ -162,6 +168,7 @@ export function useRunStream(runId: string | null): UseRunStreamResult {
             id: uniqueId('reasoning'),
             kind: 'reasoning',
             text: e.text,
+            stepId: e.step_id,
           },
         ])
         break

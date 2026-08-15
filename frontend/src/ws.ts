@@ -7,16 +7,30 @@
 import { wsBaseUrl, type DocumentOut, type SessionArtifact } from './api.ts'
 
 export type ServerEvent =
-  | { type: 'step'; iteration: number }
-  | { type: 'token'; delta: string }
+  | { type: 'step'; iteration: number; step_id?: string }
+  | { type: 'token'; delta: string; step_id?: string }
   | {
       type: 'tool_call'
       id: string
       name: string
       arguments: Record<string, unknown>
+      step_id?: string
     }
-  | { type: 'tool_result'; id: string; name: string; ok: boolean; result: unknown }
-  | { type: 'verify'; iteration: number; passed: boolean; failures: string[] }
+  | {
+      type: 'tool_result'
+      id: string
+      name: string
+      ok: boolean
+      result: unknown
+      step_id?: string
+    }
+  | {
+      type: 'verify'
+      iteration: number
+      passed: boolean
+      failures: string[]
+      step_id?: string
+    }
   | {
       type: 'meta'
       model: string
@@ -32,8 +46,9 @@ export type ServerEvent =
       return_value?: string
       duration?: number
       error?: string
+      step_id?: string
     }
-  | { type: 'reasoning'; text: string }
+  | { type: 'reasoning'; text: string; step_id?: string }
   | { type: 'suggestions'; items: string[] }
   | { type: 'session_docs'; documents: DocumentOut[] }
   | { type: 'session_artifacts'; artifacts: SessionArtifact[] }

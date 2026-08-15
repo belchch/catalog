@@ -83,6 +83,7 @@ function skippedDocsNotice(skippedIds: string[], docs?: DocumentOut[]): string {
 function highlightFromDetail(detail: string): ArtifactType | null {
   const d = detail.toLowerCase()
   if (d.includes('meta')) return 'meta'
+  if (d.includes('steps')) return 'steps'
   if (d.includes('prompt')) return 'prompt'
   if (d.includes('script')) return 'script'
   return null
