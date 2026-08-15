@@ -66,8 +66,8 @@ export function SetupKeyScreen({ onConfigured }: SetupKeyScreenProps) {
   }
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-surface p-4">
-      <div className="modal-card max-w-md space-y-4">
+    <div className="flex h-dvh justify-center overflow-y-auto bg-surface p-4">
+      <div className="modal-card my-auto max-w-md space-y-4">
         <div className="flex items-center gap-2">
           <span className="catalog-mark" aria-hidden="true">
             C

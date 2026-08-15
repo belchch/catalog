@@ -205,7 +205,7 @@ export function SkillsPanel({
   useEffect(() => {
     if (renameId != null || !focusRenameTriggerRef.current) return
     focusRenameTriggerRef.current = false
-    renameTriggerRef.current?.focus()
+    renameTriggerRef.current?.focus({ preventScroll: true })
   }, [renameId])
 
   useEffect(() => {
@@ -287,7 +287,7 @@ export function SkillsPanel({
   const escapeCascade = (): boolean => {
     if (confirmOpen) {
       setConfirmOpen(false)
-      deleteBtnRef.current?.focus()
+      deleteBtnRef.current?.focus({ preventScroll: true })
       return true
     }
     if (renameId != null) {
@@ -355,7 +355,7 @@ export function SkillsPanel({
     e.stopPropagation()
     const kept = escapeCascade()
     if (!kept) {
-      listRef.current?.focus()
+      listRef.current?.focus({ preventScroll: true })
     }
   }
 
@@ -650,7 +650,7 @@ export function SkillsPanel({
                                     aria-label="Отмена"
                                     onClick={() => {
                                       setConfirmOpen(false)
-                                      deleteBtnRef.current?.focus()
+                                      deleteBtnRef.current?.focus({ preventScroll: true })
                                     }}
                                   >
                                     Отмена

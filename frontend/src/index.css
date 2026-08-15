@@ -96,6 +96,12 @@
 button, input, textarea, select { font: inherit; }
 button { -webkit-tap-highlight-color: transparent; }
 
+html, body, #root {
+  height: 100%;
+  overflow: hidden;
+  overscroll-behavior: none;
+}
+
 @layer components {
   .btn {
     @apply inline-flex items-center justify-center rounded-control px-3 py-1 text-xs transition-colors;

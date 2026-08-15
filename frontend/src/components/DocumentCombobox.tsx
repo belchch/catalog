@@ -139,7 +139,7 @@ export function DocumentCombobox(props: DocumentComboboxProps) {
             e.preventDefault()
             e.stopPropagation()
             close()
-            rootRef.current?.querySelector('button')?.focus()
+            rootRef.current?.querySelector('button')?.focus({ preventScroll: true })
           }}
         >
           <div className="border-b border-line p-1">

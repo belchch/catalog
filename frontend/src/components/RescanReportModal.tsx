@@ -12,7 +12,7 @@ export function RescanReportModal({ report, onClose }: RescanReportModalProps) {
   const closeRef = useRef<HTMLButtonElement>(null)
 
   useEffect(() => {
-    closeRef.current?.focus()
+    closeRef.current?.focus({ preventScroll: true })
   }, [])
 
   useEffect(() => {

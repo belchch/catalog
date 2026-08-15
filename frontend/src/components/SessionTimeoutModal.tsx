@@ -25,7 +25,7 @@ export function SessionTimeoutModal({
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
-    inputRef.current?.focus()
+    inputRef.current?.focus({ preventScroll: true })
     inputRef.current?.select()
   }, [])
 

@@ -36,12 +36,12 @@ export function SettingsPanel({ providers, onClose, onRefresh }: SettingsPanelPr
   const busy = savingId !== null || refreshing
 
   useEffect(() => {
-    closeRef.current?.focus()
+    closeRef.current?.focus({ preventScroll: true })
   }, [])
 
   useEffect(() => {
     if (replacingId) {
-      inputRefs.current[replacingId]?.focus()
+      inputRefs.current[replacingId]?.focus({ preventScroll: true })
     }
   }, [replacingId])
 
@@ -51,7 +51,7 @@ export function SettingsPanel({ providers, onClose, onRefresh }: SettingsPanelPr
     const btn = replaceBtnRefs.current[id]
     if (btn) {
       pendingFocusId.current = null
-      btn.focus()
+      btn.focus({ preventScroll: true })
     }
   }, [providers, replacingId, savingId, refreshing])
 

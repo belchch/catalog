@@ -105,7 +105,7 @@ export function ModelCombobox({
             if (e.key === 'Escape') {
               e.preventDefault()
               close()
-              rootRef.current?.querySelector('button')?.focus()
+              rootRef.current?.querySelector('button')?.focus({ preventScroll: true })
             }
           }}
         >

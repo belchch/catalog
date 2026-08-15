@@ -230,7 +230,7 @@ export function ArtifactsPanel({
     if (!highlightType) return
     if (highlightType === 'steps') {
       stepsRef.current?.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
-      stepsRef.current?.focus()
+      stepsRef.current?.focus({ preventScroll: true })
       return
     }
     const el =
@@ -246,7 +246,7 @@ export function ArtifactsPanel({
           ? promptRef.current
           : scriptRef.current
     section?.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
-    el?.focus()
+    el?.focus({ preventScroll: true })
   }, [highlightType, sessionId])
 
   useEffect(() => {

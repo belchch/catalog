@@ -199,7 +199,7 @@ export function WorkspacePicker({
   )
 
   useEffect(() => {
-    closeRef.current?.focus()
+    closeRef.current?.focus({ preventScroll: true })
   }, [])
 
   useEffect(() => {
@@ -230,10 +230,10 @@ export function WorkspacePicker({
   useEffect(() => {
     if (!pending) return
     if (pending.kind === 'error') {
-      panelRef.current?.focus()
+      panelRef.current?.focus({ preventScroll: true })
       return
     }
-    panelActionRef.current?.focus()
+    panelActionRef.current?.focus({ preventScroll: true })
   }, [focusKey, pending])
 
   const tryOpen = async (path: string, confirm: boolean, source: BusySource) => {

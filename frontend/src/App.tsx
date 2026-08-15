@@ -170,7 +170,7 @@ export default function App() {
 
   const handleSettingsClose = useCallback(() => {
     setSettingsOpen(false)
-    settingsButtonRef.current?.focus()
+    settingsButtonRef.current?.focus({ preventScroll: true })
   }, [])
 
   const refreshSetup = setup.refresh
@@ -672,7 +672,7 @@ export default function App() {
 
   if (setup.status === 'unknown') {
     return (
-      <div className="flex h-screen items-center justify-center bg-surface">
+      <div className="flex h-dvh items-center justify-center bg-surface">
         <p role="status" aria-live="polite" className="text-ink-faint">
           Загрузка…
         </p>
@@ -685,7 +685,7 @@ export default function App() {
   }
 
   return (
-    <div className="catalog-shell flex h-screen flex-col">
+    <div className="catalog-shell flex h-dvh flex-col">
       <header className="catalog-header flex shrink-0 items-center justify-between px-5">
         <div className="flex min-w-0 items-center gap-3">
           <FolderIcon className="catalog-header__folder size-5 shrink-0" />

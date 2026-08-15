@@ -31,7 +31,7 @@ export function SkillTrackPicker({
   const itemRefs = useRef<(HTMLButtonElement | null)[]>([])
 
   useEffect(() => {
-    itemRefs.current[selectedIndex]?.focus()
+    itemRefs.current[selectedIndex]?.focus({ preventScroll: true })
   }, [selectedIndex])
 
   useEffect(() => {
