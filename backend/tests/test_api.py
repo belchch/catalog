@@ -324,6 +324,45 @@ def test_extract_xlsx_escapes_pipes_and_newlines(tmp_path) -> None:
     assert "| a|b |" not in text
 
 
+def test_extract_xlsx_formula_without_cache(tmp_path) -> None:
+    import openpyxl
+    from catalog.documents.extract import extract_text
+
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Data"
+    ws.append(["x", "y", "sum"])
+    ws.append([2, 3, "=A2+B2"])
+    path = tmp_path / "formula.xlsx"
+    wb.save(path)
+    wb.close()
+
+    text = extract_text(str(path), "xlsx")
+    assert "| x | y | sum |" in text
+    assert "| 2 | 3 | =A2+B2 |" in text
+
+
+def test_extract_xlsx_merged_header(tmp_path) -> None:
+    import openpyxl
+    from catalog.documents.extract import extract_text
+
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Data"
+    ws["A1"] = "Title"
+    ws.merge_cells("A1:C1")
+    ws["A2"] = "a"
+    ws["B2"] = "b"
+    ws["C2"] = "c"
+    path = tmp_path / "merged.xlsx"
+    wb.save(path)
+    wb.close()
+
+    text = extract_text(str(path), "xlsx")
+    assert "| Title | Title | Title |" in text
+    assert "| a | b | c |" in text
+
+
 def test_extract_pdf() -> None:
     from catalog.documents.extract import extract_text
 

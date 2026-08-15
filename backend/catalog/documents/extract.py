@@ -100,33 +100,85 @@ def _extract_xlsx(path: str) -> str:
     """Render all non-empty sheets of an xlsx workbook as markdown tables."""
     import openpyxl
 
-    workbook = openpyxl.load_workbook(path, read_only=True, data_only=True)
+    formula_wb = openpyxl.load_workbook(path, data_only=False)
     try:
-        blocks: list[str] = []
-        for sheet in workbook.worksheets:
-            rows = list(sheet.iter_rows(values_only=True))
-            if not rows:
-                continue
-            rows = [list(r) for r in rows]
-            while rows and all(_cell_is_blank(c) for c in rows[-1]):
-                rows.pop()
-            if not rows:
-                continue
-            block = [f"## Sheet: {sheet.title}"]
-            width = max(len(r) for r in rows)
-            padded = [
-                [_cell_to_str(c) for c in r] + [""] * (width - len(r)) for r in rows
-            ]
-            header = padded[0]
-            body = padded[1:]
-            block.append("| " + " | ".join(header) + " |")
-            block.append("| " + " | ".join(["---"] * width) + " |")
-            for row in body:
-                block.append("| " + " | ".join(row) + " |")
-            blocks.append("\n".join(block))
-        return "\n\n".join(blocks)
+        cached_wb = openpyxl.load_workbook(path, read_only=True, data_only=True)
+        try:
+            blocks: list[str] = []
+            for sheet, cached_sheet in zip(formula_wb.worksheets, cached_wb.worksheets):
+                rows = _xlsx_resolved_rows(sheet, cached_sheet)
+                if not rows:
+                    continue
+                while rows and all(_cell_is_blank(c) for c in rows[-1]):
+                    rows.pop()
+                if not rows:
+                    continue
+                block = [f"## Sheet: {sheet.title}"]
+                width = max(len(r) for r in rows)
+                padded = [
+                    [_cell_to_str(c) for c in r] + [""] * (width - len(r)) for r in rows
+                ]
+                header = padded[0]
+                body = padded[1:]
+                block.append("| " + " | ".join(header) + " |")
+                block.append("| " + " | ".join(["---"] * width) + " |")
+                for row in body:
+                    block.append("| " + " | ".join(row) + " |")
+                blocks.append("\n".join(block))
+            return "\n\n".join(blocks)
+        finally:
+            cached_wb.close()
     finally:
-        workbook.close()
+        formula_wb.close()
+
+
+def _xlsx_resolved_rows(formula_sheet, cached_sheet) -> list[list[object]]:
+    formula_rows = [list(r) for r in formula_sheet.iter_rows(values_only=True)]
+    cached_rows = [list(r) for r in cached_sheet.iter_rows(values_only=True)]
+    height = max(len(formula_rows), len(cached_rows))
+    if height == 0:
+        return []
+    width = 0
+    for row in formula_rows:
+        width = max(width, len(row))
+    for row in cached_rows:
+        width = max(width, len(row))
+    if width == 0:
+        return []
+    rows: list[list[object]] = []
+    for i in range(height):
+        formula_row = formula_rows[i] if i < len(formula_rows) else []
+        cached_row = cached_rows[i] if i < len(cached_rows) else []
+        resolved: list[object] = []
+        for j in range(width):
+            cached = cached_row[j] if j < len(cached_row) else None
+            formula = formula_row[j] if j < len(formula_row) else None
+            resolved.append(cached if cached is not None else formula)
+        rows.append(resolved)
+    merges = formula_sheet.merged_cells.ranges
+    if merges:
+        _xlsx_expand_merges(rows, merges)
+    return rows
+
+
+def _xlsx_expand_merges(rows: list[list[object]], ranges) -> None:
+    height = len(rows)
+    width = len(rows[0]) if rows else 0
+    for rng in ranges:
+        top_r = rng.min_row - 1
+        top_c = rng.min_col - 1
+        if top_r < 0 or top_r >= height or top_c < 0 or top_c >= width:
+            continue
+        value = rows[top_r][top_c]
+        for r in range(rng.min_row, rng.max_row + 1):
+            ri = r - 1
+            if ri < 0 or ri >= height:
+                continue
+            for c in range(rng.min_col, rng.max_col + 1):
+                ci = c - 1
+                if ci < 0 or ci >= width:
+                    continue
+                rows[ri][ci] = value
 
 
 def _extract_pdf(path: str) -> str:
