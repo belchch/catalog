@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import os
 import uuid
+from io import BytesIO
 from pathlib import Path
 
 from catalog.storage.db import Database
@@ -16,14 +17,91 @@ _EXT_TO_KIND = {
     ".xlsx": "xlsx",
 }
 
+_HINT_BY_EXT = {
+    ".xls": "Формат .xls не поддерживается — пересохраните файл как .xlsx",
+    ".ods": "Формат .ods не поддерживается — пересохраните файл как .xlsx",
+    ".tsv": "Формат .tsv не поддерживается — пересохраните файл как .csv",
+}
+
+_ZIP_MAGICS = (b"PK\x03\x04", b"PK\x05\x06", b"PK\x07\x08")
+_PDF_MAGIC = b"%PDF"
+
+_BROKEN_XLSX = "Не удалось открыть файл как .xlsx — файл повреждён или имеет неверный формат"
+_BROKEN_DOCX = "Не удалось открыть файл как .docx — файл повреждён или имеет неверный формат"
+_BROKEN_PDF = "Не удалось открыть файл как .pdf — файл повреждён или имеет неверный формат"
+_BROKEN_CSV = "Не удалось прочитать файл как .csv — файл повреждён или имеет неверную кодировку"
+
 
 def kind_for_filename(filename: str, *, skip: bool = False) -> str | None:
     ext = os.path.splitext(filename)[1].lower()
+    if ext in _HINT_BY_EXT:
+        if skip:
+            return None
+        raise ValueError(_HINT_BY_EXT[ext])
     if ext not in _EXT_TO_KIND:
         if skip:
             return None
         raise ValueError(f"unsupported format: {ext or '<none>'}")
     return _EXT_TO_KIND[ext]
+
+
+def validate_content(kind: str, content: bytes) -> None:
+    if kind == "xlsx":
+        _validate_xlsx(content)
+    elif kind == "csv":
+        _validate_csv(content)
+    elif kind == "docx":
+        _validate_docx(content)
+    elif kind == "pdf":
+        _validate_pdf(content)
+
+
+def _looks_like_zip(content: bytes) -> bool:
+    return content.startswith(_ZIP_MAGICS)
+
+
+def _validate_xlsx(content: bytes) -> None:
+    if not _looks_like_zip(content):
+        raise ValueError(_BROKEN_XLSX)
+    import openpyxl
+
+    try:
+        workbook = openpyxl.load_workbook(BytesIO(content), read_only=True, data_only=True)
+    except Exception as exc:
+        raise ValueError(_BROKEN_XLSX) from exc
+    workbook.close()
+
+
+def _validate_csv(content: bytes) -> None:
+    for encoding in ("utf-8-sig", "cp1251", "latin-1"):
+        try:
+            content.decode(encoding)
+            return
+        except UnicodeDecodeError:
+            continue
+    raise ValueError(_BROKEN_CSV)
+
+
+def _validate_docx(content: bytes) -> None:
+    if not _looks_like_zip(content):
+        raise ValueError(_BROKEN_DOCX)
+    import docx
+
+    try:
+        docx.Document(BytesIO(content))
+    except Exception as exc:
+        raise ValueError(_BROKEN_DOCX) from exc
+
+
+def _validate_pdf(content: bytes) -> None:
+    if not content.startswith(_PDF_MAGIC):
+        raise ValueError(_BROKEN_PDF)
+    from pypdf import PdfReader
+
+    try:
+        PdfReader(BytesIO(content))
+    except Exception as exc:
+        raise ValueError(_BROKEN_PDF) from exc
 
 
 def content_hash_bytes(data: bytes) -> str:
@@ -74,6 +152,7 @@ def ingest_file(
     kind = kind_for_filename(filename)
     if kind is None:
         raise ValueError(f"unsupported format: {os.path.splitext(filename)[1] or '<none>'}")
+    validate_content(kind, content)
     title = os.path.splitext(filename)[0]
     workspace = Path(workspace_dir)
     base_name = Path(filename).name or f"document{os.path.splitext(filename)[1]}"

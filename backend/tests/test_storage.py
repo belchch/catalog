@@ -185,8 +185,22 @@ def test_ingest_docx_and_read(db: Database, tmp_path: Path) -> None:
 
 
 def test_unsupported_format_raises(db: Database, tmp_path: Path) -> None:
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="unsupported format"):
         ingest_file(db, tmp_path, filename="file.exe", content=b"MZ\x90\x00")
+
+
+def test_xls_raises_with_hint(db: Database, tmp_path: Path) -> None:
+    with pytest.raises(ValueError, match="пересохраните файл как .xlsx"):
+        ingest_file(db, tmp_path, filename="old.xls", content=b"not-xlsx")
+    assert not (tmp_path / "old.xls").exists()
+    assert list_documents(db) == []
+
+
+def test_ingest_broken_xlsx_does_not_create(db: Database, tmp_path: Path) -> None:
+    with pytest.raises(ValueError, match="xlsx"):
+        ingest_file(db, tmp_path, filename="broken.xlsx", content=b"not-a-zip")
+    assert not (tmp_path / "broken.xlsx").exists()
+    assert list_documents(db) == []
 
 
 def test_ingest_keeps_original_filename(db: Database, tmp_path: Path) -> None:

@@ -20,11 +20,10 @@ async def upload_document(
 ) -> DocumentOut:
     try:
         kind_for_filename(file.filename or "")
+        content = await file.read()
+        row = ingest_file(db, workspace, filename=file.filename or "upload.md", content=content)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-
-    content = await file.read()
-    row = ingest_file(db, workspace, filename=file.filename or "upload.md", content=content)
     return DocumentOut(
         id=row.id, title=row.title, kind=row.kind, created_at=row.created_at
     )

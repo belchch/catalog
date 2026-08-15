@@ -162,6 +162,64 @@ def test_upload_unsupported_format(client) -> None:
     assert "unsupported" in resp.json()["detail"].lower()
 
 
+def test_upload_xls_format_hint(client, settings) -> None:
+    resp = client.post(
+        "/documents", files={"file": ("old.xls", b"not-xlsx", "application/octet-stream")}
+    )
+    assert resp.status_code == 400
+    assert "пересохраните файл как .xlsx" in resp.json()["detail"]
+    assert ".xls" in resp.json()["detail"]
+    assert client.get("/documents").json() == []
+    assert not (Path(settings.workspace_dir) / "old.xls").exists()
+
+
+def test_upload_ods_format_hint(client, settings) -> None:
+    resp = client.post(
+        "/documents", files={"file": ("sheet.ods", b"not-xlsx", "application/octet-stream")}
+    )
+    assert resp.status_code == 400
+    assert "пересохраните файл как .xlsx" in resp.json()["detail"]
+    assert ".ods" in resp.json()["detail"]
+    assert client.get("/documents").json() == []
+    assert not (Path(settings.workspace_dir) / "sheet.ods").exists()
+
+
+def test_upload_tsv_format_hint(client, settings) -> None:
+    resp = client.post(
+        "/documents", files={"file": ("table.tsv", b"a\tb\n", "text/tab-separated-values")}
+    )
+    assert resp.status_code == 400
+    assert "пересохраните файл как .csv" in resp.json()["detail"]
+    assert ".tsv" in resp.json()["detail"]
+    assert client.get("/documents").json() == []
+    assert not (Path(settings.workspace_dir) / "table.tsv").exists()
+
+
+def test_upload_broken_xlsx(client, settings) -> None:
+    resp = client.post(
+        "/documents",
+        files={"file": ("broken.xlsx", b"not-a-zip", "application/octet-stream")},
+    )
+    assert resp.status_code == 400
+    assert "xlsx" in resp.json()["detail"].lower()
+    listing = client.get("/documents")
+    assert listing.status_code == 200
+    assert listing.json() == []
+    assert not (Path(settings.workspace_dir) / "broken.xlsx").exists()
+
+
+def test_upload_empty_csv(client) -> None:
+    resp = client.post(
+        "/documents",
+        files={"file": ("empty.csv", b"", "text/csv")},
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["kind"] == "csv"
+    ids = [d["id"] for d in client.get("/documents").json()]
+    assert data["id"] in ids
+
+
 def test_upload_csv(client) -> None:
     resp = client.post(
         "/documents",
