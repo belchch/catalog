@@ -193,6 +193,53 @@ describe('usePlannerSession', () => {
     expect(result.current.sessionDocuments).toEqual([DOC_A])
   })
 
+  it('does not replace sessionDocuments on finish GET when ids already match', async () => {
+    const pending = deferred<DocumentOut[]>()
+    getSessionDocuments.mockReturnValue(pending.promise)
+
+    const { result } = renderHook(() => usePlannerSession('s1'))
+
+    act(() => {
+      captured.onEvent?.({ type: 'session_docs', documents: [DOC_A] })
+    })
+    const afterStream = result.current.sessionDocuments
+    expect(afterStream).toEqual([DOC_A])
+
+    act(() => {
+      captured.onEvent?.({ type: 'finish' })
+    })
+
+    const sameIds: DocumentOut[] = [{ ...DOC_A, title: 'Устав (копия)' }]
+    await act(async () => {
+      pending.resolve(sameIds)
+      await pending.promise
+    })
+
+    expect(result.current.sessionDocuments).toBe(afterStream)
+  })
+
+  it('applies finish GET when document ids differ from session_docs', async () => {
+    const pending = deferred<DocumentOut[]>()
+    getSessionDocuments.mockReturnValue(pending.promise)
+
+    const { result } = renderHook(() => usePlannerSession('s1'))
+
+    act(() => {
+      captured.onEvent?.({ type: 'session_docs', documents: [DOC_A] })
+    })
+
+    act(() => {
+      captured.onEvent?.({ type: 'finish' })
+    })
+
+    await act(async () => {
+      pending.resolve([DOC_A, DOC_B])
+      await pending.promise
+    })
+
+    expect(result.current.sessionDocuments).toEqual([DOC_A, DOC_B])
+  })
+
   it('appends new documents without duplicating existing ones', () => {
     const { result } = renderHook(() => usePlannerSession('s1'))
 

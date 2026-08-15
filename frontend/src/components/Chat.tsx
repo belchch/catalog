@@ -199,35 +199,37 @@ export function Chat({
             </ul>
           </section>
         )}
-        <div className="mb-2 flex flex-wrap items-center gap-1.5">
-          {selectedDocs.map((d) => (
-            <span key={d.id} className="chip-brand">
-              <span className="badge-neutral">{d.kind}</span>
-              <span className="truncate">{d.title}</span>
-              <button
-                type="button"
-                className="ml-0.5 text-ink-faint hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand disabled:cursor-not-allowed disabled:text-ink-faint"
-                aria-label={`Убрать ${d.title}`}
-                disabled={streaming}
-                onClick={() => removeSelected(d.id)}
-              >
-                ×
-              </button>
-            </span>
-          ))}
-          <div className="w-44 max-w-[12rem]">
-            <DocumentCombobox
-              multiple
-              documents={documents}
-              values={selectedDocIds}
-              onChange={setSelectedDocIds}
-              ariaLabel="Добавить документы в сессию"
-              placeholder="+ документ"
-              disabled={streaming}
-              placement="top"
-              triggerClassName="chip flex w-full justify-between text-left hover:border-line-brand focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand disabled:cursor-not-allowed disabled:bg-surface-muted disabled:text-ink-faint"
-            />
+        {selectedDocs.length > 0 && (
+          <div className="mb-1.5 flex max-h-[5.625rem] flex-wrap items-center gap-1.5 overflow-y-auto overscroll-contain">
+            {selectedDocs.map((d) => (
+              <span key={d.id} className="chip-brand">
+                <span className="badge-neutral">{d.kind}</span>
+                <span className="truncate">{d.title}</span>
+                <button
+                  type="button"
+                  className="ml-0.5 text-ink-faint hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand disabled:cursor-not-allowed disabled:text-ink-faint"
+                  aria-label={`Убрать ${d.title}`}
+                  disabled={streaming}
+                  onClick={() => removeSelected(d.id)}
+                >
+                  ×
+                </button>
+              </span>
+            ))}
           </div>
+        )}
+        <div className="mb-2 w-44 max-w-[12rem]">
+          <DocumentCombobox
+            multiple
+            documents={documents}
+            values={selectedDocIds}
+            onChange={setSelectedDocIds}
+            ariaLabel="Добавить документы в сессию"
+            placeholder="+ документ"
+            disabled={streaming}
+            placement="top"
+            triggerClassName="chip flex w-full justify-between text-left hover:border-line-brand focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand disabled:cursor-not-allowed disabled:bg-surface-muted disabled:text-ink-faint"
+          />
         </div>
         {visibleSuggestions.length > 0 && (
           <div

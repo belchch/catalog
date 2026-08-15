@@ -195,7 +195,15 @@ export function usePlannerSession(
             (docs) => {
               if (sessionIdRef.current !== sid) return
               if (docsHydrateGenRef.current !== gen) return
-              setSessionDocuments(docs)
+              setSessionDocuments((prev) => {
+                if (
+                  prev.length === docs.length &&
+                  prev.every((d, i) => d.id === docs[i]?.id)
+                ) {
+                  return prev
+                }
+                return docs
+              })
             },
             () => {},
           )
