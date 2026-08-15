@@ -16,9 +16,10 @@ describe('WorkspaceFooter', () => {
         onRescan={() => {}}
       />,
     )
-    const picker = screen.getByRole('button', { name: 'Папка не открыта' })
+    const picker = screen.getByRole('button', { name: 'Выбрать воркспейс: Папка не открыта' })
     expect(picker.getAttribute('title')).toBeNull()
-    expect(screen.queryByRole('button', { name: 'Пересканировать' })).toBeNull()
+    expect(picker.textContent).not.toContain('⌄')
+    expect(screen.queryByRole('button', { name: 'Пересканировать папку' })).toBeNull()
     picker.click()
     expect(onOpenPicker).toHaveBeenCalledTimes(1)
   })
@@ -35,9 +36,10 @@ describe('WorkspaceFooter', () => {
         onRescan={onRescan}
       />,
     )
-    const picker = screen.getByRole('button', { name: 'Docs' })
+    const picker = screen.getByRole('button', { name: 'Выбрать воркспейс: Docs' })
     expect(picker.getAttribute('title')).toBe('/Users/me/Docs')
-    const rescan = screen.getByRole('button', { name: 'Пересканировать' })
+    expect(picker.textContent).not.toContain('⌄')
+    const rescan = screen.getByRole('button', { name: 'Пересканировать папку' })
     expect(rescan.parentElement?.contains(picker)).toBe(true)
     expect(picker.contains(rescan)).toBe(false)
     rescan.click()
@@ -55,7 +57,7 @@ describe('WorkspaceFooter', () => {
         onRescan={() => {}}
       />,
     )
-    const rescan = screen.getByRole('button', { name: 'Пересканировать' })
+    const rescan = screen.getByRole('button', { name: 'Пересканировать папку' })
     expect(rescan.hasAttribute('disabled')).toBe(true)
     expect(rescan.getAttribute('aria-busy')).toBe('true')
   })

@@ -29,25 +29,21 @@ export function WorkspaceFooter({
     <div className="catalog-sidebar__footer">
       <button
         type="button"
-        className="group flex min-w-0 flex-1 items-center gap-2.5 rounded-none py-[11px] pl-5 pr-3 text-left text-sm font-semibold text-ink transition-colors hover:bg-[var(--sidebar-brand-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand"
+        className="flex min-w-0 flex-1 items-center gap-2.5 rounded-control px-[11px] py-2 text-left text-sm font-medium text-ink transition-colors hover:bg-[var(--sidebar-brand-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand"
         onClick={onOpenPicker}
         title={path ?? undefined}
         aria-haspopup="dialog"
-        aria-label={label}
+        aria-label={`Выбрать воркспейс: ${label}`}
       >
         <FolderIcon className="size-[18px] shrink-0 text-ink-faint" />
         <span
           className={
-            'truncate ' + (hasWorkspace ? '' : 'font-normal text-ink-faint')
+            hasWorkspace
+              ? 'truncate font-medium text-ink'
+              : 'truncate font-normal text-ink-faint'
           }
         >
           {label}
-        </span>
-        <span
-          aria-hidden="true"
-          className="ml-auto shrink-0 text-base text-ink-faint transition-colors group-hover:text-ink-muted"
-        >
-          ⌄
         </span>
       </button>
       {hasWorkspace ? (
@@ -56,8 +52,8 @@ export function WorkspaceFooter({
           className="catalog-sidebar__icon-button size-8"
           onClick={onRescan}
           disabled={rescanning}
-          aria-label="Пересканировать"
-          title="Пересканировать"
+          aria-label="Пересканировать папку"
+          title="Пересканировать папку"
           aria-busy={rescanning}
         >
           {rescanning ? (
@@ -66,7 +62,9 @@ export function WorkspaceFooter({
             <RefreshIcon className="size-[18px]" />
           )}
         </button>
-      ) : null}
+      ) : (
+        <span aria-hidden="true" className="size-8 shrink-0" />
+      )}
     </div>
   )
 }

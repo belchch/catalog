@@ -272,8 +272,8 @@ button { -webkit-tap-highlight-color: transparent; }
   background: var(--sidebar-line);
 }
 .catalog-sidebar__footer {
-  display: flex; flex: none; align-items: center;
-  margin: 0 -12px -12px; padding-right: 8px;
+  display: flex; flex: none; align-items: center; gap: 4px;
+  margin: 0 8px; padding-top: 8px;
   border-top: 1px solid var(--sidebar-line);
 }
 
