@@ -35,7 +35,7 @@ import { SkillSettingsModal } from './components/SkillSettingsModal.tsx'
 import { SkillTrackPicker } from './components/SkillTrackPicker.tsx'
 import { SkillsPanel } from './components/SkillsPanel.tsx'
 import { SetupKeyScreen } from './components/SetupKeyScreen.tsx'
-import { WorkspaceBar } from './components/WorkspaceBar.tsx'
+import { WorkspaceFooter } from './components/WorkspaceFooter.tsx'
 import { WorkspacePicker } from './components/WorkspacePicker.tsx'
 import { useDocuments } from './hooks/useDocuments.ts'
 import { usePlannerSession } from './hooks/usePlannerSession.ts'
@@ -675,12 +675,7 @@ export default function App() {
         </div>
       )}
       <div className="catalog-layout grid flex-1 grid-cols-1 overflow-hidden lg:grid-cols-[360px_minmax(0,1fr)]">
-        <aside className="catalog-sidebar flex flex-col overflow-y-auto p-3">
-          <div className="catalog-sidebar__brand">
-            <span className="catalog-mark">C</span>
-            <span>Catalog</span>
-            <span className="catalog-sidebar__chevron">⌄</span>
-          </div>
+        <aside className="catalog-sidebar flex min-h-0 flex-col overflow-hidden p-3">
           <div className="catalog-search" role="search">
             <span aria-hidden="true">⌕</span>
             <span>Поиск</span>
@@ -694,14 +689,6 @@ export default function App() {
             <span aria-hidden="true">✎</span>
             Новый чат
           </button>
-          <p className="catalog-sidebar__section-label">Проект</p>
-          <WorkspaceBar
-            path={workspace.current?.path ?? null}
-            displayName={workspace.current?.display_name ?? null}
-            rescanning={rescanning}
-            onOpenPicker={openPicker}
-            onRescan={() => void handleRescan()}
-          />
           <div className="catalog-sidebar__sections">
           <CollapsibleSection
             title="Сессии"
@@ -783,14 +770,13 @@ export default function App() {
             />
           </CollapsibleSection>
           </div>
-          <div className="catalog-sidebar__footer">
-            <span className="catalog-avatar">C</span>
-            <span className="truncate" title={workspace.current?.path ?? undefined}>
-              {workspace.current
-                ? workspace.current.display_name || workspace.current.path
-                : 'Папка не открыта'}
-            </span>
-          </div>
+          <WorkspaceFooter
+            path={workspace.current?.path ?? null}
+            displayName={workspace.current?.display_name ?? null}
+            rescanning={rescanning}
+            onOpenPicker={openPicker}
+            onRescan={() => void handleRescan()}
+          />
         </aside>
         <main className="catalog-main h-full min-h-0 overflow-hidden">
           {activeRunId ? (

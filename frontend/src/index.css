@@ -245,36 +245,33 @@ button { -webkit-tap-highlight-color: transparent; }
   background: var(--sidebar);
   color: var(--sidebar-ink);
 }
-.catalog-sidebar__brand {
-  display: flex; align-items: center; gap: 8px;
-  padding: 9px 10px 14px; font-size: 20px; font-weight: 650; letter-spacing: -.03em;
-}
-.catalog-mark, .catalog-avatar {
+.catalog-mark {
   display: inline-flex; align-items: center; justify-content: center;
-  border-radius: 50%; background: var(--mark-bg); color: var(--surface);
+  width: 23px; height: 23px; border-radius: 50%;
+  background: var(--mark-bg); color: var(--surface);
+  font-size: 12px; font-weight: 700;
 }
-.catalog-mark { width: 23px; height: 23px; font-size: 12px; font-weight: 700; }
-.catalog-sidebar__chevron { color: var(--ink-faint); font-size: 18px; font-weight: 400; }
 .catalog-search {
-  display: flex; align-items: center; gap: 8px; height: 34px;
+  display: flex; flex: none; align-items: center; gap: 8px; height: 34px;
   margin: 0 8px 10px; padding: 0 10px; border: 1px solid var(--sidebar-line);
   border-radius: 9px; background: var(--search-bg); color: var(--ink-faint); font-size: 13px;
 }
 .catalog-search span:first-child { font-size: 20px; line-height: 1; }
 .catalog-new-chat {
-  display: flex; align-items: center; gap: 10px; width: calc(100% - 16px);
+  display: flex; flex: none; align-items: center; gap: 10px; width: calc(100% - 16px);
   margin: 0 8px 16px; padding: 8px 11px; border-radius: 9px;
   color: var(--ink); font-size: 15px; text-align: left;
 }
 .catalog-new-chat:hover { background: var(--sidebar-brand-hover); }
-.catalog-sidebar__section-label { margin: 0 9px 7px; color: var(--ink-faint); font-size: 13px; font-weight: 600; }
-.catalog-project-title { display: flex; align-items: center; gap: 8px; margin: 0 8px 3px; padding: 7px 10px; font-size: 15px; font-weight: 600; }
-.catalog-sidebar__sections { display: flex; flex-direction: column; gap: 2px; }
-.catalog-sidebar__footer {
-  display: flex; align-items: center; gap: 9px; margin: auto -12px -12px;
-  padding: 16px 20px; border-top: 1px solid var(--sidebar-line); color: var(--ink-muted); font-size: 14px;
+.catalog-sidebar__sections {
+  display: flex; flex: 1; flex-direction: column; gap: 2px;
+  min-height: 0; overflow-y: auto; overscroll-behavior: contain;
 }
-.catalog-avatar { width: 24px; height: 24px; font-size: 11px; }
+.catalog-sidebar__footer {
+  display: flex; flex: none; align-items: center;
+  margin: 0 -12px -12px; padding-right: 8px;
+  border-top: 1px solid var(--sidebar-line);
+}
 
 .catalog-section-header {
   display: flex; align-items: center; justify-content: space-between; gap: 8px;
