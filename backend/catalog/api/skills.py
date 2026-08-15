@@ -76,7 +76,11 @@ from catalog.skills.script_runner import (
     ScriptValidationError,
     validate_script,
 )
-from catalog.skills.verify import registered_checks
+from catalog.skills.verify import (
+    registered_checks,
+    validate_verify_checks,
+    verify_checks_params_hint,
+)
 from catalog.storage.db import Database
 from catalog.storage.repo_message import add_message, list_messages
 from catalog.storage.repo_session import create_session, get_session, update_session_status
@@ -240,7 +244,10 @@ _BUILD_SKILL_PARAMETERS = {
             "items": {
                 "type": "object",
                 "properties": {
-                    "check": {"type": "string"},
+                    "check": {
+                        "type": "string",
+                        "enum": registered_checks(),
+                    },
                     "params": {"type": "object"},
                 },
                 "required": ["check"],
@@ -253,7 +260,10 @@ _BUILD_SKILL_PARAMETERS = {
 
 BUILD_SKILL_TOOL = ToolSpec(
     name="build_skill",
-    description="Build a skill configuration (SkillConfig) from the session history.",
+    description=(
+        "Build a skill configuration (SkillConfig) from the session history. "
+        + verify_checks_params_hint()
+    ),
     parameters=_BUILD_SKILL_PARAMETERS,
 )
 
@@ -394,10 +404,11 @@ def _validate_config(
         for name in config.allowed_tools:
             if name not in available_tools:
                 errors.append(f"unknown tool: {name!r}")
-    # Verify-check ids are validated for both kinds (a script may have checks).
-    for vc in config.verify_checks:
-        if vc.check not in available_checks:
-            errors.append(f"unknown verify check: {vc.check!r}")
+    errors.extend(
+        validate_verify_checks(
+            config.verify_checks, available_checks=available_checks
+        )
+    )
     return errors
 
 

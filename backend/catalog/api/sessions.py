@@ -58,7 +58,7 @@ from catalog.skills.script_runner import (
     ScriptValidationError,
     validate_script,
 )
-from catalog.skills.verify import registered_checks
+from catalog.skills.verify import validate_verify_checks
 from catalog.storage.db import Database
 from catalog.storage.repo_message import add_message, list_messages
 from catalog.storage.repo_session import (
@@ -447,11 +447,7 @@ async def patch_session_artifact_endpoint(
                 for tool_name in allowed:
                     if tool_name not in available:
                         errors.append(f"unknown tool: {tool_name!r}")
-            available_checks = set(registered_checks())
-            for vc in checks:
-                check_id = vc.get("check") if isinstance(vc, dict) else None
-                if not check_id or check_id not in available_checks:
-                    errors.append(f"unknown verify check: {check_id!r}")
+            errors.extend(validate_verify_checks(checks))
         payload["allowed_tools"] = allowed if kind == "agent" else []
         payload["verify_checks"] = checks
         row = upsert_artifact(
@@ -531,11 +527,7 @@ async def patch_skill_meta_endpoint(
         for name in allowed:
             if name not in available:
                 errors.append(f"unknown tool: {name!r}")
-    available_checks = set(registered_checks())
-    for vc in checks:
-        check_id = vc.get("check") if isinstance(vc, dict) else None
-        if not check_id or check_id not in available_checks:
-            errors.append(f"unknown verify check: {check_id!r}")
+    errors.extend(validate_verify_checks(checks))
     payload = {
         "name": req.name,
         "description": req.description,

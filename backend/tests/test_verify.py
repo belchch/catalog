@@ -1,7 +1,15 @@
 from __future__ import annotations
 
-from catalog.skills.config import VerifyCheck
-from catalog.skills.verify import VerifyResult, run_verify
+from catalog.api.skills import _validate_config
+from catalog.skills.config import SkillConfig, VerifyCheck
+from catalog.skills.verify import (
+    VerifyResult,
+    registered_checks,
+    run_verify,
+    validate_verify_check,
+    validate_verify_checks,
+    verify_checks_params_hint,
+)
 
 
 def _vc(check: str, **params: object) -> VerifyCheck:
@@ -246,6 +254,78 @@ def test_unknown_check_fail_closed() -> None:
     r = run_verify("anything", [_vc("does_not_exist")])
     assert r.passed is False
     assert r.failures == ["unknown check: does_not_exist"]
+
+
+def test_validate_verify_check_min_length_requires_min() -> None:
+    assert validate_verify_check("min_length", {}) == "min_length requires param 'min'"
+    assert validate_verify_check("min_length", {"min": 5}) is None
+
+
+def test_validate_verify_check_max_length_requires_max() -> None:
+    assert validate_verify_check("max_length", {}) == "max_length requires param 'max'"
+    assert validate_verify_check("max_length", {"max": 10}) is None
+
+
+def test_validate_verify_check_unknown() -> None:
+    assert validate_verify_check("does_not_exist", {}) == (
+        "unknown verify check: 'does_not_exist'"
+    )
+
+
+def test_validate_verify_checks_accepts_verify_check_objects() -> None:
+    errors = validate_verify_checks(
+        [
+            VerifyCheck(check="min_length", params={}),
+            VerifyCheck(check="non_empty"),
+        ]
+    )
+    assert errors == ["min_length requires param 'min'"]
+
+
+def test_verify_checks_params_hint_lists_required_keys() -> None:
+    hint = verify_checks_params_hint()
+    assert "min_length requires min" in hint
+    assert "max_length requires max" in hint
+    assert "regex_matches requires pattern" in hint
+    assert "has_section requires heading" in hint
+    assert "has_field requires key" in hint
+
+
+def test_registered_checks_cover_required_param_ids() -> None:
+    known = set(registered_checks())
+    for check_id in (
+        "min_length",
+        "max_length",
+        "regex_matches",
+        "has_section",
+        "has_field",
+    ):
+        assert check_id in known
+
+
+def test_validate_config_rejects_min_length_without_min() -> None:
+    config = SkillConfig(
+        name="Len",
+        description="x",
+        system_prompt="do it",
+        allowed_tools=["read_document"],
+        model="test",
+        verify_checks=[VerifyCheck(check="min_length", params={})],
+    )
+    errors = _validate_config(config, ["read_document"], registered_checks())
+    assert any("min_length requires param 'min'" in e for e in errors)
+
+
+def test_validate_config_accepts_min_length_with_min() -> None:
+    config = SkillConfig(
+        name="Len",
+        description="x",
+        system_prompt="do it",
+        allowed_tools=["read_document"],
+        model="test",
+        verify_checks=[VerifyCheck(check="min_length", params={"min": 8})],
+    )
+    assert _validate_config(config, ["read_document"], registered_checks()) == []
 
 
 # --------------------------------------------------------------------------- #

@@ -15,7 +15,12 @@ from __future__ import annotations
 import pytest
 
 from catalog.api.sessions import PLANNER_SYSTEM_PROMPT
-from catalog.api.skills import BUILD_SKILL_SYSTEM_PROMPT, _BUILD_SKILL_PARAMETERS
+from catalog.api.skills import (
+    BUILD_SKILL_SYSTEM_PROMPT,
+    BUILD_SKILL_TOOL,
+    _BUILD_SKILL_PARAMETERS,
+)
+from catalog.skills.verify import registered_checks, verify_checks_params_hint
 from catalog.skills.script_runner import (
     SCRIPT_CODE_CONTRACT_EN,
     SCRIPT_CODE_CONTRACT_RU,
@@ -178,6 +183,11 @@ def test_script_code_contract_lists_preinjected_modules() -> None:
         SCRIPT_CODE_CONTRACT_EN
         in _BUILD_SKILL_PARAMETERS["properties"]["code"]["description"]
     )
+    check_schema = _BUILD_SKILL_PARAMETERS["properties"]["verify_checks"]["items"][
+        "properties"
+    ]["check"]
+    assert check_schema.get("enum") == registered_checks()
+    assert verify_checks_params_hint() in BUILD_SKILL_TOOL.description
 
 
 def test_run_script_empty_output() -> None:

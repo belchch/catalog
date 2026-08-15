@@ -42,6 +42,63 @@ def registered_checks() -> list[str]:
     return list(_REGISTRY.keys())
 
 
+_REQUIRED_PARAMS: dict[str, tuple[str, ...]] = {
+    "min_length": ("min",),
+    "max_length": ("max",),
+    "regex_matches": ("pattern",),
+    "has_section": ("heading",),
+    "has_field": ("key",),
+}
+
+
+def verify_checks_params_hint() -> str:
+    parts = [
+        f"{check_id} requires {', '.join(keys)}"
+        for check_id, keys in _REQUIRED_PARAMS.items()
+    ]
+    return "Params: " + "; ".join(parts) + "."
+
+
+def validate_verify_check(
+    check_id: str | None,
+    params: dict | None = None,
+    *,
+    available_checks: list[str] | None = None,
+) -> str | None:
+    known = available_checks if available_checks is not None else registered_checks()
+    if not check_id or check_id not in known:
+        return f"unknown verify check: {check_id!r}"
+    required = _REQUIRED_PARAMS.get(check_id, ())
+    payload = params if isinstance(params, dict) else {}
+    for key in required:
+        value = payload.get(key)
+        if value is None or value == "":
+            return f"{check_id} requires param {key!r}"
+    return None
+
+
+def validate_verify_checks(
+    checks: list,
+    *,
+    available_checks: list[str] | None = None,
+) -> list[str]:
+    errors: list[str] = []
+    for vc in checks:
+        if isinstance(vc, dict):
+            check_id = vc.get("check")
+            raw_params = vc.get("params")
+        else:
+            check_id = getattr(vc, "check", None)
+            raw_params = getattr(vc, "params", None)
+        params = raw_params if isinstance(raw_params, dict) else {}
+        error = validate_verify_check(
+            check_id, params, available_checks=available_checks
+        )
+        if error:
+            errors.append(error)
+    return errors
+
+
 def run_verify(text: str, checks: list[VerifyCheck]) -> VerifyResult:
     """Run all ``checks`` over ``text``; fail-closed on unknown ids.
 

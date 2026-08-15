@@ -16,7 +16,8 @@ verify_checks: [
 
 ## Базовые (общие)
 - `non_empty` — результат непустой после `trim()`.
-- `min_length` / `max_length` — длина в границах. `params: { min?, max?, unit: "chars"|"lines" }`.
+- `min_length` — длина не меньше границы. `params: { min, unit?: "chars"|"lines" }`.
+- `max_length` — длина не больше границы. `params: { max, unit?: "chars"|"lines" }`.
 - `regex_matches` — содержит совпадение с регулярным выражением. `params: { pattern }`.
 - `no_leftover_placeholders` — нет незаполненных плейсхолдеров (`{...}`, `<...>`, `TODO`).
 
