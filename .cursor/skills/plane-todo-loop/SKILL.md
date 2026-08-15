@@ -5,9 +5,11 @@ description: Автономный цикл обработки задач про�
 
 # Skill: Plane → Todo Loop
 
-Автономно обрабатывает задачи проекта **CATALOG** из Plane (инструменты доступны через MCP-сервер `plane`, см. `~/.cursor/mcp.json`): каждую задачу в статусе **Todo** переводит в **In Progress** и создаёт для неё заполненный файл плана выполнения (на основе анализа кода). Цикл повторяется, пока есть задачи в Todo и не превышен лимит итераций. После цикла планы переименовываются с префиксом очереди `NN-` по зависимостям Plane.
+Автономно обрабатывает задачи проекта **CATALOG** из Plane: каждую задачу в статусе **Todo** переводит в **In Progress** и создаёт для неё заполненный файл плана выполнения (на основе анализа кода). Цикл повторяется, пока есть задачи в Todo и не превышен лимит итераций. После цикла планы переименовываются с префиксом очереди `NN-` по зависимостям Plane.
 
-Названия инструментов ниже (`list_states`, `list_work_items`, `update_work_item`, `retrieve_work_item`, `list_work_item_comments`, `list_work_item_relations`) — это имена tool'ов сервера `@makeplane/plane-mcp-server`. В Cursor они видны с префиксом MCP-сервера (например `plane.list_work_items` / `mcp_plane_list_work_items`, точный формат — как показывает автодополнение инструментов). Если по имени инструмент не находится — вызови список доступных MCP-инструментов сервера `plane` и сопоставь по смыслу.
+Инструменты — MCP-сервер **`user-plane`**: `state` (action `list`), `workitem` (`list`, `retrieve`, `update`), `workitem_comment` (`list`), `workitem_relation` (`list`). Перед вызовом сверь схему через GetMcpTools. Если сервер в `needsAuth` — аутентифицируй через `mcp_auth`, затем повтори.
+
+Зависимости `blocking` / `blocked_by` между задачами Todo **не проставляет** этот скилл — их пишет фаза 1 цепочки [`plane-deps`](../plane-deps/SKILL.md) (или `/plane-deps` вручную) **до** запуска todo-loop. Здесь зависимости только читаются для нумерации `NN-`.
 
 ## Параметры запуска
 - **PLANS_DIR** — папка для файлов планов.
@@ -21,7 +23,7 @@ description: Автономный цикл обработки задач про�
 2. Зафиксировать константы Plane:
    - workspace slug: `belchch`
    - project: `catalog-app`, identifier `CATALOG`, id `84997489-c485-4448-9ebe-0a06c4fa3cbc`
-3. Вызвать `list_states(project_id=84997489-c485-4448-9ebe-0a06c4fa3cbc)` и по полю `name` найти:
+3. Вызвать `state` action `list` с `project_id=84997489-c485-4448-9ebe-0a06c4fa3cbc` и по полю `name` найти:
    - **TODO_STATE_ID** = state с `name == "Todo"` (ожидаемо `a81f8cef-f7d7-471a-b3f1-a6e9a457e5f9`, group `unstarted`)
    - **INPROGRESS_STATE_ID** = state с `name == "In Progress"` (ожидаемо `bc19d2fb-0962-4cb0-96de-15a8478daf4d`, group `started`)
    - Если какого-то статуса нет — сообщить об ошибке и остановиться.
@@ -34,13 +36,12 @@ description: Автономный цикл обработки задач про�
 
 Вызвать:
 ```
-list_work_items(
-  project_id = "84997489-c485-4448-9ebe-0a06c4fa3cbc",
-  pql        = "state = \"<TODO_STATE_ID>\"",
-  order_by   = "sequence_id",
-  per_page   = 1,
+workitem action=list
+  project_id = "84997489-c485-4448-9ebe-0a06c4fa3cbc"
+  pql        = "state = \"<TODO_STATE_ID>\""
+  order_by   = "sequence_id"
+  per_page   = 1
   fields     = "id,name,sequence_id,state"
-)
 ```
 - Берётся ровно одна задача — первая по `sequence_id` (самая старая, FIFO).
 - **Если `results` пуст** (задач в Todo нет) → выйти из цикла: «Задач в Todo больше нет».
@@ -48,9 +49,9 @@ list_work_items(
 
 ### ШАГ 2 — Перевести в In Progress, собрать ТЗ и определить тип
 
-1. `update_work_item(project_id, work_item_id=<id>, state=<INPROGRESS_STATE_ID>)` — задача переходит в In Progress.
-2. Получить полное описание задачи: `retrieve_work_item(project_id, work_item_id=<id>, fields="name,description_html,priority")`. Извлечь текст из `description_html` (счистить теги).
-3. Получить комментарии задачи: `list_work_item_comments(project_id, work_item_id=<id>)` (если инструмент называется иначе — найти в списке tool'ов сервера `plane` инструмент чтения комментариев work item). Отсортировать по времени создания.
+1. `workitem` action `update` с `project_id`, `workitem_id=<id>`, `state=<INPROGRESS_STATE_ID>` — задача переходит в In Progress.
+2. Получить полное описание задачи: `workitem` action `retrieve` с `project_id`, `workitem_id=<id>`, `fields="name,description_html,priority"`. Извлечь текст из `description_html` (счистить теги).
+3. Получить комментарии задачи: `workitem_comment` action `list` с `project_id`, `workitem_id=<id>`. Отсортировать по времени создания.
 4. Определить **ТЗ** (актуальную формулировку задачи) и **ПРЕДЫСТОРИЮ**:
    - **Комментарии есть** → ТЗ = текст *последнего* комментария (счистить HTML). ПРЕДЫСТОРИЯ = описание задачи + все комментарии, кроме последнего, в хронологическом порядке.
    - **Комментариев нет** → ТЗ = описание задачи. ПРЕДЫСТОРИИ нет (секция в плане: «_нет — комментариев к задаче не было_»).
@@ -116,7 +117,7 @@ list_work_items(
 
 Выполняется **один раз после выхода из цикла**, до финального отчёта — **всегда**, в том числе при ITER = 0.
 
-Уже пронумерованные файлы (`^[0-9]{2}-CATALOG-`) **не переименовывать и не перенумеровывать**: их имена — ключи `STATE.steps` в `.cursor/state/night-shift.json` и порядок `catalog-pipeline`. Снимать префиксы со всей папки запрещено.
+Уже пронумерованные файлы (`^[0-9]{2}-CATALOG-`) **не переименовывать и не перенумеровывать**: их имена — ключи `STATE.steps` в файле состояния `catalog-pipeline` и порядок очереди. Снимать префиксы со всей папки запрещено.
 
 ### 0. Состав батча
 
@@ -136,10 +137,9 @@ list_work_items(
 Для каждой **уникальной** задачи BATCH (поле `id` в шапке плана) вызвать:
 
 ```
-list_work_item_relations(
-  project_id   = "84997489-c485-4448-9ebe-0a06c4fa3cbc",
-  work_item_id = <id>
-)
+workitem_relation action=list
+  project_id   = "84997489-c485-4448-9ebe-0a06c4fa3cbc"
+  workitem_id  = <id>
 ```
 
 Ребро **тикетов** — только `dependencies.blocking` / `dependencies.blocked_by`:
@@ -216,7 +216,7 @@ list_work_item_relations(
 - **Не коммитить.** Изменения (файлы планов) остаются в working tree; решение о коммите — за человеком.
 - **Идемпотентность по статусу:** обработанная задача уходит в In Progress, поэтому повторный запуск skill безопасно продолжит с оставшихся Todo.
 - Если на шаге 3 анализ показывает, что задача дублирует уже существующий план в PLANS_DIR — всё равно создать отдельный план и сослаться на дубликат в «Контексте». После цикла дубликат с тем же `(sequence_id, type)`, что у EXISTING, в очередь **не** нумеровать (orphan → `_dup-`).
-- **После цикла всегда префиксы.** Шаг выполнять и при ITER = 0. Не оставлять в PLANS_DIR файлы `CATALOG-*.md` без `NN-` (исключение — только `_dup-CATALOG-…`, они не в очереди). Не пропускать `list_work_item_relations`, если BATCH не пуст. Не сортировать очередь по номеру CATALOG-NN.
+- **После цикла всегда префиксы.** Шаг выполнять и при ITER = 0. Не оставлять в PLANS_DIR файлы `CATALOG-*.md` без `NN-` (исключение — только `_dup-CATALOG-…`, они не в очереди). Не пропускать `workitem_relation` action `list`, если BATCH не пуст. Не сортировать очередь по номеру CATALOG-NN.
 - **EXISTING не перенумеровывать.** Файлы `NN-CATALOG-*.md`, которые уже были в папке до этого запуска, не переименовывать, префиксы не снимать, ключи `STATE.steps` не менять. Новые префиксы только у BATCH, начиная с `max(EXISTING)+1`. Хвост сбоя с тем же `(sequence_id, type)`, что у EXISTING, — `_dup-`, не второй `NN-`.
 - **Один слот на ключ.** В BATCH и в очереди pipeline — не больше одного плана на `(sequence_id, type)`. Однотипные лишние не сортировать в очередь, а схлопывать. Tie-break Kahn для оставшихся: `sequence_id`, затем `code` < `ui`, затем basename.
 - **Ссылки после rename.** После всех `mv` пройти PLANS_DIR и заменить по RENAME_MAP каждое старое имя/путь плана (не только пару code/ui).

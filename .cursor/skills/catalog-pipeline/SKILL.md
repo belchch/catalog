@@ -1,20 +1,21 @@
 ---
 name: catalog-pipeline
-description: Автономный ночной pipeline по шагам docs/plan/night-shift/NN-CATALOG-*.md. Владеет общей веткой pipeline, PR, файлом состояния .cursor/state/night-shift.json и циклом generator↔reviewer (до 5 циклов на шаг). Использовать явно через /catalog-pipeline, когда нужно прогнать один или несколько шагов ночного пайплайна.
+description: Автономный pipeline по шагам PLANS_DIR/NN-CATALOG-*.md (дефолт docs/plan/night-shift/). Владеет общей веткой pipeline, PR, файлом состояния STATE и циклом generator↔reviewer (до 5 циклов на шаг). Использовать явно через /catalog-pipeline или как фазу 3 цепочки /catalog-full-run.
 disable-model-invocation: true
 ---
 
 # Skill: catalog-pipeline
 
-Ты — **parent-оркестратор** одного или нескольких шагов ночного pipeline. Ты (а не подагенты) владеешь git, PR и файлом состояния. Подагенты `catalog-generator` и `catalog-reviewer` НИКОГДА не коммитят и не пушат — это твоя работа.
+Ты — **parent-оркестратор** одного или нескольких шагов pipeline. Ты (а не подагенты) владеешь git, PR и файлом состояния. Подагенты `catalog-generator` и `catalog-reviewer` НИКОГДА не коммитят и не пушат — это твоя работа.
 
 Модель парента выбирается пользователем в UI/CLI до запуска (ориентир: Grok 4.6). Эта инструкция работает независимо от того, какая модель её выполняет.
 
 ## Параметры запуска
-- **STEPS** — список шагов для прогона. Если пользователь не указал явно — возьми из `.cursor/state/night-shift.json.steps`, отфильтровав `status == "pending"`, в порядке очереди из `docs/plan/night-shift/`: по числовому префиксу `NN-` в имени файла (`00-…`, `01-…`, …), не по номеру CATALOG-NN. Файлы `*.design.md` в очередь не входят.
-- **BRANCH** — общая ветка pipeline. Если в state есть `branch` — используй её. Иначе спроси/уточни у пользователя (не угадывай имя ветки молча).
+- **PLANS_DIR** — папка с планами `NN-CATALOG-*.md`. Если задана вызывающей цепочкой (`/catalog-full-run`) или пользователем — использовать её. Иначе дефолт `docs/plan/night-shift/`.
+- **STATE** — путь к JSON состояния. Если задан цепочкой/пользователем — использовать его. Иначе дефолт `.cursor/state/night-shift.json`. Файл в `.gitignore`, никогда не коммитить.
+- **STEPS** — список шагов для прогона. Если пользователь не указал явно — возьми из `STATE.steps`, отфильтровав `status == "pending"`, в порядке очереди из `PLANS_DIR`: по числовому префиксу `NN-` в имени файла (`00-…`, `01-…`, …), не по номеру CATALOG-NN. Файлы `*.design.md` в очередь не входят. Если `STATE.steps` пуст/отсутствует — инициализируй pending-записи по всем `NN-CATALOG-*.md` в `PLANS_DIR` (без `*.design.md`), в порядке `NN-`.
+- **BRANCH** — общая ветка pipeline. Если в state есть `branch` — используй её. Если задана цепочкой (`pipeline/<RUN_NAME>`) — используй её и запиши в STATE. Иначе спроси/уточни у пользователя (не угадывай имя ветки молча).
 - **CYCLES_MAX = 5** (на шаг).
-- **STATE** = `.cursor/state/night-shift.json` (см. схему ниже). Файл в `.gitignore`, никогда не коммитить.
 - **UI-шаг** — шаг, в файле плана которого есть маркер `- **Тип шага:** ui`. Только для таких шагов включается фаза дизайна и UI-ревью (роли `catalog-designer` + `catalog-ui-reviewer`). Для остальных шагов поток прежний (`generator ↔ reviewer`), эти роли не запускаются.
 
 ## Подготовка (один раз перед циклом шагов)
@@ -29,7 +30,7 @@ disable-model-invocation: true
 
 1. `base_sha = git rev-parse HEAD`. `STATE.steps[STEP] = { status: "running", attempt: 0, base_sha, updated: <ISO> }`. Запиши STATE на диск (атомарно — временный файл + rename).
 1a. **Фаза дизайна (только для UI-шага, один раз до цикла).** Если STEP помечен `- **Тип шага:** ui` и у шага ещё нет `design_path` со `Статус дизайна: Ready`:
-   - `DESIGN = docs/plan/night-shift/<STEP без .md>.design.md`.
+   - `DESIGN = <PLANS_DIR>/<STEP без .md>.design.md`.
    - Запусти **новый** Task → subagent_type `catalog-designer` с промптом: `PLAN=<путь к STEP>, DESIGN=<DESIGN>`. Сохрани `STATE.steps[STEP].designer_agent_id` и `STATE.steps[STEP].design_path = <DESIGN>`. Запиши STATE.
    - Для не-UI шага DESIGN не создаётся, эта фаза пропускается.
 2. `ISSUES = "нет"`. Для `CYCLE = 1..CYCLES_MAX`:
@@ -44,7 +45,7 @@ disable-model-invocation: true
    - Прогони финальные проверки по всему коду (backend: `ruff check .`, `pytest` из `backend/`; frontend: `pnpm run build`, `pnpm run lint`, `pnpm run typecheck` из `frontend/`). Если что-то красное — это твоя ошибка контроля, не commit; разберись (обычно значит reviewer одобрил зря — считай CHANGES_REQUESTED и продолжи циклы, если лимит не исчерпан).
    - `git add` только файлы, относящиеся к шагу. `git commit -m "<CATALOG-NN>: <краткое summary>"`.
    - `git push` (первый пуш ветки — `git push -u origin <BRANCH>`).
-   - Если PR ещё не существует — `gh pr create --base main --head <BRANCH> --title "Pipeline: <slug>" --body "Шаги — см. .cursor/state/night-shift.json (не в git)."`. Иначе PR обновится пушем автоматически — **не вызывай `gh pr review` на каждый цикл**.
+   - Если PR ещё не существует — `gh pr create --base main --head <BRANCH> --title "Pipeline: <slug>" --body "Шаги — см. <STATE> (не в git)."`. Иначе PR обновится пушем автоматически — **не вызывай `gh pr review` на каждый цикл**.
    - `STATE.steps[STEP] = { status: "done", verdict: "APPROVED", commit: <sha>, updated: <ISO> }`. Запиши STATE.
    - Опционально (не обязательно на каждый шаг): один короткий `gh pr comment` с итогом шага.
 4. **Лимит циклов без APPROVED:**
@@ -57,12 +58,12 @@ disable-model-invocation: true
 - Не создавай вложенных подагентов глубже `parent → generator/reviewer` (запрещено).
 - reviewer и ui-reviewer вызываются **заново** каждый цикл (без resume); generator — **резюмируется** тот же instance между циклами одного шага. designer запускается **один раз** до цикла на UI-шаге (resume только если нужно перегенерировать дизайн — по умолчанию не требуется).
 - APPROVED шага возможен только при APPROVED от обоих ревьюеров (для не-UI шага ui-reviewer не запускается и считается APPROVED).
-- STATE пишешь атомарно после каждого перехода. Никогда не коммить `.cursor/state/night-shift.json`.
+- STATE пишешь атомарно после каждого перехода. Никогда не коммить файл STATE (и любой путь под `.cursor/state/`).
 - Не мерджи PR сам — финальное решение за Bugbot/человеком.
 - Не постишь `gh pr review`/`gh pr comment` на каждый цикл — шум в PR недопустим.
 - **Модели подагентов не выбираешь и не пишешь в STATE.** При `Task` **не передавай** параметр `model` — модель роли берётся из frontmatter `.cursor/agents/catalog-*.md` (переключается скилом `/pipeline-model-mode`). В STATE не заводи поля вроде `requested_models` / `actual_models`.
 
-## Схема `.cursor/state/night-shift.json`
+## Схема STATE (пример пути `.cursor/state/night-shift.json`)
 ```json
 {
   "schema_version": 1,
