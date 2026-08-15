@@ -68,6 +68,18 @@ function writeStoredSessionId(id: string | null): void {
 
 const DEFAULT_SESSION_TIMEOUT = 60
 
+function skippedDocsNotice(skippedIds: string[], docs?: DocumentOut[]): string {
+  const titles = skippedIds.map((id) => {
+    const title = docs?.find((d) => d.id === id)?.title
+    return title && title.length > 0 ? title : id
+  })
+  if (titles.length === 1) {
+    return `Документ «${titles[0]}» не добавлен в сессию: не найден в воркспейсе.`
+  }
+  const listed = titles.map((t) => `«${t}»`).join(', ')
+  return `Не добавлены в сессию: ${listed} — документы не найдены в воркспейсе.`
+}
+
 function highlightFromDetail(detail: string): ArtifactType | null {
   const d = detail.toLowerCase()
   if (d.includes('meta')) return 'meta'
@@ -294,25 +306,50 @@ export default function App() {
     wasStreamingRef.current = planner.streaming
   }, [planner.streaming, sessionsRefresh, workspaceRefreshBlocked])
 
-  const ensureSession = useCallback(async (): Promise<string> => {
-    if (!hasWorkspace) throw new Error('Сначала откройте папку воркспейса')
-    if (sessionId) return sessionId
-    const created = await createSession()
-    setSessionId(created.id)
-    void sessions.refresh()
-    return created.id
-  }, [hasWorkspace, sessionId, sessions])
-
-  const handleSend = useCallback(
-    async (text: string, docIds?: string[]) => {
-      try {
-        await ensureSession()
-        planner.send(text, docIds)
-      } catch (e) {
-        setNotice(e instanceof Error ? e.message : String(e))
+  const ensureSession = useCallback(
+    async (
+      docIds?: string[],
+    ): Promise<{ id: string; skippedDocIds: string[] }> => {
+      if (!hasWorkspace) throw new Error('Сначала откройте папку воркспейса')
+      if (sessionId) return { id: sessionId, skippedDocIds: [] }
+      const created = await createSession(docIds)
+      setSessionId(created.id)
+      void sessions.refresh()
+      return {
+        id: created.id,
+        skippedDocIds: created.skipped_doc_ids ?? [],
       }
     },
-    [ensureSession, planner],
+    [hasWorkspace, sessionId, sessions],
+  )
+
+  const handleSend = useCallback(
+    (text: string, docIds?: string[], docs?: DocumentOut[]) => {
+      if (sessionId) {
+        setNotice(null)
+        planner.send(text, docIds, docs)
+        return
+      }
+      setNotice(null)
+      void ensureSession(docIds)
+        .then((created) => {
+          const skipped = new Set(created.skippedDocIds)
+          const filteredIds = docIds?.filter((id) => !skipped.has(id))
+          const filteredDocs = docs?.filter((d) => !skipped.has(d.id))
+          if (created.skippedDocIds.length > 0) {
+            setNotice(skippedDocsNotice(created.skippedDocIds, docs))
+          }
+          planner.send(
+            text,
+            filteredIds && filteredIds.length > 0 ? filteredIds : undefined,
+            filteredDocs && filteredDocs.length > 0 ? filteredDocs : undefined,
+          )
+        })
+        .catch((e: unknown) => {
+          setNotice(e instanceof Error ? e.message : String(e))
+        })
+    },
+    [sessionId, ensureSession, planner],
   )
 
   const handleSelectSession = useCallback(
@@ -495,7 +532,7 @@ export default function App() {
       setNotice(null)
       setSavedResultDoc(null)
       try {
-        const sid = await ensureSession()
+        const { id: sid } = await ensureSession()
         const runId = await skillsHook.apply(skillId, docIds, mode, sid, prompt)
         setActiveRunId(runId)
       } catch (e) {
@@ -579,7 +616,9 @@ export default function App() {
         </div>
       </header>
       {notice && (
-        <div className="catalog-notice px-5 py-2 text-xs">{notice}</div>
+        <div className="catalog-notice px-5 py-2 text-xs" role="status" aria-live="polite">
+          {notice}
+        </div>
       )}
       <div className="catalog-layout grid flex-1 grid-cols-1 overflow-hidden lg:grid-cols-[360px_minmax(0,1fr)]">
         <aside className="catalog-sidebar flex flex-col overflow-y-auto p-3">

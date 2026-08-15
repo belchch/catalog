@@ -21,7 +21,7 @@ interface ChatProps {
   documents: DocumentOut[]
   sessionDocuments: DocumentOut[]
   sessionId: string | null
-  onSend: (text: string, docIds?: string[]) => void
+  onSend: (text: string, docIds?: string[], docs?: DocumentOut[]) => void
   onCancel: () => void
   onReconnect: () => void
   onRemoveDocument?: (docId: string) => void
@@ -81,11 +81,19 @@ export function Chat({
     el.style.height = `${el.scrollHeight}px`
   }, [input])
 
+  const selectedDocs = selectedDocIds
+    .map((id) => documents.find((d) => d.id === id))
+    .filter((d): d is DocumentOut => d != null)
+
   const submit = () => {
     const text = input.trim()
     if (streaming) return
     if (!text && selectedDocIds.length === 0) return
-    onSend(text, selectedDocIds.length > 0 ? selectedDocIds : undefined)
+    onSend(
+      text,
+      selectedDocIds.length > 0 ? selectedDocIds : undefined,
+      selectedDocs.length > 0 ? selectedDocs : undefined,
+    )
     setInput('')
     setSelectedDocIds([])
   }
@@ -97,10 +105,6 @@ export function Chat({
     : messages.length === 0
       ? STARTER_SUGGESTIONS
       : suggestions
-
-  const selectedDocs = selectedDocIds
-    .map((id) => documents.find((d) => d.id === id))
-    .filter((d): d is DocumentOut => d != null)
 
   const removeSelected = (id: string) => {
     if (streaming) return
@@ -168,7 +172,7 @@ export function Chat({
             <p className="mb-1 text-[11px] text-ink-faint">
               Агент видит только эти документы
             </p>
-            <ul className="flex flex-wrap gap-1.5" role="list">
+            <ul className="flex flex-wrap gap-1.5" role="list" aria-live="polite">
               {sessionDocuments.map((d) => (
                 <li key={d.id} role="listitem" className="chip">
                   <span className="badge-neutral">{d.kind}</span>

@@ -41,6 +41,7 @@ export type ApplyMode = 'persist' | 'preview'
 
 export interface SessionCreated {
   id: string
+  skipped_doc_ids: string[]
 }
 
 export interface SessionOut {
@@ -297,7 +298,14 @@ export function uploadDocument(file: File): Promise<DocumentOut> {
   return jsonFetch<DocumentOut>('/documents', { method: 'POST', body: form })
 }
 
-export function createSession(): Promise<SessionCreated> {
+export function createSession(docIds?: string[]): Promise<SessionCreated> {
+  if (docIds && docIds.length > 0) {
+    return jsonFetch<SessionCreated>('/sessions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ doc_ids: docIds }),
+    })
+  }
   return jsonFetch<SessionCreated>('/sessions', { method: 'POST' })
 }
 

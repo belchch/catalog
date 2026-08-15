@@ -39,7 +39,7 @@ export interface UsePlannerSessionResult {
   savePrompt: (content: string) => Promise<SessionArtifact>
   saveScript: (content: string) => Promise<SessionArtifact>
   saveMeta: (meta: SkillMetaPatch) => Promise<SessionArtifact>
-  send: (text: string, docIds?: string[]) => void
+  send: (text: string, docIds?: string[], docs?: DocumentOut[]) => void
   cancel: () => void
   reconnect: () => void
   removeDocument: (docId: string) => Promise<void>
@@ -340,12 +340,24 @@ export function usePlannerSession(
     }
   }, [sessionId, handleEvent, resetLocal, reconnectNonce])
 
-  const send = useCallback((text: string, docIds?: string[]) => {
+  const send = useCallback((text: string, docIds?: string[], docs?: DocumentOut[]) => {
     const trimmed = text.trim()
     const ids = docIds && docIds.length > 0 ? docIds : undefined
     if (!trimmed && !ids) return
     skipHydrateRef.current = true
     setMessages((prev) => [...prev, { role: 'user', content: trimmed }])
+    if (docs && docs.length > 0) {
+      setSessionDocuments((prev) => {
+        const seen = new Set(prev.map((d) => d.id))
+        const next = prev.slice()
+        for (const doc of docs) {
+          if (seen.has(doc.id)) continue
+          seen.add(doc.id)
+          next.push(doc)
+        }
+        return next
+      })
+    }
     streamingRef.current = true
     setStreaming(true)
     setSuggestions([])
