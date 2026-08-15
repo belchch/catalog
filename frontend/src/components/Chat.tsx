@@ -142,8 +142,7 @@ export function Chat({
     .map((id) => documents.find((d) => d.id === id))
     .filter((d): d is DocumentOut => d != null)
 
-  const submit = () => {
-    const text = input.trim()
+  const sendCurrent = (text: string) => {
     if (streaming) return
     if (!text && selectedDocIds.length === 0) return
     onSend(
@@ -154,6 +153,10 @@ export function Chat({
     setInput('')
     setSelectedDocIds([])
     setDocPickerOpen(false)
+  }
+
+  const submit = () => {
+    sendCurrent(input.trim())
   }
 
   const canSubmit = !streaming && (input.trim().length > 0 || selectedDocIds.length > 0)
@@ -224,7 +227,7 @@ export function Chat({
             <ChatMessage
               key={i}
               message={m}
-              onRepeat={onSend}
+              onRepeat={(content) => onSend(content)}
               streaming={streaming}
               closed={closed}
             />
@@ -269,7 +272,7 @@ export function Chat({
                   key={s}
                   type="button"
                   className="chip shrink-0 transition-colors hover:border-line-brand hover:bg-surface-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand disabled:cursor-not-allowed disabled:bg-surface-muted disabled:text-ink-faint"
-                  onClick={() => onSend(s)}
+                  onClick={() => sendCurrent(s)}
                   disabled={streaming}
                 >
                   {s}
