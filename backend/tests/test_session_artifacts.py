@@ -626,6 +626,35 @@ def test_save_skill_steps_allows_empty_content(mem_db: Database) -> None:
     assert row.is_valid is True
 
 
+def test_save_skill_steps_rejects_unknown_input(mem_db: Database) -> None:
+    session_id = create_session(mem_db)
+    tools = build_artifact_tools(
+        mem_db, session_id, available_tools=["read_document"]
+    )
+    _, save_steps = tools.get("save_skill_steps")
+
+    async def _run():
+        return await save_steps(
+            steps=[
+                {
+                    "id": "upper",
+                    "type": "script",
+                    "input": "prevous",
+                    "code": "result = document.upper()\n",
+                }
+            ]
+        )
+
+    result = asyncio.run(_run())
+    assert result["ok"] is False
+    assert "unknown input" in (result["error"] or "")
+    row = get_artifact(mem_db, session_id, "steps")
+    assert row is not None
+    assert row.is_valid is False
+    payload = json.loads(row.content)
+    assert payload["steps"][0]["input"] == "prevous"
+
+
 def test_save_skill_steps_rejects_bad_script(mem_db: Database) -> None:
     session_id = create_session(mem_db)
     tools = build_artifact_tools(

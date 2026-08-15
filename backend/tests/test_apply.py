@@ -28,7 +28,13 @@ from catalog.llm.base import (
     ToolSpec,
 )
 from catalog.skills.apply import apply_skill, apply_skill_collect
-from catalog.skills.config import PipelineStep, SkillConfig, VerifyCheck
+from catalog.skills.artifact_tools import validate_pipeline_steps
+from catalog.skills.config import (
+    PipelineStep,
+    SkillConfig,
+    VerifyCheck,
+    pipeline_step_from_dict,
+)
 from catalog.skills.repo_run import get_run
 from catalog.skills.repo_skill import create_skill, get_skill
 from catalog.storage.db import Database
@@ -913,6 +919,22 @@ def test_skill_config_pipeline_roundtrip() -> None:
     assert restored.steps[0].code == "result = document.upper()\n"
 
 
+def test_pipeline_step_from_dict_keeps_unknown_input() -> None:
+    step = pipeline_step_from_dict(
+        {"id": "a", "type": "script", "input": "prevous"}, 0
+    )
+    assert step.input == "prevous"
+    errors = validate_pipeline_steps([step], [])
+    assert any("unknown input" in e for e in errors)
+
+
+def test_pipeline_step_from_dict_defaults_missing_input() -> None:
+    first = pipeline_step_from_dict({"id": "a", "type": "script"}, 0)
+    later = pipeline_step_from_dict({"id": "b", "type": "script"}, 1)
+    assert first.input == "documents"
+    assert later.input == "previous"
+
+
 def test_apply_pipeline_script_llm_script(db: Database, workspace: Path) -> None:
     skill = _pipeline_skill()
     skill_id = create_skill(
@@ -1081,6 +1103,55 @@ def test_apply_pipeline_stops_on_middle_step_failure(
     step_ids = {e.get("data", {}).get("step_id") for e in trace}
     assert "suffix" not in step_ids
     assert "upper" in step_ids
+
+
+def test_apply_pipeline_previous_on_first_step_fails(
+    db: Database, workspace: Path
+) -> None:
+    skill = SkillConfig(
+        name="pipe-no-prev",
+        description="first step asks for previous",
+        system_prompt="",
+        allowed_tools=[],
+        model="test/model",
+        kind="pipeline",
+        steps=[
+            PipelineStep(
+                id="note",
+                type="llm",
+                input="previous",
+                system_prompt="rewrite",
+                allowed_tools=["read_document"],
+            ),
+        ],
+    )
+    skill_id = create_skill(
+        db, name=skill.name, description=skill.description, config=skill
+    )
+    input_doc_id = _ingest_input(db, workspace)
+    provider = ScriptProvider([_result("SHOULD NOT RUN")])
+
+    with pytest.raises(ValueError, match="previous"):
+        asyncio.run(
+            apply_skill_collect(
+                provider=provider,
+                db=db,
+                workspace_dir=str(workspace),
+                skill=skill,
+                skill_id=skill_id,
+                input_doc_ids=[input_doc_id],
+                base_tools=build_document_tools(db, workspace),
+            )
+        )
+
+    assert provider.seen_messages == []
+    with db.connect() as conn:
+        row = conn.execute(
+            "SELECT status FROM skill_run WHERE skill_id = ?",
+            (skill_id,),
+        ).fetchone()
+    assert row is not None
+    assert row["status"] == "failed"
 
 
 def test_apply_pipeline_finish_ignores_early_step_cap(

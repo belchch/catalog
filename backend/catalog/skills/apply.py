@@ -84,9 +84,18 @@ def _pipeline_step_input(
     current: PipelineValue | None,
     doc_texts: list[str],
 ) -> PipelineValue:
-    if step.input == "documents" or current is None:
+    if step.input == "documents":
         return doc_texts[0] if len(doc_texts) == 1 else list(doc_texts)
-    return current
+    if step.input == "previous":
+        if current is None:
+            raise ValueError(
+                f"pipeline step {step.id!r} input is 'previous' "
+                "but there is no previous result"
+            )
+        return current
+    raise ValueError(
+        f"pipeline step {step.id!r}: unknown input {step.input!r}"
+    )
 
 
 def _pipeline_llm_user_content(
@@ -338,7 +347,7 @@ async def _apply_core(
             current: PipelineValue | None = None
             for index, step in enumerate(skill.steps):
                 step_input = _pipeline_step_input(step, current, doc_texts)
-                from_documents = step.input == "documents" or current is None
+                from_documents = step.input == "documents"
                 if step.type == "script":
                     doc_text = _value_as_text(step_input)
                     docs_list = _value_as_documents(step_input)

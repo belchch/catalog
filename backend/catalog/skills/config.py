@@ -63,6 +63,8 @@ def pipeline_step_from_dict(data: dict, index: int = 0) -> PipelineStep:
     raw_input = data.get("input")
     if raw_input in PIPELINE_STEP_INPUTS:
         step_input = raw_input
+    elif isinstance(raw_input, str) and raw_input.strip():
+        step_input = raw_input.strip()
     else:
         step_input = "documents" if index == 0 else "previous"
     raw_tools = data.get("allowed_tools") or []
