@@ -208,7 +208,7 @@ button { -webkit-tap-highlight-color: transparent; }
   background: var(--notice-bg);
   color: var(--notice-ink);
 }
-.catalog-layout { min-height: 0; }
+.catalog-layout { min-height: 0; grid-template-rows: minmax(0, 1fr); }
 .catalog-main { background: var(--surface); }
 
 .catalog-sidebar {

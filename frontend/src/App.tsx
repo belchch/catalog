@@ -616,7 +616,7 @@ export default function App() {
         </div>
       </header>
       {notice && (
-        <div className="catalog-notice px-5 py-2 text-xs" role="status" aria-live="polite">
+        <div className="catalog-notice shrink-0 px-5 py-2 text-xs" role="status" aria-live="polite">
           {notice}
         </div>
       )}
@@ -738,7 +738,7 @@ export default function App() {
             </span>
           </div>
         </aside>
-        <main className="catalog-main overflow-hidden">
+        <main className="catalog-main h-full min-h-0 overflow-hidden">
           {activeRunId ? (
             <RunView
               run={run}
@@ -767,7 +767,7 @@ export default function App() {
               </div>
             </div>
           ) : (
-            <div className="flex h-full flex-col overflow-hidden">
+            <div className="flex h-full min-h-0 flex-col overflow-hidden">
               <div
                 role="tablist"
                 aria-label="Область main"
@@ -807,12 +807,12 @@ export default function App() {
                   role={isLg ? undefined : 'tabpanel'}
                   aria-label={isLg ? undefined : 'Чат'}
                   className={
-                    'min-w-0 flex-1 overflow-hidden ' +
+                    'min-h-0 min-w-0 flex-1 overflow-hidden ' +
                     (showChat ? 'flex' : 'hidden') +
                     ' lg:flex'
                   }
                 >
-                  <div className="flex h-full w-full flex-col overflow-hidden">
+                  <div className="flex h-full min-h-0 w-full flex-col overflow-hidden">
                     <Chat
                       messages={planner.messages}
                       streaming={planner.streaming}
@@ -847,7 +847,7 @@ export default function App() {
                   role={isLg ? undefined : 'tabpanel'}
                   aria-label={isLg ? undefined : 'Черновик'}
                   className={
-                    'catalog-draft-area w-full overflow-hidden lg:w-[408px] lg:shrink-0 ' +
+                    'catalog-draft-area min-h-0 w-full overflow-hidden lg:w-[408px] lg:shrink-0 ' +
                     (showDraft ? 'flex' : 'hidden') +
                     ' lg:flex'
                   }

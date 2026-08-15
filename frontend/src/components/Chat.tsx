@@ -63,11 +63,14 @@ export function Chat({
 }: ChatProps) {
   const [input, setInput] = useState('')
   const [selectedDocIds, setSelectedDocIds] = useState<string[]>([])
-  const bottomRef = useRef<HTMLDivElement>(null)
+  const scrollRef = useRef<HTMLDivElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
 
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
+    if (messages.length === 0) return
+    const el = scrollRef.current
+    if (!el) return
+    el.scrollTop = el.scrollHeight
   }, [messages])
 
   useEffect(() => {
@@ -112,13 +115,19 @@ export function Chat({
   }
 
   return (
-    <div className="catalog-chat flex h-full flex-col">
+    <div className="catalog-chat flex h-full min-h-0 flex-col">
       {editingSkillName && (
-        <div className="bg-brand-soft px-4 py-1.5 text-xs text-brand-ink">
+        <div className="shrink-0 bg-brand-soft px-4 py-1.5 text-xs text-brand-ink">
           Редактирование: {editingSkillName}
         </div>
       )}
-      <div className="catalog-chat__scroll flex-1 overflow-y-auto px-5 py-6">
+      <div
+        ref={scrollRef}
+        role="region"
+        tabIndex={0}
+        aria-label="История сообщений"
+        className="catalog-chat__scroll min-h-0 flex-1 overflow-y-auto px-5 py-6 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand"
+      >
         <div className="catalog-chat__content">
         {messages.length === 0 && (
           <p className="catalog-chat__empty mt-16 text-center text-sm text-ink-faint">
@@ -159,10 +168,9 @@ export function Chat({
           </div>
         )}
         {error && <div className="my-2 text-xs text-danger-ink">Ошибка: {error}</div>}
-        <div ref={bottomRef} />
         </div>
       </div>
-      <div className="catalog-composer-area p-4">
+      <div className="catalog-composer-area shrink-0 p-4">
         <div className="catalog-composer">
         {sessionDocuments.length > 0 && (
           <section className="mb-2" aria-label="Документы в сессии">
