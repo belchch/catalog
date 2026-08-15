@@ -44,24 +44,22 @@ def create_run(
     *,
     skill_id: str,
     session_id: str | None,
-    input_doc_ids: list[str] | None = None,
+    input_doc_ids: list[str],
     persist: bool = True,
     user_prompt: str | None = None,
-    parent_run_id: str | None = None,
 ) -> str:
-    docs = list(input_doc_ids or [])
-    if not docs and parent_run_id is None:
+    if not input_doc_ids:
         raise ValueError("create_run requires at least one input document id")
     run_id = uuid.uuid4().hex
     now = _now_iso()
-    first_doc_id = docs[0] if docs else None
-    ids_json = json.dumps(docs, ensure_ascii=False) if docs else None
+    first_doc_id = input_doc_ids[0]
+    ids_json = json.dumps(list(input_doc_ids), ensure_ascii=False)
     with db.connect() as conn:
         conn.execute(
             "INSERT INTO skill_run(id, skill_id, session_id, input_doc_id, "
             "input_doc_ids, output_doc_id, status, trace_json, started_at, ended_at, "
-            "persist, result_text, user_prompt, parent_run_id) "
-            "VALUES (?, ?, ?, ?, ?, NULL, 'pending', NULL, ?, NULL, ?, NULL, ?, ?)",
+            "persist, result_text, user_prompt) "
+            "VALUES (?, ?, ?, ?, ?, NULL, 'pending', NULL, ?, NULL, ?, NULL, ?)",
             (
                 run_id,
                 skill_id,
@@ -71,7 +69,6 @@ def create_run(
                 now,
                 int(persist),
                 user_prompt,
-                parent_run_id,
             ),
         )
     return run_id
@@ -174,27 +171,12 @@ def has_running_runs(db: Database) -> bool:
     return row is not None
 
 
-def list_child_runs(db: Database, parent_run_id: str) -> list[dict]:
-    with db.connect() as conn:
-        rows = conn.execute(
-            "SELECT id FROM skill_run WHERE parent_run_id = ? "
-            "ORDER BY started_at",
-            (parent_run_id,),
-        ).fetchall()
-    out: list[dict] = []
-    for row in rows:
-        child = get_run(db, row["id"])
-        if child is not None:
-            out.append(child)
-    return out
-
-
 def get_run(db: Database, run_id: str) -> dict | None:
     with db.connect() as conn:
         row = conn.execute(
             "SELECT id, skill_id, session_id, input_doc_id, input_doc_ids, "
             "output_doc_id, status, trace_json, started_at, ended_at, "
-            "persist, result_text, user_prompt, parent_run_id "
+            "persist, result_text, user_prompt "
             "FROM skill_run WHERE id = ?",  # noqa: S608
             (run_id,),
         ).fetchone()
@@ -210,11 +192,6 @@ def get_run(db: Database, run_id: str) -> dict | None:
         input_doc_ids = [row["input_doc_id"]]
     else:
         input_doc_ids = []
-    parent_run_id = None
-    try:
-        parent_run_id = row["parent_run_id"]
-    except (KeyError, IndexError):
-        parent_run_id = None
     return {
         "id": row["id"],
         "skill_id": row["skill_id"],
@@ -229,5 +206,4 @@ def get_run(db: Database, run_id: str) -> dict | None:
         "persist": bool(row["persist"]) if row["persist"] is not None else True,
         "result_text": row["result_text"],
         "user_prompt": row["user_prompt"],
-        "parent_run_id": parent_run_id,
     }

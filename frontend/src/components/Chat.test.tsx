@@ -54,7 +54,6 @@ function renderChat(
 }
 
 function selectDocuments(...titles: string[]) {
-  fireEvent.click(screen.getByRole('button', { name: 'Добавить документ' }))
   fireEvent.click(
     screen.getByRole('combobox', { name: 'Добавить документы в сессию' }),
   )
@@ -127,7 +126,7 @@ describe('Chat suggestion send', () => {
     const { onSend } = renderChat({ messages })
     selectDocuments('Устав')
 
-    expect(screen.getByText('· к отправке', { exact: false })).toBeTruthy()
+    expect(screen.getByLabelText('Убрать Устав')).toBeTruthy()
 
     fireEvent.click(
       screen.getByRole('button', { name: 'Переотправить это сообщение' }),
@@ -135,7 +134,7 @@ describe('Chat suggestion send', () => {
 
     expect(onSend).toHaveBeenCalledTimes(1)
     expect(onSend).toHaveBeenCalledWith('Старое сообщение')
-    expect(screen.getByText('· к отправке', { exact: false })).toBeTruthy()
+    expect(screen.getByLabelText('Убрать Устав')).toBeTruthy()
     expect(
       (screen.getByPlaceholderText('Сообщение планировщику…') as HTMLTextAreaElement)
         .value,

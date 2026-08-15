@@ -50,7 +50,6 @@ from catalog.skills.repo_run import (
     claim_run,
     create_run,
     get_run,
-    list_child_runs,
     set_output_doc_id,
 )
 from catalog.skills.repo_skill import get_skill
@@ -109,13 +108,14 @@ async def apply_endpoint(
 
 @router.get("/runs/{run_id}", response_model=RunOut)
 async def get_run_endpoint(run_id: str, db: Database = Depends(get_workspace_db)) -> RunOut:
-    import json
-
     row = get_run(db, run_id)
     if row is None:
         raise HTTPException(status_code=404, detail="run not found")
-    trace = json.loads(row["trace_json"]) if row["trace_json"] else None
-    children = list_child_runs(db, run_id)
+    trace: dict | None = None
+    if row["trace_json"]:
+        import json
+
+        trace = json.loads(row["trace_json"])
     return RunOut(
         id=row["id"],
         skill_id=row["skill_id"],
@@ -125,22 +125,6 @@ async def get_run_endpoint(run_id: str, db: Database = Depends(get_workspace_db)
         status=row["status"],
         trace=trace,
         result_text=row["result_text"],
-        parent_run_id=row.get("parent_run_id"),
-        children=[
-            RunOut(
-                id=c["id"],
-                skill_id=c["skill_id"],
-                input_doc_id=c["input_doc_id"],
-                input_doc_ids=c["input_doc_ids"],
-                output_doc_id=c["output_doc_id"],
-                status=c["status"],
-                trace=json.loads(c["trace_json"]) if c["trace_json"] else None,
-                result_text=c["result_text"],
-                parent_run_id=c.get("parent_run_id"),
-                children=[],
-            )
-            for c in children
-        ],
     )
 
 

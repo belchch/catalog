@@ -1,4 +1,4 @@
-import { useLayoutEffect, useRef, type ReactNode } from 'react'
+import { useLayoutEffect, useRef } from 'react'
 import type { RunStep } from '../hooks/useRunStream.ts'
 import {
   segmentTraceSteps,
@@ -12,34 +12,6 @@ function eventCountLabel(n: number): string {
   if (n10 === 1 && n100 !== 11) return `${n} событие`
   if (n10 >= 2 && n10 <= 4 && (n100 < 12 || n100 > 14)) return `${n} события`
   return `${n} событий`
-}
-
-function parseSkillToolPayload(raw: string | undefined): {
-  skillName?: string
-  skillId?: string
-  configHash?: string
-  text?: string
-  failures: string[]
-  ok: boolean
-} | null {
-  if (!raw) return null
-  try {
-    const data = JSON.parse(raw) as Record<string, unknown>
-    if (typeof data.skill_id !== 'string') return null
-    const failures = Array.isArray(data.verify_failures)
-      ? data.verify_failures.map(String)
-      : []
-    return {
-      skillId: data.skill_id,
-      skillName: typeof data.skill_name === 'string' ? data.skill_name : undefined,
-      configHash: typeof data.config_hash === 'string' ? data.config_hash : undefined,
-      text: typeof data.text === 'string' ? data.text : undefined,
-      failures,
-      ok: data.ok === true || data.status === 'ok',
-    }
-  } catch {
-    return null
-  }
 }
 
 function ScriptStep({ s }: { s: RunStep }) {
@@ -74,60 +46,6 @@ function ScriptStep({ s }: { s: RunStep }) {
           {s.error}
         </pre>
       )}
-    </li>
-  )
-}
-
-function NestedSkillNode({
-  call,
-  result,
-}: {
-  call?: RunStep
-  result: RunStep
-}) {
-  const payload = parseSkillToolPayload(result.result)
-  const ok = payload?.ok ?? result.ok
-  const title =
-    payload?.skillName ||
-    call?.text?.replace(/^→\s*/, '') ||
-    'Вложенный скилл'
-  return (
-    <li className="rounded border border-line bg-surface p-1.5">
-      <details open>
-        <summary className="flex cursor-pointer items-center gap-2 font-mono text-[11px] text-ink-muted">
-          <span className="min-w-0 truncate">вызов · {title}</span>
-          <span className="ml-auto flex shrink-0 items-center gap-1.5 text-ink-faint">
-            <span
-              aria-hidden="true"
-              className={ok ? 'text-success-ink' : 'text-danger-ink'}
-            >
-              {ok ? '✓' : '✗'}
-            </span>
-          </span>
-        </summary>
-        <ol className="mt-1 flex flex-col gap-1.5 border-l border-line pl-3">
-          {payload?.configHash && (
-            <li className="font-mono text-[11px] text-ink-faint">
-              pinned {payload.configHash}
-            </li>
-          )}
-          {payload?.text != null && (
-            <li className="font-mono text-[11px] text-ink-muted">
-              <details>
-                <summary className="cursor-pointer text-ink-faint">результат</summary>
-                <pre className="mt-1 overflow-x-auto whitespace-pre-wrap break-words rounded bg-surface-muted p-1.5">
-                  {payload.text}
-                </pre>
-              </details>
-            </li>
-          )}
-          {payload && payload.failures.length > 0 && (
-            <li className="font-mono text-[11px] text-danger-ink">
-              verify: {payload.failures.join('; ')}
-            </li>
-          )}
-        </ol>
-      </details>
     </li>
   )
 }
@@ -222,29 +140,13 @@ function TraceStepGroup({
           <span className="sr-only">{statusWord}</span>
         </summary>
         <ol className="mt-1 flex flex-col gap-1.5 border-l border-line pl-3">
-          {renderStepList(items)}
+          {items.map((s) => (
+            <TraceItem key={s.id} s={s} />
+          ))}
         </ol>
       </details>
     </li>
   )
-}
-
-function renderStepList(steps: RunStep[]): ReactNode[] {
-  const nodes: ReactNode[] = []
-  for (let i = 0; i < steps.length; i += 1) {
-    const s = steps[i]
-    if (s.kind === 'tool_result' && parseSkillToolPayload(s.result) != null) {
-      const prev = i > 0 ? steps[i - 1] : undefined
-      const call = prev?.kind === 'tool_call' ? prev : undefined
-      if (call && nodes.length > 0) {
-        nodes.pop()
-      }
-      nodes.push(<NestedSkillNode key={s.id} call={call} result={s} />)
-      continue
-    }
-    nodes.push(<TraceItem key={s.id} s={s} />)
-  }
-  return nodes
 }
 
 export function TraceSteps({
@@ -264,25 +166,6 @@ export function TraceSteps({
     <ol className="flex flex-col gap-1.5">
       {segments.map((seg) => {
         if (seg.kind === 'flat') {
-          const idx = steps.findIndex((s) => s.id === seg.item.id)
-          const prev = idx > 0 ? steps[idx - 1] : undefined
-          if (
-            seg.item.kind === 'tool_result' &&
-            parseSkillToolPayload(seg.item.result) != null
-          ) {
-            const call = prev?.kind === 'tool_call' ? prev : undefined
-            return (
-              <NestedSkillNode key={seg.item.id} call={call} result={seg.item} />
-            )
-          }
-          if (
-            seg.item.kind === 'tool_call' &&
-            idx + 1 < steps.length &&
-            steps[idx + 1].kind === 'tool_result' &&
-            parseSkillToolPayload(steps[idx + 1].result) != null
-          ) {
-            return null
-          }
           return <TraceItem key={seg.item.id} s={seg.item} />
         }
         groupN += 1

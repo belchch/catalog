@@ -7,10 +7,6 @@ import {
   type SkillMetaPatch,
 } from '../api.ts'
 import { StepsList } from './StepsList.tsx'
-import {
-  VerifyChecksPicker,
-  type VerifyCheckDraft,
-} from './VerifyChecksPicker.tsx'
 
 type InputArity = 1 | 2 | null
 type SectionSaving = ArtifactType | null
@@ -21,7 +17,7 @@ interface MetaDraft {
   kind: SkillKind
   inputArity: InputArity
   allowedTools: string
-  verifyChecks: VerifyCheckDraft[]
+  verifyChecks: string
 }
 
 interface ArtifactsPanelProps {
@@ -55,7 +51,7 @@ const EMPTY_META: MetaDraft = {
   kind: 'agent',
   inputArity: 1,
   allowedTools: '',
-  verifyChecks: [],
+  verifyChecks: '',
 }
 
 const fieldCls = 'field'
@@ -79,20 +75,16 @@ function parseMetaContent(content: string): MetaDraft {
     const tools = Array.isArray(parsed.allowed_tools)
       ? (parsed.allowed_tools as unknown[]).map(String).join(', ')
       : ''
-    const checks: VerifyCheckDraft[] = []
-    if (Array.isArray(parsed.verify_checks)) {
-      for (const c of parsed.verify_checks as unknown[]) {
-        if (!c || typeof c !== 'object' || !('check' in c)) continue
-        const row = c as { check: unknown; params?: unknown }
-        const check = String(row.check)
-        if (!check) continue
-        const params =
-          row.params && typeof row.params === 'object'
-            ? (row.params as Record<string, unknown>)
-            : undefined
-        checks.push({ check, params })
-      }
-    }
+    const checks = Array.isArray(parsed.verify_checks)
+      ? (parsed.verify_checks as unknown[])
+          .map((c) =>
+            c && typeof c === 'object' && 'check' in c
+              ? String((c as { check: unknown }).check)
+              : '',
+          )
+          .filter(Boolean)
+          .join(', ')
+      : ''
     return {
       name: typeof parsed.name === 'string' ? parsed.name : '',
       description: typeof parsed.description === 'string' ? parsed.description : '',
@@ -111,11 +103,11 @@ function metaToPatch(draft: MetaDraft): SkillMetaPatch {
     .split(',')
     .map((s) => s.trim())
     .filter(Boolean)
-  const checks = draft.verifyChecks.map((c) =>
-    c.params && Object.keys(c.params).length > 0
-      ? { check: c.check, params: c.params }
-      : { check: c.check },
-  )
+  const checks = draft.verifyChecks
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean)
+    .map((check) => ({ check }))
   return {
     name: draft.name.trim(),
     description: draft.description,
@@ -624,17 +616,18 @@ export function ArtifactsPanel({
               )}
             </label>
             <label className="mb-1 block text-[11px] text-ink-faint">
-              Проверка результата
-              <div className="mt-1">
-                <VerifyChecksPicker
-                  value={metaDraft.verifyChecks}
-                  disabled={inputsDisabled}
-                  onChange={(next) => {
-                    setMetaDraft((d) => ({ ...d, verifyChecks: next }))
-                    clearHighlightIf('meta')
-                  }}
-                />
-              </div>
+              verify_checks
+              <input
+                type="text"
+                className={`mt-1 ${fieldCls}`}
+                value={metaDraft.verifyChecks}
+                disabled={inputsDisabled}
+                placeholder="non_empty, markdown_well_formed"
+                onChange={(e) => {
+                  setMetaDraft((d) => ({ ...d, verifyChecks: e.target.value }))
+                  clearHighlightIf('meta')
+                }}
+              />
             </label>
             {(nameClientError || metaArt?.error) && (
               <p id="meta-error" className="mt-1 text-[11px] text-danger-ink">

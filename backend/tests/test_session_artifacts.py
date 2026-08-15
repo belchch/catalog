@@ -96,32 +96,6 @@ def test_save_skill_script_valid(mem_db: Database) -> None:
     assert row.content == code
 
 
-def test_set_skill_meta_rejects_min_length_without_min(mem_db: Database) -> None:
-    session_id = create_session(mem_db)
-    tools = build_artifact_tools(
-        mem_db, session_id, available_tools=["read_document"]
-    )
-    _, set_meta = tools.get("set_skill_meta")
-    check_prop = tools.get("set_skill_meta")[0].parameters["properties"][
-        "verify_checks"
-    ]["items"]["properties"]["check"]
-    assert "enum" in check_prop
-    assert "non_empty" in check_prop["enum"]
-
-    async def _run():
-        return await set_meta(
-            name="BadMin",
-            description="x",
-            kind="agent",
-            allowed_tools=["read_document"],
-            verify_checks=[{"check": "min_length"}],
-        )
-
-    result = asyncio.run(_run())
-    assert result["ok"] is False
-    assert "min_length" in (result.get("error") or "")
-
-
 def test_set_skill_meta_rejects_empty_name(mem_db: Database) -> None:
     session_id = create_session(mem_db)
     tools = build_artifact_tools(

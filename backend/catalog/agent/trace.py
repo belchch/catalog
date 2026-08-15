@@ -6,7 +6,7 @@ from dataclasses import dataclass, field
 
 @dataclass
 class TraceEntry:
-    # "llm" | "tool_call" | "tool_result" | "script" | "verify" | "error"
+    # "llm" | "tool_call" | "tool_result" | "error"
     kind: str
     iteration: int
     data: dict

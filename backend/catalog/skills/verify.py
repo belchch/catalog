@@ -42,99 +42,21 @@ def registered_checks() -> list[str]:
     return list(_REGISTRY.keys())
 
 
-def _is_custom_check(check_id: str) -> bool:
-    return check_id == "custom" or check_id.startswith("custom:")
-
-
-def _custom_check_id(vc: VerifyCheck) -> str | None:
-    if vc.check.startswith("custom:"):
-        return vc.check.split(":", 1)[1] or None
-    if vc.check == "custom":
-        raw = vc.params.get("id")
-        return str(raw) if raw else None
-    return None
-
-
 def run_verify(text: str, checks: list[VerifyCheck]) -> VerifyResult:
-    """Run deterministic ``checks`` over ``text``; fail-closed on unknown ids.
+    """Run all ``checks`` over ``text``; fail-closed on unknown ids.
 
-    Custom LLM checks (``custom`` / ``custom:<id>``) are ignored here — use
-    :func:`run_verify_async` when a provider is available (ADR-0020).
+    ``checks`` items are :class:`~catalog.skills.config.VerifyCheck` objects
+    exposing ``.check`` and ``.params``.
     """
     failures: list[str] = []
     for c in checks:
-        if _is_custom_check(c.check):
-            continue
         fn = _REGISTRY.get(c.check)
         if fn is None:
+            # Fail-closed: an unknown check id must never pass.
             return VerifyResult(passed=False, failures=[f"unknown check: {c.check}"])
         reason = fn(text, c.params)
         if reason is not None:
             failures.append(f"{c.check}: {reason}")
-    return VerifyResult(passed=not failures, failures=failures)
-
-
-async def run_verify_async(
-    text: str,
-    checks: list[VerifyCheck],
-    *,
-    db=None,
-    provider=None,
-    model: str = "",
-) -> VerifyResult:
-    """Deterministic checks first; LLM judges only if those pass (ADR-0020)."""
-    from catalog.llm.base import Message
-    from catalog.storage.repo_custom_check import get_custom_check
-
-    det = [c for c in checks if not _is_custom_check(c.check)]
-    custom = [c for c in checks if _is_custom_check(c.check)]
-    base = run_verify(text, det)
-    if not base.passed or not custom:
-        return base
-    if provider is None or db is None:
-        return VerifyResult(
-            passed=False,
-            failures=base.failures
-            + ["custom check requires LLM provider and workspace db"],
-        )
-
-    failures = list(base.failures)
-    for c in custom:
-        cid = _custom_check_id(c)
-        if not cid:
-            failures.append("custom: missing check id")
-            continue
-        row = get_custom_check(db, cid)
-        if row is None:
-            failures.append(f"unknown custom check: {cid!r}")
-            continue
-        judge_prompt = (
-            "Ты проверяешь результат работы скилла по одному критерию.\n"
-            "Критерий (утверждение, которое должно быть верно):\n"
-            f"{row.prompt}\n\n"
-            "Результат для проверки:\n"
-            f"{text}\n\n"
-            "Ответь строго одной строкой: PASS или FAIL: <краткая причина>."
-        )
-        try:
-            resp = await provider.complete(
-                model or "openai/gpt-4o-mini",
-                [Message(role="user", content=judge_prompt)],
-                None,
-                0.0,
-            )
-            answer = (resp.content or "").strip()
-        except Exception as exc:
-            failures.append(f"custom:{cid}: judge error: {exc}")
-            continue
-        upper = answer.upper()
-        if upper.startswith("PASS"):
-            continue
-        if upper.startswith("FAIL"):
-            reason = answer.split(":", 1)[1].strip() if ":" in answer else answer
-            failures.append(f"custom:{row.name}: {reason or 'failed'}")
-        else:
-            failures.append(f"custom:{row.name}: unexpected judge reply: {answer[:120]}")
     return VerifyResult(passed=not failures, failures=failures)
 
 

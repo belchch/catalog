@@ -48,10 +48,8 @@ from catalog.llm.timeout import (
 )
 from catalog.agent.registry import ToolRegistry
 from catalog.skills.artifact_tools import (
-    VERIFY_CHECK_PARAMS_HINT,
     parse_steps_content,
     validate_pipeline_steps,
-    validate_verify_check_entry,
 )
 from catalog.skills.config import (
     SKILL_KINDS,
@@ -242,15 +240,11 @@ _BUILD_SKILL_PARAMETERS = {
             "items": {
                 "type": "object",
                 "properties": {
-                    "check": {
-                        "type": "string",
-                        "enum": registered_checks(),
-                    },
+                    "check": {"type": "string"},
                     "params": {"type": "object"},
                 },
                 "required": ["check"],
             },
-            "description": VERIFY_CHECK_PARAMS_HINT,
         },
         "output_kind": {"type": "string"},
     },
@@ -259,10 +253,7 @@ _BUILD_SKILL_PARAMETERS = {
 
 BUILD_SKILL_TOOL = ToolSpec(
     name="build_skill",
-    description=(
-        "Build a skill configuration (SkillConfig) from the session history. "
-        + VERIFY_CHECK_PARAMS_HINT
-    ),
+    description="Build a skill configuration (SkillConfig) from the session history.",
     parameters=_BUILD_SKILL_PARAMETERS,
 )
 
@@ -403,13 +394,10 @@ def _validate_config(
         for name in config.allowed_tools:
             if name not in available_tools:
                 errors.append(f"unknown tool: {name!r}")
+    # Verify-check ids are validated for both kinds (a script may have checks).
     for vc in config.verify_checks:
-        errors.extend(
-            validate_verify_check_entry(
-                {"check": vc.check, "params": dict(vc.params)},
-                available_checks,
-            )
-        )
+        if vc.check not in available_checks:
+            errors.append(f"unknown verify check: {vc.check!r}")
     return errors
 
 
@@ -1143,107 +1131,3 @@ async def delete_skill_endpoint(
 ) -> None:
     if not delete_skill(db, skill_id):
         raise HTTPException(status_code=404, detail="skill not found")
-
-
-@router.get("/custom-checks")
-async def list_custom_checks_endpoint(
-    db: Database = Depends(get_workspace_db),
-) -> list[dict]:
-    from catalog.storage.repo_custom_check import list_custom_checks
-
-    return [
-        {
-            "id": r.id,
-            "name": r.name,
-            "prompt": r.prompt,
-            "hidden": r.hidden,
-            "created_at": r.created_at,
-        }
-        for r in list_custom_checks(db)
-    ]
-
-
-@router.get("/verify-checks")
-async def list_verify_checks_endpoint() -> dict:
-    return {
-        "builtin": registered_checks(),
-        "labels": {
-            "non_empty": "Не пустой",
-            "min_length": "Минимальная длина",
-            "max_length": "Максимальная длина",
-            "regex_matches": "Совпадение с regex",
-            "no_leftover_placeholders": "Без плейсхолдеров",
-            "markdown_well_formed": "Корректный markdown",
-            "has_section": "Есть раздел",
-            "has_field": "Есть поле",
-            "table_parses": "Таблица парсится",
-        },
-    }
-
-
-@router.post("/custom-checks")
-async def create_custom_check_endpoint(
-    body: dict,
-    db: Database = Depends(get_workspace_db),
-) -> dict:
-    from catalog.storage.repo_custom_check import create_custom_check
-
-    name = body.get("name") if isinstance(body, dict) else None
-    prompt = body.get("prompt") if isinstance(body, dict) else None
-    if not isinstance(name, str) or not name.strip():
-        raise HTTPException(status_code=422, detail="name must be non-empty")
-    if not isinstance(prompt, str) or not prompt.strip():
-        raise HTTPException(status_code=422, detail="prompt must be non-empty")
-    row = create_custom_check(db, name=name, prompt=prompt)
-    return {
-        "id": row.id,
-        "name": row.name,
-        "prompt": row.prompt,
-        "hidden": row.hidden,
-        "created_at": row.created_at,
-    }
-
-
-@router.post("/custom-checks/trial")
-async def trial_custom_check_endpoint(
-    body: dict,
-    db: Database = Depends(get_workspace_db),
-    provider=Depends(get_provider),
-    settings: Settings = Depends(get_settings),
-) -> dict:
-    from catalog.skills.config import VerifyCheck
-    from catalog.skills.verify import run_verify_async
-    from catalog.storage.repo_custom_check import create_custom_check, hide_custom_check
-
-    prompt = body.get("prompt") if isinstance(body, dict) else None
-    sample = body.get("sample") if isinstance(body, dict) else None
-    if not isinstance(prompt, str) or not prompt.strip():
-        raise HTTPException(status_code=422, detail="prompt must be non-empty")
-    if not isinstance(sample, str):
-        raise HTTPException(status_code=422, detail="sample must be a string")
-    tmp = create_custom_check(db, name="__trial__", prompt=prompt)
-    try:
-        result = await run_verify_async(
-            sample,
-            [VerifyCheck(check=f"custom:{tmp.id}")],
-            db=db,
-            provider=provider,
-            model=settings.default_model,
-        )
-        return {
-            "passed": result.passed,
-            "failures": result.failures,
-        }
-    finally:
-        hide_custom_check(db, tmp.id)
-
-
-@router.post("/custom-checks/{check_id}/hide", status_code=204)
-async def hide_custom_check_endpoint(
-    check_id: str,
-    db: Database = Depends(get_workspace_db),
-) -> None:
-    from catalog.storage.repo_custom_check import hide_custom_check
-
-    if not hide_custom_check(db, check_id):
-        raise HTTPException(status_code=404, detail="custom check not found")
