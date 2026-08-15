@@ -342,6 +342,16 @@ async def _apply_core(
             verify_event = VerifyEvent(iteration=1, result=result)
             yield verify_event
             log_agent_event(verify_event)
+            trace.entries.append(
+                TraceEntry(
+                    kind="verify",
+                    iteration=1,
+                    data={
+                        "passed": result.passed,
+                        "failures": list(result.failures),
+                    },
+                )
+            )
             passed = result.passed
         elif skill.kind == "pipeline":
             current: PipelineValue | None = None
@@ -461,6 +471,16 @@ async def _apply_core(
             verify_event = VerifyEvent(iteration=1, result=result)
             yield verify_event
             log_agent_event(verify_event)
+            trace.entries.append(
+                TraceEntry(
+                    kind="verify",
+                    iteration=1,
+                    data={
+                        "passed": result.passed,
+                        "failures": list(result.failures),
+                    },
+                )
+            )
             passed = result.passed
         else:
             # ---- Agent path (ADR-0001/0002) ----
@@ -537,6 +557,16 @@ async def _apply_core(
                 verify_event = VerifyEvent(iteration=r + 1, result=result)
                 yield verify_event
                 log_agent_event(verify_event)
+                trace.entries.append(
+                    TraceEntry(
+                        kind="verify",
+                        iteration=r + 1,
+                        data={
+                            "passed": result.passed,
+                            "failures": list(result.failures),
+                        },
+                    )
+                )
 
                 if result.passed:
                     passed = True

@@ -1726,6 +1726,10 @@ def test_apply_skill_run(client, provider, db) -> None:
     assert run["status"] == "ok"
     assert run["output_doc_id"] == finish["output_doc_id"]
     assert run["trace"] is not None
+    saved_verify = [e for e in run["trace"] if e.get("kind") == "verify"]
+    assert saved_verify
+    assert saved_verify[-1]["data"]["passed"] is True
+    assert saved_verify[-1]["data"]["failures"] == []
 
 
 def test_apply_creates_pending_run_before_stream(client, db) -> None:
