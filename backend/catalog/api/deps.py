@@ -72,6 +72,13 @@ def ws_get(websocket: WebSocket, name: str):
     return getattr(websocket.app.state, name)
 
 
+def _with_step_id(frame: dict, event) -> dict:
+    step_id = getattr(event, "step_id", None)
+    if step_id:
+        frame["step_id"] = step_id
+    return frame
+
+
 def agent_event_to_frame(event) -> dict | None:
     """Map an :data:`AgentEvent` to a WS JSON frame.
 
@@ -80,31 +87,40 @@ def agent_event_to_frame(event) -> dict | None:
     finish is emitted separately from the persisted run row).
     """
     if isinstance(event, StepEvent):
-        return {"type": "step", "iteration": event.iteration}
+        return _with_step_id({"type": "step", "iteration": event.iteration}, event)
     if isinstance(event, TokenEvent):
-        return {"type": "token", "delta": event.delta}
+        return _with_step_id({"type": "token", "delta": event.delta}, event)
     if isinstance(event, ToolCallEvent):
-        return {
-            "type": "tool_call",
-            "id": event.id,
-            "name": event.name,
-            "arguments": event.arguments,
-        }
+        return _with_step_id(
+            {
+                "type": "tool_call",
+                "id": event.id,
+                "name": event.name,
+                "arguments": event.arguments,
+            },
+            event,
+        )
     if isinstance(event, ToolResultEvent):
-        return {
-            "type": "tool_result",
-            "id": event.id,
-            "name": event.name,
-            "ok": event.ok,
-            "result": _snip_result(event.result),
-        }
+        return _with_step_id(
+            {
+                "type": "tool_result",
+                "id": event.id,
+                "name": event.name,
+                "ok": event.ok,
+                "result": _snip_result(event.result),
+            },
+            event,
+        )
     if isinstance(event, VerifyEvent):
-        return {
-            "type": "verify",
-            "iteration": event.iteration,
-            "passed": event.result.passed,
-            "failures": list(event.result.failures),
-        }
+        return _with_step_id(
+            {
+                "type": "verify",
+                "iteration": event.iteration,
+                "passed": event.result.passed,
+                "failures": list(event.result.failures),
+            },
+            event,
+        )
     if isinstance(event, RunMetaEvent):
         return {
             "type": "meta",
@@ -124,9 +140,9 @@ def agent_event_to_frame(event) -> dict | None:
             frame["duration"] = event.duration
         if event.error is not None:
             frame["error"] = event.error
-        return frame
+        return _with_step_id(frame, event)
     if isinstance(event, ReasoningEvent):
-        return {"type": "reasoning", "text": _snip(event.text)}
+        return _with_step_id({"type": "reasoning", "text": _snip(event.text)}, event)
     return None
 
 

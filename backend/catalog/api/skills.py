@@ -19,6 +19,7 @@ skill drops back to ``draft``.
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import ValidationError
@@ -46,11 +47,18 @@ from catalog.llm.timeout import (
     llm_timeout_context,
 )
 from catalog.agent.registry import ToolRegistry
+from catalog.skills.artifact_tools import (
+    parse_steps_content,
+    validate_pipeline_steps,
+)
 from catalog.skills.config import (
+    SKILL_KINDS,
     SkillConfig,
     VerifyCheck,
     compute_tags,
     ensure_read_document_tool,
+    pipeline_step_to_dict,
+    pipeline_steps_from_value,
 )
 from catalog.skills.repo_skill import (
     SkillRecord,
@@ -321,7 +329,7 @@ def _args_to_config(args: dict, default_model: str) -> SkillConfig:
         )
         for vc in (args.get("verify_checks") or [])
     ]
-    if kind == "script":
+    if kind in ("script", "pipeline"):
         allowed_tools: list[str] = []
     else:
         allowed_tools = ensure_read_document_tool(
@@ -344,6 +352,7 @@ def _args_to_config(args: dict, default_model: str) -> SkillConfig:
         input_arity=args.get("input_arity"),
         provider=args.get("provider") or "",
         reasoning=args.get("reasoning") or "",
+        steps=pipeline_steps_from_value(args.get("steps")),
     )
 
 
@@ -358,14 +367,18 @@ def _validate_config(
     checks apply. Verify-check ids are validated for both kinds.
     """
     errors: list[str] = []
-    if config.kind not in ("agent", "script"):
-        errors.append(f"unknown skill kind: {config.kind!r} (expected 'agent' or 'script')")
+    if config.kind not in SKILL_KINDS:
+        errors.append(
+            f"unknown skill kind: {config.kind!r} (expected 'agent', 'script', or 'pipeline')"
+        )
         return errors
     if config.kind == "script":
         try:
             validate_script(config.code)
         except ScriptValidationError as exc:
             errors.append(str(exc))
+    elif config.kind == "pipeline":
+        errors.extend(validate_pipeline_steps(config.steps, available_tools))
     else:
         for name in config.allowed_tools:
             if name not in available_tools:
@@ -455,6 +468,61 @@ def _build_skill_from_artifacts(
             )
         args["code"] = script.content
         args["system_prompt"] = ""
+    elif kind == "pipeline":
+        steps_row = get_artifact(db, session_id, "steps")
+        if steps_row is None:
+            raise HTTPException(
+                status_code=422,
+                detail="steps artifact is missing; save steps before building",
+            )
+        if not steps_row.is_valid:
+            raise HTTPException(
+                status_code=422,
+                detail=f"steps are invalid: {steps_row.error or 'validation failed'}",
+            )
+        parsed, parse_errors = parse_steps_content(steps_row.content)
+        if parse_errors:
+            raise HTTPException(
+                status_code=422,
+                detail="steps artifact is invalid: " + "; ".join(parse_errors),
+            )
+        script = get_artifact(db, session_id, "script")
+        prompt = get_artifact(db, session_id, "prompt")
+        filled = []
+        script_used = False
+        prompt_used = False
+        for step in parsed:
+            if (
+                step.type == "script"
+                and not step.code.strip()
+                and script is not None
+                and not script_used
+            ):
+                if not script.is_valid:
+                    raise HTTPException(
+                        status_code=422,
+                        detail=f"script is invalid: {script.error or 'validation failed'}",
+                    )
+                step = replace(step, code=script.content)
+                script_used = True
+            if (
+                step.type == "llm"
+                and not step.system_prompt.strip()
+                and prompt is not None
+                and not prompt_used
+            ):
+                if not prompt.is_valid:
+                    raise HTTPException(
+                        status_code=422,
+                        detail=f"prompt is invalid: {prompt.error or 'validation failed'}",
+                    )
+                step = replace(step, system_prompt=prompt.content)
+                prompt_used = True
+            filled.append(step)
+        args["steps"] = [pipeline_step_to_dict(s) for s in filled]
+        args["code"] = ""
+        args["system_prompt"] = ""
+        args["allowed_tools"] = []
     else:
         prompt = get_artifact(db, session_id, "prompt")
         if prompt is None or not prompt.content.strip():
@@ -712,6 +780,19 @@ def seed_session_artifacts_from_skill(
         is_valid=True,
         error=None,
     )
+    if config.kind == "pipeline" or config.steps:
+        upsert_artifact(
+            db,
+            session_id=session_id,
+            type="steps",
+            content=json.dumps(
+                {"steps": [pipeline_step_to_dict(s) for s in config.steps]},
+                ensure_ascii=False,
+            ),
+            source="user",
+            is_valid=True,
+            error=None,
+        )
     if config.system_prompt:
         upsert_artifact(
             db,
@@ -722,6 +803,18 @@ def seed_session_artifacts_from_skill(
             is_valid=True,
             error=None,
         )
+    elif config.kind == "pipeline":
+        first_llm = next((s for s in config.steps if s.type == "llm"), None)
+        if first_llm is not None and first_llm.system_prompt:
+            upsert_artifact(
+                db,
+                session_id=session_id,
+                type="prompt",
+                content=first_llm.system_prompt,
+                source="user",
+                is_valid=True,
+                error=None,
+            )
     if config.code:
         is_valid = True
         error: str | None = None
@@ -739,6 +832,25 @@ def seed_session_artifacts_from_skill(
             is_valid=is_valid,
             error=error,
         )
+    elif config.kind == "pipeline":
+        first_script = next((s for s in config.steps if s.type == "script"), None)
+        if first_script is not None and first_script.code:
+            is_valid = True
+            error: str | None = None
+            try:
+                validate_script(first_script.code)
+            except ScriptValidationError as exc:
+                is_valid = False
+                error = str(exc)
+            upsert_artifact(
+                db,
+                session_id=session_id,
+                type="script",
+                content=first_script.code,
+                source="user",
+                is_valid=is_valid,
+                error=error,
+            )
 
 
 def _preview(config: SkillConfig) -> SkillPreview:
@@ -768,6 +880,9 @@ def _format_skill_for_edit(record: SkillRecord) -> str:
         lines.append(f"- allowed_tools: {', '.join(config.allowed_tools) or '(нет)'}")
         if config.non_determinism_reason:
             lines.append(f"- non_determinism_reason: {config.non_determinism_reason}")
+    if config.kind == "pipeline" and config.steps:
+        step_ids = ", ".join(s.id for s in config.steps) or "(нет)"
+        lines.append(f"- steps: {step_ids}")
     lines.append(
         f"- input_arity: {config.input_arity if config.input_arity is not None else 'любое'}"
     )
@@ -781,7 +896,7 @@ def _format_skill_for_edit(record: SkillRecord) -> str:
     lines.append(
         "Обсуди с пользователем изменения и обновляй черновик инструментами "
         "set_skill_meta и save_skill_prompt (для agent) или save_skill_script "
-        "(для script)."
+        "(для script) или save_skill_steps (для pipeline)."
     )
     return "\n".join(lines)
 

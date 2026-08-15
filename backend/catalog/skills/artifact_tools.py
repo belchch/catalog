@@ -6,6 +6,14 @@ from typing import Any
 
 from catalog.agent.registry import ToolRegistry
 from catalog.llm.base import ToolSpec
+from catalog.skills.config import (
+    PIPELINE_STEP_INPUTS,
+    PIPELINE_STEP_TYPES,
+    SKILL_KINDS,
+    PipelineStep,
+    pipeline_step_to_dict,
+    pipeline_steps_from_value,
+)
 from catalog.skills.script_runner import (
     SCRIPT_CODE_CONTRACT_EN,
     ScriptValidationError,
@@ -51,7 +59,7 @@ def _validate_meta_fields(
     available_checks: list[str],
 ) -> list[str]:
     errors: list[str] = []
-    if kind not in ("agent", "script"):
+    if kind not in SKILL_KINDS:
         errors.append(f"unknown skill kind: {kind!r}")
         return errors
     if kind == "agent":
@@ -63,6 +71,51 @@ def _validate_meta_fields(
         if not check_id or check_id not in available_checks:
             errors.append(f"unknown verify check: {check_id!r}")
     return errors
+
+
+def validate_pipeline_steps(
+    steps: list[PipelineStep], available_tools: list[str]
+) -> list[str]:
+    errors: list[str] = []
+    if not steps:
+        errors.append("pipeline skill must have at least one step")
+        return errors
+    seen: list[str] = []
+    for step in steps:
+        label = step.id or "(missing id)"
+        if not step.id:
+            errors.append("pipeline step id must be non-empty")
+        elif step.id in seen:
+            errors.append(f"duplicate pipeline step id: {step.id!r}")
+        else:
+            seen.append(step.id)
+        if step.type not in PIPELINE_STEP_TYPES:
+            errors.append(f"step {label}: unknown type {step.type!r}")
+        if step.input not in PIPELINE_STEP_INPUTS:
+            errors.append(f"step {label}: unknown input {step.input!r}")
+        if step.type == "script":
+            try:
+                validate_script(step.code)
+            except ScriptValidationError as exc:
+                errors.append(f"step {label}: {exc}")
+        elif step.type == "llm":
+            if not step.system_prompt.strip():
+                errors.append(f"step {label}: llm prompt is empty")
+            for name in step.allowed_tools:
+                if name not in available_tools:
+                    errors.append(f"step {label}: unknown tool: {name!r}")
+    return errors
+
+
+def parse_steps_content(content: str) -> tuple[list[PipelineStep], list[str]]:
+    try:
+        data = json.loads(content)
+    except (TypeError, ValueError, json.JSONDecodeError) as exc:
+        return [], [f"steps must be JSON: {exc}"]
+    try:
+        return pipeline_steps_from_value(data), []
+    except (TypeError, ValueError) as exc:
+        return [], [str(exc)]
 
 
 def build_artifact_tools(
@@ -167,6 +220,30 @@ def build_artifact_tools(
         await _notify()
         return {"ok": is_valid, "artifact": _artifact_payload(row), "error": error}
 
+    async def _save_skill_steps(*, steps: list[dict] | dict) -> dict[str, Any]:
+        errors: list[str] = []
+        parsed: list[PipelineStep] = []
+        try:
+            parsed = pipeline_steps_from_value(steps)
+        except (TypeError, ValueError) as exc:
+            errors.append(str(exc))
+        if not errors:
+            errors.extend(validate_pipeline_steps(parsed, available_tools))
+        payload = {"steps": [pipeline_step_to_dict(s) for s in parsed]}
+        is_valid = not errors
+        error = "; ".join(errors) if errors else None
+        row = upsert_artifact(
+            db,
+            session_id=session_id,
+            type="steps",
+            content=json.dumps(payload, ensure_ascii=False),
+            source="llm",
+            is_valid=is_valid,
+            error=error,
+        )
+        await _notify()
+        return {"ok": is_valid, "artifact": _artifact_payload(row), "error": error}
+
     async def _read_skill_draft() -> dict[str, Any]:
         rows = list_artifacts(db, session_id)
         out: dict[str, Any] = {
@@ -224,15 +301,19 @@ def build_artifact_tools(
             name="set_skill_meta",
             description=(
                 "Set skill metadata for this session: name, description, kind "
-                "(agent|script), optional input_arity, allowed_tools, "
-                "verify_checks. Call when kind/name are clear."
+                "(agent|script|pipeline), optional input_arity, allowed_tools, "
+                "verify_checks. For pipeline, allowed_tools belong on steps, "
+                "not here. Call when kind/name are clear."
             ),
             parameters={
                 "type": "object",
                 "properties": {
                     "name": {"type": "string"},
                     "description": {"type": "string"},
-                    "kind": {"type": "string", "enum": ["agent", "script"]},
+                    "kind": {
+                        "type": "string",
+                        "enum": ["agent", "script", "pipeline"],
+                    },
                     "input_arity": {"type": ["integer", "null"]},
                     "allowed_tools": {
                         "type": "array",
@@ -257,10 +338,57 @@ def build_artifact_tools(
     )
     reg.register(
         ToolSpec(
+            name="save_skill_steps",
+            description=(
+                "Save the pipeline steps draft for this session. Each step "
+                "has id, type (script|llm), input (documents|previous). "
+                "script steps need code; llm steps need system_prompt, "
+                "optional model/provider/reasoning/allowed_tools. "
+                "Call after set_skill_meta(kind=pipeline)."
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "steps": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "id": {"type": "string"},
+                                "type": {
+                                    "type": "string",
+                                    "enum": ["script", "llm"],
+                                },
+                                "input": {
+                                    "type": "string",
+                                    "enum": ["documents", "previous"],
+                                },
+                                "code": {"type": "string"},
+                                "system_prompt": {"type": "string"},
+                                "prompt": {"type": "string"},
+                                "allowed_tools": {
+                                    "type": "array",
+                                    "items": {"type": "string"},
+                                },
+                                "model": {"type": "string"},
+                                "provider": {"type": "string"},
+                                "reasoning": {"type": "string"},
+                            },
+                            "required": ["id", "type"],
+                        },
+                    }
+                },
+                "required": ["steps"],
+            },
+        ),
+        _save_skill_steps,
+    )
+    reg.register(
+        ToolSpec(
             name="read_skill_draft",
             description=(
                 "Read the current session skill draft artifacts (prompt, "
-                "script, meta)."
+                "script, meta, steps)."
             ),
             parameters={"type": "object", "properties": {}},
         ),

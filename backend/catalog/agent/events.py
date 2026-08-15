@@ -14,6 +14,7 @@ class TokenEvent:
     """A streamed text chunk."""
 
     delta: str
+    step_id: str | None = None
 
 
 @dataclass
@@ -21,6 +22,7 @@ class ToolCallEvent:
     id: str
     name: str
     arguments: dict
+    step_id: str | None = None
 
 
 @dataclass
@@ -30,6 +32,7 @@ class ToolResultEvent:
     ok: bool
     # ok=True -> tool return value; ok=False -> error string.
     result: Any | str
+    step_id: str | None = None
 
 
 @dataclass
@@ -37,6 +40,7 @@ class StepEvent:
     """Emitted at the start of each loop iteration."""
 
     iteration: int
+    step_id: str | None = None
 
 
 @dataclass
@@ -47,6 +51,7 @@ class FinishEvent:
     # True when the loop hit max_iterations without a final answer.
     capped: bool
     usage: dict
+    step_id: str | None = None
 
 
 @dataclass
@@ -59,6 +64,7 @@ class VerifyEvent:
 
     iteration: int
     result: VerifyResult
+    step_id: str | None = None
 
 
 @dataclass
@@ -91,6 +97,7 @@ class ScriptEvent:
     return_value: str | None = None
     duration: float | None = None
     error: str | None = None
+    step_id: str | None = None
 
 
 @dataclass
@@ -103,6 +110,7 @@ class ReasoningEvent:
     """
 
     text: str
+    step_id: str | None = None
 
 
 AgentEvent = (

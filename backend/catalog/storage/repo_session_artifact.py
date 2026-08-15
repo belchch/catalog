@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 
 from catalog.storage.db import Database
 
-ARTIFACT_TYPES = ("prompt", "script", "meta")
+ARTIFACT_TYPES = ("prompt", "script", "meta", "steps")
 ARTIFACT_SOURCES = ("llm", "user")
 
 
@@ -100,7 +100,7 @@ def list_artifacts(db: Database, session_id: str) -> list[ArtifactRow]:
             "SELECT session_id, type, content, is_valid, error, source, updated_at "
             "FROM session_artifact WHERE session_id = ? "
             "ORDER BY CASE type WHEN 'meta' THEN 0 WHEN 'prompt' THEN 1 "
-            "WHEN 'script' THEN 2 ELSE 3 END",
+            "WHEN 'script' THEN 2 WHEN 'steps' THEN 3 ELSE 4 END",
             (session_id,),
         ).fetchall()
     return [_row_to_artifact(r) for r in rows]

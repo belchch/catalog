@@ -304,8 +304,8 @@ class SkillMetaPatchRequest(BaseModel):
     @field_validator("kind")
     @classmethod
     def _allowed_kind(cls, value: str) -> str:
-        if value not in ("agent", "script"):
-            raise ValueError("kind must be 'agent' or 'script'")
+        if value not in ("agent", "script", "pipeline"):
+            raise ValueError("kind must be 'agent', 'script', or 'pipeline'")
         return value
 
     @field_validator("name")

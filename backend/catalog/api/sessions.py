@@ -46,7 +46,13 @@ from catalog.documents.tools import build_document_tools
 from catalog.llm.base import Message
 from catalog.llm.log_context import prompt_log_context
 from catalog.llm.timeout import DEFAULT_LLM_TIMEOUT_SECONDS, llm_timeout_context
-from catalog.skills.artifact_tools import artifacts_frame, build_artifact_tools
+from catalog.skills.artifact_tools import (
+    artifacts_frame,
+    build_artifact_tools,
+    parse_steps_content,
+    validate_pipeline_steps,
+)
+from catalog.skills.config import SKILL_KINDS, pipeline_step_to_dict
 from catalog.skills.script_runner import (
     SCRIPT_CODE_CONTRACT_RU,
     ScriptValidationError,
@@ -84,9 +90,11 @@ PLANNER_SYSTEM_PROMPT = (
     "пользователем в эту сессию. Если нужного документа нет в list_documents, "
     "попроси пользователя добавить его — глобальное хранилище тебе недоступно. "
     "Задавай уточняющие вопросы и формулируй чёткое задание для скилла.\n\n"
-    "Когда задача прояснилась — определи kind (agent или script) и "
+    "Когда задача прояснилась — определи kind (agent, script или pipeline) и "
     "материализуй черновик инструментами: set_skill_meta, затем "
-    "save_skill_prompt (для agent) или save_skill_script (для script). "
+    "save_skill_prompt (для agent), save_skill_script (для script) "
+    "или save_skill_steps (для pipeline; затем save_skill_script / "
+    "save_skill_prompt по шагам). "
     "Для kind=script: "
     + SCRIPT_CODE_CONTRACT_RU
     + ". "
@@ -431,7 +439,7 @@ async def patch_session_artifact_endpoint(
                 errors.append(arity_error)
             else:
                 payload["input_arity"] = arity
-        if kind not in ("agent", "script"):
+        if kind not in SKILL_KINDS:
             errors.append(f"unknown skill kind: {kind!r}")
         else:
             if kind == "agent":
@@ -451,6 +459,24 @@ async def patch_session_artifact_endpoint(
             session_id=session_id,
             type="meta",
             content=json.dumps(payload, ensure_ascii=False),
+            source="user",
+            is_valid=not errors,
+            error="; ".join(errors) if errors else None,
+        )
+        return _artifact_out(row)
+
+    if artifact_type == "steps":
+        parsed, errors = parse_steps_content(req.content)
+        if not errors:
+            errors.extend(validate_pipeline_steps(parsed, tools.names()))
+        payload = {"steps": [pipeline_step_to_dict(s) for s in parsed]}
+        row = upsert_artifact(
+            db,
+            session_id=session_id,
+            type="steps",
+            content=json.dumps(payload, ensure_ascii=False)
+            if parsed or not errors
+            else req.content,
             source="user",
             is_valid=not errors,
             error="; ".join(errors) if errors else None,

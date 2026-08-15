@@ -1542,6 +1542,29 @@ def test_compute_tags_agent_script_mixed_legacy() -> None:
     assert compute_tags(legacy) == ["ai"]
 
 
+def test_compute_tags_pipeline() -> None:
+    from catalog.skills.config import PipelineStep
+
+    pipe = SkillConfig(
+        name="p",
+        description="d",
+        system_prompt="",
+        allowed_tools=[],
+        model="test/model",
+        kind="pipeline",
+        steps=[
+            PipelineStep(id="a", type="script", input="documents", code="result = document\n"),
+            PipelineStep(
+                id="b",
+                type="llm",
+                input="previous",
+                system_prompt="rewrite",
+            ),
+        ],
+    )
+    assert compute_tags(pipe) == ["python", "ai"]
+
+
 def test_list_skills_endpoint_returns_tags(client, db) -> None:
     """GET /skills surfaces computed tags per skill (CATALOG-8)."""
     # An agent skill (the default helper) and a script skill.

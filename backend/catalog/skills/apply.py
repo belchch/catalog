@@ -25,7 +25,7 @@ import time
 import uuid
 from asyncio import CancelledError
 from collections.abc import AsyncIterator
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 from catalog.agent.events import AgentEvent, FinishEvent, RunMetaEvent, ScriptEvent, VerifyEvent
@@ -45,7 +45,7 @@ from catalog.documents.obsidian import (
     rewrite_wiki_links,
 )
 from catalog.llm.base import LLMProvider, Message
-from catalog.skills.config import SkillConfig, ensure_read_document_tool
+from catalog.skills.config import PipelineStep, SkillConfig, ensure_read_document_tool
 from catalog.skills.repo_run import claim_run, create_run, finish_run, get_run
 from catalog.skills.script_runner import ScriptRuntimeError, run_script_async
 from catalog.skills.verify import run_verify
@@ -54,6 +54,87 @@ from catalog.storage.repo_document import create_document, get_document
 from catalog.storage.repo_session_document import attach_documents
 
 logger = logging.getLogger("catalog.skills.apply")
+
+PipelineValue = str | list[str]
+
+
+def _value_as_text(value: PipelineValue) -> str:
+    if isinstance(value, list):
+        if len(value) == 1:
+            return value[0]
+        return "\n\n---\n\n".join(value)
+    return value
+
+
+def _value_as_documents(value: PipelineValue) -> list[str]:
+    if isinstance(value, list):
+        return list(value)
+    return [value]
+
+
+def _with_step_id(event: AgentEvent, step_id: str) -> AgentEvent:
+    if hasattr(event, "step_id"):
+        return replace(event, step_id=step_id)
+    return event
+
+
+def _pipeline_step_input(
+    step: PipelineStep,
+    current: PipelineValue | None,
+    doc_texts: list[str],
+) -> PipelineValue:
+    if step.input == "documents" or current is None:
+        return doc_texts[0] if len(doc_texts) == 1 else list(doc_texts)
+    return current
+
+
+def _pipeline_llm_user_content(
+    *,
+    step_input: PipelineValue,
+    from_documents: bool,
+    docs: list,
+    input_doc_ids: list[str],
+    doc_texts: list[str],
+) -> str:
+    if from_documents:
+        link_hint = (
+            "Не вставляй связи с входными документами в текст ответа — "
+            "система добавит раздел «Ссылки» при сохранении. "
+            "Если нужны другие Obsidian-ссылки [[...]], используй имя файла "
+            "(stem без расширения и пути), а не title."
+        )
+        content_note = (
+            "Ниже приведён полный текст каждого входного документа — "
+            "опирайся на него. Это не вложение файла: текст уже в этом "
+            "сообщении. При необходимости дополнительно вызови "
+            "read_document(doc_id=...)."
+        )
+        stem_lines = "\n".join(
+            f"- «{d.title}» → [[{Path(d.path).stem}]]" for d in docs
+        )
+        inline_blocks = "\n\n".join(
+            f"--- документ {did}: {d.title} ---\n{text}"
+            for did, d, text in zip(input_doc_ids, docs, doc_texts)
+        )
+        if len(docs) == 1:
+            return (
+                f"Обработай документ {input_doc_ids[0]} ({docs[0].title}).\n"
+                f"{content_note}\n{link_hint}\n{stem_lines}\n\n{inline_blocks}"
+            )
+        listing = ", ".join(
+            f"{did} ({d.title})" for did, d in zip(input_doc_ids, docs)
+        )
+        return (
+            f"Обработай документы: {listing}.\n"
+            f"{content_note}\n{link_hint}\n{stem_lines}\n\n{inline_blocks}"
+        )
+    if isinstance(step_input, list):
+        blocks = "\n\n".join(
+            f"--- фрагмент {i + 1} ---\n{text}"
+            for i, text in enumerate(step_input)
+        )
+        return f"Обработай следующие фрагменты.\n\n{blocks}"
+    return f"Обработай следующий текст.\n\n{step_input}"
 
 
 @dataclass
@@ -216,6 +297,8 @@ async def _apply_core(
                 text = await run_script_async(
                     skill.code, doc_text, documents=doc_texts
                 )
+                if isinstance(text, list):
+                    text = _value_as_text(text)
             except ScriptRuntimeError as exc:
                 script_error = ScriptEvent(
                     stage="error", error=str(exc), duration=time.perf_counter() - t0
@@ -245,6 +328,116 @@ async def _apply_core(
             last_text = text
 
             result = run_verify(text or "", skill.verify_checks)
+            verify_event = VerifyEvent(iteration=1, result=result)
+            yield verify_event
+            log_agent_event(verify_event)
+            passed = result.passed
+        elif skill.kind == "pipeline":
+            current: PipelineValue | None = None
+            for index, step in enumerate(skill.steps):
+                step_input = _pipeline_step_input(step, current, doc_texts)
+                from_documents = step.input == "documents" or current is None
+                if step.type == "script":
+                    doc_text = _value_as_text(step_input)
+                    docs_list = _value_as_documents(step_input)
+                    script_start = ScriptEvent(
+                        stage="start", snippet=step.code, step_id=step.id
+                    )
+                    yield script_start
+                    log_agent_event(script_start)
+                    t0 = time.perf_counter()
+                    try:
+                        text = await run_script_async(
+                            step.code, doc_text, documents=docs_list
+                        )
+                    except ScriptRuntimeError as exc:
+                        script_error = ScriptEvent(
+                            stage="error",
+                            error=str(exc),
+                            duration=time.perf_counter() - t0,
+                            step_id=step.id,
+                        )
+                        yield script_error
+                        log_agent_event(script_error)
+                        trace.entries.append(
+                            TraceEntry(
+                                kind="error",
+                                iteration=index + 1,
+                                data={
+                                    "script": True,
+                                    "error": str(exc),
+                                    "step_id": step.id,
+                                },
+                            )
+                        )
+                        raise
+                    display = _value_as_text(text)
+                    script_done = ScriptEvent(
+                        stage="done",
+                        return_value=display,
+                        duration=time.perf_counter() - t0,
+                        step_id=step.id,
+                    )
+                    yield script_done
+                    log_agent_event(script_done)
+                    trace.entries.append(
+                        TraceEntry(
+                            kind="script",
+                            iteration=index + 1,
+                            data={
+                                "ok": True,
+                                "chars": len(display),
+                                "step_id": step.id,
+                            },
+                        )
+                    )
+                    current = text
+                    last_text = display
+                elif step.type == "llm":
+                    step_tools = base_tools.filter(
+                        ensure_read_document_tool(step.allowed_tools)
+                    )
+                    start_content = _pipeline_llm_user_content(
+                        step_input=step_input,
+                        from_documents=from_documents,
+                        docs=docs,
+                        input_doc_ids=input_doc_ids,
+                        doc_texts=doc_texts,
+                    )
+                    messages: list[Message] = [
+                        Message(role="user", content=start_content)
+                    ]
+                    text = None
+                    capped = False
+                    before = len(trace.entries)
+                    async for event in _run_agent_core(
+                        provider=provider,
+                        model=step.model or skill.model,
+                        system_prompt=step.system_prompt,
+                        messages=messages,
+                        tools=step_tools,
+                        temperature=skill.temperature,
+                        max_iterations=skill.max_iterations,
+                        use_stream=False,
+                        trace=trace,
+                        reasoning=step.reasoning or skill.reasoning,
+                    ):
+                        tagged = _with_step_id(event, step.id)
+                        yield tagged
+                        if isinstance(event, FinishEvent):
+                            text = event.text
+                            capped = event.capped
+                    for entry in trace.entries[before:]:
+                        entry.data["step_id"] = step.id
+                    current = text or ""
+                    last_text = current
+                    last_capped = capped
+                else:
+                    raise ValueError(
+                        f"unknown pipeline step type: {step.type!r}"
+                    )
+            final_text = last_text or ""
+            result = run_verify(final_text, skill.verify_checks)
             verify_event = VerifyEvent(iteration=1, result=result)
             yield verify_event
             log_agent_event(verify_event)

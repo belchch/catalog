@@ -11,6 +11,10 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass, field
 
+SKILL_KINDS = ("agent", "script", "pipeline")
+PIPELINE_STEP_TYPES = ("script", "llm")
+PIPELINE_STEP_INPUTS = ("documents", "previous")
+
 
 @dataclass
 class VerifyCheck:
@@ -22,6 +26,85 @@ class VerifyCheck:
 
     check: str
     params: dict = field(default_factory=dict)
+
+
+@dataclass
+class PipelineStep:
+    id: str
+    type: str
+    input: str = "previous"
+    code: str = ""
+    system_prompt: str = ""
+    allowed_tools: list[str] = field(default_factory=list)
+    model: str = ""
+    provider: str = ""
+    reasoning: str = ""
+
+
+def pipeline_step_to_dict(step: PipelineStep) -> dict:
+    return {
+        "id": step.id,
+        "type": step.type,
+        "input": step.input,
+        "code": step.code,
+        "system_prompt": step.system_prompt,
+        "allowed_tools": list(step.allowed_tools),
+        "model": step.model,
+        "provider": step.provider,
+        "reasoning": step.reasoning,
+    }
+
+
+def pipeline_step_from_dict(data: dict, index: int = 0) -> PipelineStep:
+    raw_id = data.get("id")
+    step_id = raw_id.strip() if isinstance(raw_id, str) else ""
+    raw_type = data.get("type")
+    step_type = raw_type.strip() if isinstance(raw_type, str) else ""
+    raw_input = data.get("input")
+    if raw_input in PIPELINE_STEP_INPUTS:
+        step_input = raw_input
+    else:
+        step_input = "documents" if index == 0 else "previous"
+    raw_tools = data.get("allowed_tools") or []
+    if not isinstance(raw_tools, list):
+        raw_tools = []
+    prompt = data.get("system_prompt")
+    if not isinstance(prompt, str) or not prompt:
+        alias = data.get("prompt")
+        prompt = alias if isinstance(alias, str) else ""
+    code = data.get("code")
+    if not isinstance(code, str):
+        code = ""
+    model = data.get("model")
+    provider = data.get("provider")
+    reasoning = data.get("reasoning")
+    return PipelineStep(
+        id=step_id,
+        type=step_type,
+        input=step_input,
+        code=code,
+        system_prompt=prompt,
+        allowed_tools=[str(t) for t in raw_tools],
+        model=model if isinstance(model, str) else "",
+        provider=provider if isinstance(provider, str) else "",
+        reasoning=reasoning if isinstance(reasoning, str) else "",
+    )
+
+
+def pipeline_steps_from_value(value: object) -> list[PipelineStep]:
+    if value is None:
+        return []
+    if isinstance(value, dict):
+        nested = value.get("steps", value)
+        value = nested
+    if not isinstance(value, list):
+        raise TypeError("steps must be a list")
+    steps: list[PipelineStep] = []
+    for i, item in enumerate(value):
+        if not isinstance(item, dict):
+            raise TypeError(f"steps[{i}] must be an object")
+        steps.append(pipeline_step_from_dict(item, i))
+    return steps
 
 
 @dataclass
@@ -49,10 +132,11 @@ class SkillConfig:
     max_retries: int = 2
     verify_checks: list[VerifyCheck] = field(default_factory=list)
     output_kind: str = "md"
-    # ``"agent"`` | ``"script"`` (ADR-0014). Default keeps legacy skills agent.
+    # ``"agent"`` | ``"script"`` | ``"pipeline"`` (ADR-0014 / ADR-0018).
     kind: str = "agent"
     # Python source for ``kind="script"`` skills (empty for agent skills).
     code: str = ""
+    steps: list[PipelineStep] = field(default_factory=list)
     # For ``kind="agent"``: the model's explanation of why the task is not
     # deterministic (CATALOG-3). Empty for ``script`` skills. Persisted so the
     # reason is captured alongside the config (DoD requirement).
@@ -91,6 +175,7 @@ class SkillConfig:
                 "input_arity": self.input_arity,
                 "provider": self.provider,
                 "reasoning": self.reasoning,
+                "steps": [pipeline_step_to_dict(s) for s in self.steps],
             },
             ensure_ascii=False,
         )
@@ -126,6 +211,7 @@ class SkillConfig:
             input_arity=data.get("input_arity"),
             provider=data.get("provider", ""),
             reasoning=data.get("reasoning", ""),
+            steps=pipeline_steps_from_value(data.get("steps")),
         )
 
 
@@ -156,6 +242,8 @@ def compute_tags(config: SkillConfig) -> list[str]:
     from a script and would mis-tag pure scripts as ``"ai"``.
     """
     tags: list[str] = []
+    if config.kind == "pipeline":
+        return ["python", "ai"]
     if config.kind == "script" or bool(config.code):
         tags.append("python")
     if config.kind == "agent" or (

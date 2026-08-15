@@ -27,7 +27,7 @@ from catalog.llm.base import (
     ToolSpec,
 )
 from catalog.skills.apply import apply_skill, apply_skill_collect
-from catalog.skills.config import SkillConfig, VerifyCheck
+from catalog.skills.config import PipelineStep, SkillConfig, VerifyCheck
 from catalog.skills.repo_run import get_run
 from catalog.skills.repo_skill import create_skill, get_skill
 from catalog.storage.db import Database
@@ -865,6 +865,189 @@ def test_skill_config_kind_roundtrip() -> None:
     )
     assert legacy.kind == "agent"
     assert legacy.code == ""
+    assert legacy.steps == []
+
+
+def _pipeline_skill() -> SkillConfig:
+    return SkillConfig(
+        name="pipe",
+        description="linear pipeline",
+        system_prompt="",
+        allowed_tools=[],
+        model="test/model",
+        verify_checks=[VerifyCheck("non_empty")],
+        kind="pipeline",
+        steps=[
+            PipelineStep(
+                id="upper",
+                type="script",
+                input="documents",
+                code="result = document.upper()\n",
+            ),
+            PipelineStep(
+                id="note",
+                type="llm",
+                input="previous",
+                system_prompt="Prefix the incoming text with Noted:",
+                allowed_tools=["read_document"],
+                model="test/model",
+            ),
+            PipelineStep(
+                id="suffix",
+                type="script",
+                input="previous",
+                code="result = document + '\\nEND'\n",
+            ),
+        ],
+    )
+
+
+def test_skill_config_pipeline_roundtrip() -> None:
+    skill = _pipeline_skill()
+    restored = SkillConfig.from_json(skill.to_json())
+    assert restored.kind == "pipeline"
+    assert [s.id for s in restored.steps] == ["upper", "note", "suffix"]
+    assert restored.steps[1].type == "llm"
+    assert restored.steps[1].system_prompt.startswith("Prefix")
+    assert restored.steps[0].code == "result = document.upper()\n"
+
+
+def test_apply_pipeline_script_llm_script(db: Database, workspace: Path) -> None:
+    skill = _pipeline_skill()
+    skill_id = create_skill(
+        db, name=skill.name, description=skill.description, config=skill
+    )
+    input_doc_id = _ingest_input(db, workspace)
+    provider = ScriptProvider([_result("NOTED: SOURCE TEXT")])
+
+    result = asyncio.run(
+        apply_skill_collect(
+            provider=provider,
+            db=db,
+            workspace_dir=str(workspace),
+            skill=skill,
+            skill_id=skill_id,
+            input_doc_ids=[input_doc_id],
+            base_tools=build_document_tools(db, workspace),
+        )
+    )
+
+    assert result.status == "ok"
+    assert "NOTED: SOURCE TEXT" in (result.result_text or "")
+    assert "END" in (result.result_text or "")
+    assert provider.seen_messages
+    user_msgs = [m for m in provider.seen_messages[0] if m.role == "user"]
+    assert user_msgs
+    assert "SOURCE TEXT" in (user_msgs[0].content or "")
+
+    step_ids = {
+        e.data.get("step_id")
+        for e in result.trace.entries
+        if e.data.get("step_id")
+    }
+    assert step_ids == {"upper", "note", "suffix"}
+
+
+def test_apply_pipeline_emits_step_id_on_events(
+    db: Database, workspace: Path
+) -> None:
+    skill = _pipeline_skill()
+    skill_id = create_skill(
+        db, name=skill.name, description=skill.description, config=skill
+    )
+    input_doc_id = _ingest_input(db, workspace)
+    provider = ScriptProvider([_result("NOTED: SOURCE TEXT")])
+
+    events = asyncio.run(
+        _collect_events(
+            apply_skill(
+                provider=provider,
+                db=db,
+                workspace_dir=str(workspace),
+                skill=skill,
+                skill_id=skill_id,
+                input_doc_ids=[input_doc_id],
+                base_tools=build_document_tools(db, workspace),
+            )
+        )
+    )
+
+    script_events = [e for e in events if isinstance(e, ScriptEvent)]
+    assert {e.step_id for e in script_events} == {"upper", "suffix"}
+    step_events = [e for e in events if isinstance(e, StepEvent)]
+    assert step_events
+    assert all(e.step_id == "note" for e in step_events)
+
+
+def test_apply_pipeline_stops_on_middle_step_failure(
+    db: Database, workspace: Path
+) -> None:
+    skill = SkillConfig(
+        name="pipe-fail",
+        description="middle step blows up",
+        system_prompt="",
+        allowed_tools=[],
+        model="test/model",
+        kind="pipeline",
+        steps=[
+            PipelineStep(
+                id="upper",
+                type="script",
+                input="documents",
+                code="result = document.upper()\n",
+            ),
+            PipelineStep(
+                id="boom",
+                type="llm",
+                input="previous",
+                system_prompt="do not succeed",
+                allowed_tools=["read_document"],
+            ),
+            PipelineStep(
+                id="suffix",
+                type="script",
+                input="previous",
+                code="result = document + '\\nEND'\n",
+            ),
+        ],
+    )
+    skill_id = create_skill(
+        db, name=skill.name, description=skill.description, config=skill
+    )
+    input_doc_id = _ingest_input(db, workspace)
+
+    class BoomProvider(ScriptProvider):
+        async def complete(self, *args: Any, **kwargs: Any) -> Any:
+            raise RuntimeError("llm step exploded")
+
+    provider = BoomProvider([])
+
+    with pytest.raises(RuntimeError, match="llm step exploded"):
+        asyncio.run(
+            apply_skill_collect(
+                provider=provider,
+                db=db,
+                workspace_dir=str(workspace),
+                skill=skill,
+                skill_id=skill_id,
+                input_doc_ids=[input_doc_id],
+                base_tools=build_document_tools(db, workspace),
+            )
+        )
+
+    with db.connect() as conn:
+        row = conn.execute(
+            "SELECT status, trace_json FROM skill_run WHERE skill_id = ?",
+            (skill_id,),
+        ).fetchone()
+    assert row is not None
+    assert row["status"] == "failed"
+    import json as _json
+
+    trace = _json.loads(row["trace_json"] or "[]")
+    step_ids = {e.get("data", {}).get("step_id") for e in trace}
+    assert "suffix" not in step_ids
+    assert "upper" in step_ids
 
 
 def test_tool_registry_filter() -> None:

@@ -302,23 +302,31 @@ def _call_main(main: Any, namespace: dict[str, Any]) -> Any:
     return main(*bound.args, **bound.kwargs)
 
 
-def _extract_result(namespace: dict[str, Any]) -> str:
-    """Determine the script's output string from its post-run namespace."""
-    # 1. An explicit ``result`` global wins.
+def _as_str_list(value: Any) -> list[str] | None:
+    if isinstance(value, list) and all(isinstance(item, str) for item in value):
+        return value
+    return None
+
+
+def _extract_result(namespace: dict[str, Any]) -> str | list[str]:
     result = namespace.get("result")
+    as_list = _as_str_list(result)
+    if as_list is not None:
+        return as_list
     if isinstance(result, str):
         return result
     if result is not None:
         return str(result)
-    # 2. A ``main`` function that returns a string (any supported signature).
     main = namespace.get("main")
     if callable(main):
         out = _call_main(main, namespace)
+        out_list = _as_str_list(out)
+        if out_list is not None:
+            return out_list
         if isinstance(out, str):
             return out
         if out is not None:
             return str(out)
-    # 3. Captured print output (strip a single trailing newline for ergonomics).
     captured: list[str] = namespace.get("_captured", [])
     if captured:
         text = "".join(captured)
@@ -334,7 +342,7 @@ def run_script(
     documents: list[str] | None = None,
     timeout_seconds: float = DEFAULT_TIMEOUT_SECONDS,
     memory_bytes: int = DEFAULT_MEMORY_BYTES,
-) -> str:
+) -> str | list[str]:
     """Execute a validated script over ``doc_text`` and return its result string.
 
     The script is run synchronously in the current process inside a restricted
@@ -394,7 +402,7 @@ async def run_script_async(
     documents: list[str] | None = None,
     timeout_seconds: float = DEFAULT_TIMEOUT_SECONDS,
     memory_bytes: int = DEFAULT_MEMORY_BYTES,
-) -> str:
+) -> str | list[str]:
     """Async wrapper around :func:`run_script` for the apply path.
 
     Runs synchronously in the event-loop (main) thread rather than via
