@@ -7,7 +7,7 @@ def extract_text(path: str, kind: str) -> str:
     """Return the plain text of a stored document.
 
     - ``md`` / ``result_md`` -> raw file contents (utf-8).
-    - ``docx`` -> paragraphs joined with newlines via python-docx.
+    - ``docx`` -> body paragraphs and tables in document order; tables as markdown.
     - ``csv`` -> raw file contents (utf-8 with cp1251/latin-1 fallback).
     - ``xlsx`` -> all non-empty sheets rendered as markdown tables.
     - ``pdf`` -> per-page text via pypdf with explicit page markers.
@@ -16,8 +16,7 @@ def extract_text(path: str, kind: str) -> str:
         with open(path, encoding="utf-8") as f:
             return f.read()
     if kind == "docx":
-        document = docx.Document(path)
-        return "\n".join(p.text for p in document.paragraphs)
+        return _extract_docx(path)
     if kind == "csv":
         return _extract_csv(path)
     if kind == "xlsx":
@@ -25,6 +24,64 @@ def extract_text(path: str, kind: str) -> str:
     if kind == "pdf":
         return _extract_pdf(path)
     raise ValueError(f"unsupported kind: {kind}")
+
+
+def _extract_docx(path: str) -> str:
+    from docx.oxml.table import CT_Tbl
+    from docx.oxml.text.paragraph import CT_P
+    from docx.table import Table
+    from docx.text.paragraph import Paragraph
+
+    document = docx.Document(path)
+    parts: list[str] = []
+    for child in document.element.body.iterchildren():
+        if isinstance(child, CT_P):
+            parts.append(Paragraph(child, document).text)
+        elif isinstance(child, CT_Tbl):
+            parts.append(_docx_table_to_md(Table(child, document)))
+    return "\n".join(parts)
+
+
+def _docx_table_to_md(table: object) -> str:
+    from docx.table import Table
+
+    if not isinstance(table, Table):
+        return ""
+    rows = list(table.rows)
+    if not rows:
+        return ""
+    width = max(len(row.cells) for row in rows)
+    if width == 0:
+        return ""
+    padded: list[list[str]] = []
+    nested_blocks: list[str] = []
+    seen_cells: set[int] = set()
+    for row in rows:
+        values = [_cell_to_str(cell.text.strip()) for cell in row.cells]
+        if len(values) < width:
+            values = values + [""] * (width - len(values))
+        padded.append(values)
+        for cell in row.cells:
+            tc_id = id(cell._tc)
+            if tc_id in seen_cells:
+                continue
+            seen_cells.add(tc_id)
+            for nested in cell.tables:
+                nested_md = _docx_table_to_md(nested)
+                if nested_md:
+                    nested_blocks.append(nested_md)
+    header = padded[0]
+    body = padded[1:]
+    lines = [
+        "| " + " | ".join(header) + " |",
+        "| " + " | ".join(["---"] * width) + " |",
+    ]
+    for row in body:
+        lines.append("| " + " | ".join(row) + " |")
+    result = "\n".join(lines)
+    if nested_blocks:
+        return result + "\n\n" + "\n\n".join(nested_blocks)
+    return result
 
 
 def _extract_csv(path: str) -> str:
