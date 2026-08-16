@@ -2,6 +2,15 @@ import { useState } from 'react'
 import type { SessionOut } from '../api.ts'
 import type { UseSessionsResult } from '../hooks/useSessions.ts'
 
+const STATUS_BADGES: Record<string, { label: string; className: string }> = {
+  planning: { label: 'планирование', className: 'badge-accent' },
+  done: { label: 'готово', className: 'badge-success' },
+}
+
+function statusBadge(status: string) {
+  return STATUS_BADGES[status] ?? { label: status, className: 'badge-neutral' }
+}
+
 interface SessionsPanelProps {
   sessions: UseSessionsResult
   currentSessionId: string | null
@@ -63,7 +72,9 @@ export function SessionsPanel({
                   }
                 >
                   <span>{new Date(s.updated_at).toLocaleString()}</span>
-                  <span className="badge-neutral">{s.status}</span>
+                  <span className={statusBadge(s.status).className}>
+                    {statusBadge(s.status).label}
+                  </span>
                 </span>
               </button>
               <div className="flex shrink-0 flex-col justify-center gap-0.5">

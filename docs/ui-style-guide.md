@@ -11,10 +11,10 @@
 | ink | `text-ink`, `text-ink-muted`, `text-ink-faint`, `placeholder:text-ink-placeholder` | Текст |
 | brand | `bg-brand`, `hover:bg-brand-hover`, `bg-brand-soft`, `text-brand-ink` | Акцент `#7c3aed` (фиолетовый) |
 | danger | `bg-danger`, `bg-danger-soft`, `text-danger-ink`, `border-danger-line` | Ошибки, стоп |
-| success | `bg-success`, `bg-success-soft`, `text-success-ink` | ok / committed |
+| success | `bg-success`, `bg-success-soft`, `text-success-ink` | ok / committed / сессия «готово» |
 | warning | `bg-warning`, `bg-warning-soft`, `text-warning-ink` | draft / reconnect |
 | info | `bg-info-soft`, `text-info-ink` | тег `python` |
-| accent | `bg-accent`, `hover:bg-accent-hover`, `bg-accent-soft`, `text-accent-ink`, `border-accent-line` | Яркий фиолетовый `#7c3aed`: CTA «Создать скилл» (градиент в фуксию), hover подсказок, тег `ai` |
+| accent | `bg-accent`, `hover:bg-accent-hover`, `bg-accent-soft`, `text-accent-ink`, `border-accent-line` | Яркий фиолетовый `#7c3aed`: CTA «Создать скилл» (градиент в фуксию), hover подсказок, тег `ai`, сессия «планирование» |
 | teal | `bg-teal-soft`, `text-teal-ink` | тип документа, input `documents` |
 | rose | `bg-rose-soft`, `text-rose-ink` | arity трека, input `previous` |
 | elev | `rounded-card` / `rounded-card-lg`, `shadow-card` | Карточки 20–24px |
