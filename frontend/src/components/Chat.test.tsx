@@ -23,6 +23,7 @@ function renderChat(overrides: Partial<Parameters<typeof Chat>[0]> = {}) {
       cancelling={false}
       closed={false}
       reconnecting={false}
+      interrupted={false}
       error={null}
       suggestions={[]}
       documents={[SPEC]}
@@ -200,5 +201,202 @@ describe('Chat composer', () => {
     expect(tools.hasAttribute('disabled')).toBe(true)
     expect(tools.getAttribute('title')).toBe('Идёт генерация')
     expect(tools.getAttribute('aria-description')).toBe('Идёт генерация')
+  })
+})
+
+describe('Chat connection banner', () => {
+  it('hides the thinking indicator when the socket is closed even if streaming is stuck', () => {
+    renderChat({ streaming: true, closed: true, interrupted: true })
+    expect(screen.queryByText('●●● планировщик думает…')).toBeNull()
+    expect(screen.getByText('Соединение потеряно — ответ прерван')).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'Остановить генерацию' })).toBeNull()
+    expect(screen.getByRole('button', { name: 'Отправить' })).toBeTruthy()
+  })
+
+  it('shows the interrupted banner with reconnect and a draft-preserving composer', () => {
+    const onReconnect = vi.fn()
+    const { onSend } = renderChat({
+      closed: true,
+      interrupted: true,
+      onReconnect,
+    })
+    const status = screen.getByRole('status')
+    expect(status.getAttribute('aria-live')).toBe('polite')
+    expect(status.className).toContain('border-warning-line')
+    expect(status.className).toContain('bg-warning-soft')
+    expect(status.className).toContain('text-warning-ink')
+    expect(status.className).not.toMatch(/#[0-9a-fA-F]{3,8}/)
+    expect(status.textContent).toContain('Соединение потеряно — ответ прерван')
+    expect(status.textContent).toContain(
+      'Часть ответа могла не сохраниться. Переподключитесь и повторите запрос.',
+    )
+    const reconnect = screen.getByRole('button', { name: 'Переподключить' })
+    expect(reconnect.hasAttribute('disabled')).toBe(false)
+    expect(reconnect.className).toContain('btn-secondary')
+    fireEvent.click(reconnect)
+    expect(onReconnect).toHaveBeenCalledTimes(1)
+
+    const textarea = screen.getByPlaceholderText('Сообщение планировщику…')
+    fireEvent.change(textarea, { target: { value: 'черновик' } })
+    fireEvent.keyDown(textarea, { key: 'Enter' })
+    expect(onSend).not.toHaveBeenCalled()
+    expect((textarea as HTMLTextAreaElement).value).toBe('черновик')
+    expect(textarea.hasAttribute('disabled')).toBe(false)
+
+    const send = screen.getByRole('button', { name: 'Отправить' })
+    expect(send.hasAttribute('disabled')).toBe(true)
+    expect(send.getAttribute('title')).toBe('Нет соединения — переподключитесь')
+    expect(send.getAttribute('aria-description')).toBe(
+      'Нет соединения — переподключитесь',
+    )
+    fireEvent.click(send)
+    expect(onSend).not.toHaveBeenCalled()
+
+    const chip = screen.getByRole('button', { name: 'Изучи доступные документы' })
+    expect(chip.hasAttribute('disabled')).toBe(true)
+    fireEvent.click(chip)
+    expect(onSend).not.toHaveBeenCalled()
+  })
+
+  it('shows the idle disconnect banner without the interrupted copy', () => {
+    renderChat({ closed: true, interrupted: false })
+    const status = screen.getByRole('status')
+    expect(status.textContent).toContain('Соединение потеряно')
+    expect(status.textContent).not.toContain('ответ прерван')
+    expect(status.textContent).toContain('Отправка сообщений недоступна.')
+    expect(screen.getByRole('button', { name: 'Переподключить' })).toBeTruthy()
+  })
+
+  it('shows a busy reconnecting banner and keeps send blocked', () => {
+    const onReconnect = vi.fn()
+    const { onSend } = renderChat({
+      reconnecting: true,
+      interrupted: false,
+      onReconnect,
+    })
+    const status = screen.getByRole('status')
+    expect(status.getAttribute('aria-busy')).toBe('true')
+    expect(status.textContent).toContain('Переподключаю…')
+    expect(status.textContent).not.toContain('Соединение потеряно')
+    const reconnect = screen.getByRole('button', { name: 'Переподключаю…' })
+    expect(reconnect.hasAttribute('disabled')).toBe(true)
+    expect(reconnect.getAttribute('aria-busy')).toBe('true')
+    fireEvent.click(reconnect)
+    expect(onReconnect).not.toHaveBeenCalled()
+
+    const send = screen.getByRole('button', { name: 'Отправить' })
+    expect(send.getAttribute('title')).toBe('Нет соединения — переподключитесь')
+    fireEvent.click(send)
+    expect(onSend).not.toHaveBeenCalled()
+  })
+
+  it('renders the banner after the last message and hides it when an error is shown', () => {
+    const messages: PlannerMessage[] = [{ role: 'user', content: 'hello' }]
+    renderChat({ messages, closed: true, interrupted: true })
+    const heading = screen.getByText('Соединение потеряно — ответ прерван')
+    const status = heading.closest('[role="status"]')
+    expect(status).toBeTruthy()
+    const content = status?.parentElement
+    expect(content?.textContent).toMatch(/hello[\s\S]*Соединение потеряно/)
+    const errorSlot = content?.querySelector('.text-danger-ink')
+    expect(errorSlot).toBeNull()
+    const bannerIndex = content?.textContent?.indexOf('Соединение потеряно') ?? -1
+    const helloIndex = content?.textContent?.indexOf('hello') ?? -1
+    expect(helloIndex).toBeGreaterThan(-1)
+    expect(bannerIndex).toBeGreaterThan(helloIndex)
+    cleanup()
+    renderChat({ messages, closed: true, interrupted: true, error: 'boom' })
+    expect(screen.queryByText('Соединение потеряно — ответ прерван')).toBeNull()
+    expect(screen.getByText('Ошибка: boom')).toBeTruthy()
+  })
+
+  it('restores composer focus after a click-initiated reconnect', () => {
+    const onReconnect = vi.fn()
+    const view = render(
+      <Chat
+        messages={[]}
+        streaming={false}
+        cancelling={false}
+        closed={true}
+        reconnecting={false}
+        interrupted={true}
+        error={null}
+        suggestions={[]}
+        documents={[SPEC]}
+        sessionDocuments={[]}
+        sessionId="s1"
+        onSend={() => {}}
+        onCancel={() => {}}
+        onReconnect={onReconnect}
+        onCreateSkill={() => {}}
+        buildingSkill={false}
+        proposingTracks={false}
+        editingSkillName={null}
+        buildError={null}
+        buildErrorIsTimeout={false}
+        sessionTimeoutSeconds={60}
+        onOpenTimeoutModal={() => {}}
+        onDismissBuildError={() => {}}
+      />,
+    )
+    fireEvent.click(screen.getByRole('button', { name: 'Переподключить' }))
+    expect(onReconnect).toHaveBeenCalledTimes(1)
+    view.rerender(
+      <Chat
+        messages={[]}
+        streaming={false}
+        cancelling={false}
+        closed={false}
+        reconnecting={true}
+        interrupted={false}
+        error={null}
+        suggestions={[]}
+        documents={[SPEC]}
+        sessionDocuments={[]}
+        sessionId="s1"
+        onSend={() => {}}
+        onCancel={() => {}}
+        onReconnect={onReconnect}
+        onCreateSkill={() => {}}
+        buildingSkill={false}
+        proposingTracks={false}
+        editingSkillName={null}
+        buildError={null}
+        buildErrorIsTimeout={false}
+        sessionTimeoutSeconds={60}
+        onOpenTimeoutModal={() => {}}
+        onDismissBuildError={() => {}}
+      />,
+    )
+    view.rerender(
+      <Chat
+        messages={[]}
+        streaming={false}
+        cancelling={false}
+        closed={false}
+        reconnecting={false}
+        interrupted={false}
+        error={null}
+        suggestions={[]}
+        documents={[SPEC]}
+        sessionDocuments={[]}
+        sessionId="s1"
+        onSend={() => {}}
+        onCancel={() => {}}
+        onReconnect={onReconnect}
+        onCreateSkill={() => {}}
+        buildingSkill={false}
+        proposingTracks={false}
+        editingSkillName={null}
+        buildError={null}
+        buildErrorIsTimeout={false}
+        sessionTimeoutSeconds={60}
+        onOpenTimeoutModal={() => {}}
+        onDismissBuildError={() => {}}
+      />,
+    )
+    expect(document.activeElement).toBe(
+      screen.getByPlaceholderText('Сообщение планировщику…'),
+    )
   })
 })

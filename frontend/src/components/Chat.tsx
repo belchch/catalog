@@ -2,6 +2,7 @@ import { useEffect, useId, useRef, useState } from 'react'
 import type { DocumentOut, SkillOut } from '../api.ts'
 import type { PlannerMessage } from '../hooks/usePlannerSession.ts'
 import { ChatMessage } from './ChatMessage.tsx'
+import { ConnectionBanner } from './ConnectionBanner.tsx'
 import { DocumentCombobox } from './DocumentCombobox.tsx'
 import { FileTextIcon, PlusIcon, WrenchIcon } from './icons.tsx'
 import { ToolsPopover } from './ToolsPopover.tsx'
@@ -18,6 +19,7 @@ interface ChatProps {
   cancelling: boolean
   closed: boolean
   reconnecting: boolean
+  interrupted: boolean
   error: string | null
   suggestions: string[]
   documents: DocumentOut[]
@@ -55,6 +57,7 @@ export function Chat({
   cancelling,
   closed,
   reconnecting,
+  interrupted,
   error,
   suggestions,
   documents,
@@ -92,14 +95,37 @@ export function Chat({
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const toolsRootRef = useRef<HTMLDivElement>(null)
   const toolsButtonRef = useRef<HTMLButtonElement>(null)
+  const restoreComposerFocusRef = useRef(false)
   const toolsPopoverId = useId()
+  const socketDown = closed || reconnecting
+  const liveStreaming = streaming && !socketDown
+  const showBanner = !error && socketDown
+  const noConnectionTitle = 'Нет соединения — переподключитесь'
 
   useEffect(() => {
-    if (messages.length === 0) return
+    if (messages.length === 0 && !showBanner) return
     const el = scrollRef.current
     if (!el) return
     el.scrollTop = el.scrollHeight
-  }, [messages])
+  }, [messages, showBanner])
+
+  useEffect(() => {
+    if (closed || reconnecting) return
+    if (!restoreComposerFocusRef.current) return
+    restoreComposerFocusRef.current = false
+    const active = document.activeElement
+    if (
+      active &&
+      active !== document.body &&
+      active !== textareaRef.current &&
+      (active instanceof HTMLInputElement ||
+        active instanceof HTMLTextAreaElement ||
+        active instanceof HTMLSelectElement)
+    ) {
+      return
+    }
+    textareaRef.current?.focus()
+  }, [closed, reconnecting])
 
   useEffect(() => {
     setSelectedDocIds([])
@@ -140,8 +166,8 @@ export function Chat({
   }, [toolsOpen, onCloseTools])
 
   useEffect(() => {
-    if (streaming && toolsOpen) onCloseTools?.()
-  }, [streaming, toolsOpen, onCloseTools])
+    if (liveStreaming && toolsOpen) onCloseTools?.()
+  }, [liveStreaming, toolsOpen, onCloseTools])
 
   const selectedDocs = selectedDocIds
     .map((id) => documents.find((d) => d.id === id))
@@ -159,8 +185,13 @@ export function Chat({
 
   const closePicker = () => setPickerEpoch((n) => n + 1)
 
+  const handleReconnect = () => {
+    restoreComposerFocusRef.current = true
+    onReconnect()
+  }
+
   const sendCurrent = (text: string) => {
-    if (streaming) return
+    if (liveStreaming || socketDown) return
     if (!text && selectedDocIds.length === 0) return
     onSend(
       text,
@@ -172,16 +203,19 @@ export function Chat({
     closePicker()
   }
 
-  const canSubmit = !streaming && (input.trim().length > 0 || selectedDocIds.length > 0)
+  const canSubmit =
+    !liveStreaming &&
+    !socketDown &&
+    (input.trim().length > 0 || selectedDocIds.length > 0)
 
-  const visibleSuggestions = streaming
+  const visibleSuggestions = liveStreaming
     ? []
     : messages.length === 0
       ? STARTER_SUGGESTIONS
       : suggestions
 
   const removeAttachment = (id: string, pending: boolean) => {
-    if (streaming) return
+    if (liveStreaming) return
     setSelectedDocIds((prev) => prev.filter((x) => x !== id))
     if (!pending) onRemoveDocument?.(id)
   }
@@ -195,8 +229,8 @@ export function Chat({
     attachedSkillCount > 0
       ? `Инструменты, включено ${attachedSkillCount}`
       : 'Инструменты'
-  const toolsDisabled = streaming || !sessionId
-  const toolsTitle = streaming
+  const toolsDisabled = liveStreaming || !sessionId
+  const toolsTitle = liveStreaming
     ? 'Идёт генерация'
     : !sessionId
       ? 'Отправьте сообщение, чтобы начать сессию'
@@ -254,33 +288,19 @@ export function Chat({
             key={i}
             message={m}
             onRepeat={(content) => onSend(content)}
-            streaming={streaming}
-            closed={closed}
+            streaming={liveStreaming}
+            closed={socketDown}
           />
         ))}
-        {streaming && (
+        {liveStreaming && (
           <div className="my-2 text-xs text-ink-faint">●●● планировщик думает…</div>
         )}
-        {(closed || reconnecting) && (
-          <div
-            className="my-2 flex items-center gap-2 text-xs"
-            role="status"
-            aria-live="polite"
-            aria-busy={reconnecting}
-          >
-            <span className="text-warning-ink">
-              {reconnecting ? 'Переподключаю…' : 'Соединение закрыто'}
-            </span>
-            <button
-              type="button"
-              className="btn-secondary"
-              onClick={onReconnect}
-              disabled={reconnecting}
-              aria-busy={reconnecting}
-            >
-              {reconnecting ? 'Переподключаю…' : 'Переподключить'}
-            </button>
-          </div>
+        {showBanner && (
+          <ConnectionBanner
+            reconnecting={reconnecting}
+            interrupted={interrupted}
+            onReconnect={handleReconnect}
+          />
         )}
         {error && <div className="my-2 text-xs text-danger-ink">Ошибка: {error}</div>}
         </div>
@@ -299,7 +319,7 @@ export function Chat({
                 type="button"
                 className="chip shrink-0 transition-colors hover:border-line-brand hover:bg-surface-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand disabled:cursor-not-allowed disabled:bg-surface-muted disabled:text-ink-faint"
                 onClick={() => sendCurrent(s)}
-                disabled={streaming}
+                disabled={liveStreaming || socketDown}
               >
                 {s}
               </button>
@@ -335,7 +355,7 @@ export function Chat({
                   type="button"
                   className="shrink-0 text-ink-faint hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand disabled:cursor-not-allowed disabled:text-ink-faint"
                   aria-label={`Убрать ${doc.title}`}
-                  disabled={streaming}
+                  disabled={liveStreaming}
                   onClick={() => removeAttachment(doc.id, pending)}
                 >
                   ×
@@ -365,9 +385,9 @@ export function Chat({
               e.preventDefault()
               sendCurrent(input.trim())
             }}
-            disabled={streaming}
+            disabled={liveStreaming}
           />
-          {streaming ? (
+          {liveStreaming ? (
             <button
               type="button"
               className="btn-icon-danger"
@@ -385,7 +405,8 @@ export function Chat({
               onClick={() => sendCurrent(input.trim())}
               disabled={!canSubmit}
               aria-label="Отправить"
-              title="Отправить"
+              title={socketDown ? noConnectionTitle : 'Отправить'}
+              aria-description={socketDown ? noConnectionTitle : undefined}
             >
               <span aria-hidden="true">↑</span>
             </button>
@@ -400,7 +421,7 @@ export function Chat({
             onChange={setSelectedDocIds}
             ariaLabel="Добавить документ"
             placeholder="+"
-            disabled={streaming}
+            disabled={liveStreaming}
             placement="top"
             listClassName="w-64"
             triggerContent={<PlusIcon />}

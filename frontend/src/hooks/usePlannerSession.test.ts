@@ -1,6 +1,6 @@
 import { act, renderHook, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import type { DocumentOut } from '../api.ts'
+import type { DocumentOut, MessageOut } from '../api.ts'
 import type { PlannerConnection, ServerEvent } from '../ws.ts'
 import { usePlannerSession } from './usePlannerSession.ts'
 
@@ -55,6 +55,7 @@ function deferred<T>() {
 interface CapturedConn {
   onEvent: ((e: ServerEvent) => void) | null
   onOpen: (() => void) | undefined
+  onClose: (() => void) | undefined
   send: ReturnType<typeof vi.fn>
   close: ReturnType<typeof vi.fn>
   cancel: ReturnType<typeof vi.fn>
@@ -63,9 +64,22 @@ interface CapturedConn {
 const captured: CapturedConn = {
   onEvent: null,
   onOpen: undefined,
+  onClose: undefined,
   send: vi.fn(),
   close: vi.fn(),
   cancel: vi.fn(),
+}
+
+function storedMessage(role: string, content: string, id = 1): MessageOut {
+  return {
+    id,
+    session_id: 's1',
+    role,
+    content,
+    tool_name: null,
+    tool_call_id: null,
+    created_at: '2026-01-01T00:00:00Z',
+  }
 }
 
 describe('usePlannerSession', () => {
@@ -79,6 +93,7 @@ describe('usePlannerSession', () => {
     getSessionDocuments.mockResolvedValue([])
     captured.onEvent = null
     captured.onOpen = undefined
+    captured.onClose = undefined
     captured.send = vi.fn()
     captured.close = vi.fn()
     captured.cancel = vi.fn()
@@ -86,10 +101,11 @@ describe('usePlannerSession', () => {
       (
         _sessionId: string,
         onEvent: (e: ServerEvent) => void,
-        opts?: { onOpen?: () => void },
+        opts?: { onOpen?: () => void; onClose?: () => void },
       ): PlannerConnection => {
         captured.onEvent = onEvent
         captured.onOpen = opts?.onOpen
+        captured.onClose = opts?.onClose
         return {
           send: captured.send,
           cancel: captured.cancel,
@@ -252,5 +268,119 @@ describe('usePlannerSession', () => {
     })
 
     expect(result.current.sessionDocuments).toEqual([DOC_A, DOC_B])
+  })
+
+  it('clears streaming and cancelling on close and marks the turn interrupted', () => {
+    const { result } = renderHook(() => usePlannerSession('s1'))
+
+    act(() => {
+      captured.onOpen?.()
+      result.current.send('привет')
+      result.current.cancel()
+    })
+    expect(result.current.streaming).toBe(true)
+    expect(result.current.cancelling).toBe(true)
+
+    act(() => {
+      captured.onClose?.()
+    })
+    expect(result.current.streaming).toBe(false)
+    expect(result.current.cancelling).toBe(false)
+    expect(result.current.closed).toBe(true)
+    expect(result.current.interrupted).toBe(true)
+    expect(result.current.reconnecting).toBe(false)
+  })
+
+  it('does not mark a close outside a turn as interrupted', () => {
+    const { result } = renderHook(() => usePlannerSession('s1'))
+
+    act(() => {
+      captured.onOpen?.()
+      captured.onClose?.()
+    })
+    expect(result.current.closed).toBe(true)
+    expect(result.current.interrupted).toBe(false)
+    expect(result.current.streaming).toBe(false)
+  })
+
+  it('clears streaming when send is queued and the socket closes before open', () => {
+    const { result } = renderHook(() => usePlannerSession('s1'))
+
+    act(() => {
+      result.current.send('привет')
+    })
+    expect(result.current.streaming).toBe(true)
+    expect(result.current.messages.at(-1)).toEqual({
+      role: 'user',
+      content: 'привет',
+    })
+
+    act(() => {
+      captured.onClose?.()
+    })
+    expect(result.current.streaming).toBe(false)
+    expect(result.current.interrupted).toBe(true)
+    expect(result.current.closed).toBe(true)
+    expect(result.current.messages).toEqual([{ role: 'user', content: 'привет' }])
+  })
+
+  it('hydrates stored messages after reconnect without clearing the list first', async () => {
+    const pending = deferred<MessageOut[]>()
+    listSessionMessages
+      .mockResolvedValueOnce([])
+      .mockReturnValueOnce(pending.promise)
+
+    const { result } = renderHook(() => usePlannerSession('s1'))
+
+    await waitFor(() => {
+      expect(listSessionMessages).toHaveBeenCalledTimes(1)
+    })
+
+    act(() => {
+      result.current.send('привет')
+      captured.onClose?.()
+    })
+    expect(result.current.interrupted).toBe(true)
+    expect(result.current.messages).toEqual([{ role: 'user', content: 'привет' }])
+
+    act(() => {
+      result.current.reconnect()
+    })
+    expect(result.current.reconnecting).toBe(true)
+    expect(result.current.interrupted).toBe(false)
+    expect(result.current.closed).toBe(false)
+    expect(result.current.messages).toEqual([{ role: 'user', content: 'привет' }])
+
+    await act(async () => {
+      pending.resolve([
+        storedMessage('user', 'привет', 1),
+        storedMessage('assistant', 'ответ из БД', 2),
+      ])
+      await pending.promise
+    })
+    expect(result.current.messages).toEqual([
+      { role: 'user', content: 'привет' },
+      { role: 'assistant', content: 'ответ из БД' },
+    ])
+  })
+
+  it('clears interrupted and closed when the session changes', () => {
+    const { result, rerender } = renderHook(
+      ({ id }: { id: string | null }) => usePlannerSession(id),
+      { initialProps: { id: 's1' } },
+    )
+
+    act(() => {
+      result.current.send('привет')
+      captured.onClose?.()
+    })
+    expect(result.current.interrupted).toBe(true)
+    expect(result.current.closed).toBe(true)
+
+    rerender({ id: 's2' })
+    expect(result.current.interrupted).toBe(false)
+    expect(result.current.closed).toBe(false)
+    expect(result.current.streaming).toBe(false)
+    expect(result.current.messages).toEqual([])
   })
 })

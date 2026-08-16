@@ -942,6 +942,7 @@ export default function App() {
                       cancelling={planner.cancelling}
                       closed={planner.closed}
                       reconnecting={planner.reconnecting}
+                      interrupted={planner.interrupted}
                       error={planner.error}
                       suggestions={planner.suggestions}
                       documents={docs.documents}

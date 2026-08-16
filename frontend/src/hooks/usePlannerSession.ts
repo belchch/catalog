@@ -34,6 +34,7 @@ export interface UsePlannerSessionResult {
   cancelling: boolean
   closed: boolean
   reconnecting: boolean
+  interrupted: boolean
   error: string | null
   suggestions: string[]
   sessionDocuments: DocumentOut[]
@@ -110,6 +111,7 @@ export function usePlannerSession(
   const [cancelling, setCancelling] = useState(false)
   const [closed, setClosed] = useState(false)
   const [reconnecting, setReconnecting] = useState(false)
+  const [interrupted, setInterrupted] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [suggestions, setSuggestions] = useState<string[]>([])
   const [sessionDocuments, setSessionDocuments] = useState<DocumentOut[]>([])
@@ -139,6 +141,7 @@ export function usePlannerSession(
     setCancelling(false)
     setClosed(false)
     setReconnecting(false)
+    setInterrupted(false)
     setError(null)
     setSuggestions([])
     setSessionDocuments([])
@@ -365,6 +368,7 @@ export function usePlannerSession(
         readyRef.current = true
         setClosed(false)
         setReconnecting(false)
+        setInterrupted(false)
         const queued = pendingRef.current
         pendingRef.current = []
         for (const item of queued) {
@@ -374,6 +378,13 @@ export function usePlannerSession(
       onClose: () => {
         readyRef.current = false
         if (intentionalClose) return
+        const wasStreaming = streamingRef.current
+        streamingRef.current = false
+        setStreaming(false)
+        setCancelling(false)
+        setInterrupted(wasStreaming)
+        pendingRef.current = []
+        assistantBufferRef.current = ''
         setReconnecting(false)
         if (!hadErrorRef.current) setClosed(true)
       },
@@ -408,6 +419,7 @@ export function usePlannerSession(
     }
     streamingRef.current = true
     setStreaming(true)
+    setInterrupted(false)
     setSuggestions([])
     assistantBufferRef.current = ''
     setError(null)
@@ -427,6 +439,7 @@ export function usePlannerSession(
     if (!sessionId) return
     setReconnecting(true)
     setClosed(false)
+    setInterrupted(false)
     setError(null)
     hadErrorRef.current = false
     setReconnectNonce((n) => n + 1)
@@ -504,6 +517,7 @@ export function usePlannerSession(
     cancelling,
     closed,
     reconnecting,
+    interrupted,
     error,
     suggestions,
     sessionDocuments,
