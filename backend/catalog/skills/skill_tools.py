@@ -109,6 +109,40 @@ def _merge_tools(*registries: ToolRegistry) -> ToolRegistry:
     return merged
 
 
+def _deadline_exceeded_result(
+    *,
+    db: Database,
+    session_id: str,
+    skill_id: str,
+    skill_name: str,
+    pinned_hash: str,
+    depth: int,
+    run_id: str | None = None,
+) -> dict[str, Any]:
+    if run_id is None:
+        run_id = create_run(
+            db,
+            skill_id=skill_id,
+            session_id=session_id,
+            persist=False,
+            parent_run_id=SESSION_TOOL_PARENT_RUN_ID,
+        )
+        trace = Trace()
+        trace.entries.append(
+            TraceEntry("deadline", 0, {"error": "deadline exceeded"})
+        )
+        finish_run(db, run_id, status="failed", output_doc_id=None, trace=trace)
+    return {
+        "ok": False,
+        "error": "deadline exceeded",
+        "skill_id": skill_id,
+        "skill_name": skill_name,
+        "config_hash": pinned_hash,
+        "depth": depth,
+        "run_id": run_id,
+    }
+
+
 def _budget_exhausted_result(
     *,
     db: Database,
@@ -228,6 +262,15 @@ def build_session_skill_tools(
                     "depth": nested.depth,
                 }
             hold = None
+            if _budget is not None and _budget.mark_deadline_if_exceeded():
+                return _deadline_exceeded_result(
+                    db=db,
+                    session_id=session_id,
+                    skill_id=_skill_id,
+                    skill_name=_name,
+                    pinned_hash=_hash,
+                    depth=nested.depth,
+                )
             if _budget is not None:
                 needed_llm, needed_runs = estimate_skill_budget(_config)
                 hold = _budget.reserve(needed_llm, needed_runs)
@@ -259,7 +302,7 @@ def build_session_skill_tools(
             )
             apply_tools = _merge_tools(base_tools, nested_skill_tools)
             try:
-                with nested_skill_hold(hold):
+                with nested_skill_hold(hold, _budget):
                     result = await apply_skill_collect(
                         provider=resolved_provider,
                         db=db,
@@ -288,6 +331,16 @@ def build_session_skill_tools(
             finally:
                 if _budget is not None and hold is not None:
                     _budget.release(hold)
+            if _budget is not None and _budget.deadline_hit:
+                return _deadline_exceeded_result(
+                    db=db,
+                    session_id=session_id,
+                    skill_id=_skill_id,
+                    skill_name=_name,
+                    pinned_hash=_hash,
+                    depth=nested.depth,
+                    run_id=result.run_id,
+                )
             verify_failures: list[str] = []
             for entry in result.trace.entries:
                 if entry.kind == "verify" and not entry.data.get("passed", True):

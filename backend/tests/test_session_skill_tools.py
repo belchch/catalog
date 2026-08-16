@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import re
+import time
 from dataclasses import replace
 from pathlib import Path
 
@@ -16,7 +17,9 @@ from catalog.skills.apply import apply_skill_collect
 from catalog.skills.budget import (
     SkillBudget,
     estimate_skill_budget,
+    make_turn_budget,
     nested_skill_hold,
+    turn_deadline_seconds,
 )
 from catalog.skills.config import PipelineStep, SkillConfig, VerifyCheck
 from catalog.skills.repo_run import get_run
@@ -816,4 +819,246 @@ def test_ws_budget_exhausted_does_not_fail_turn(client, provider, db) -> None:
     payload = json.loads(results[0]["result"])
     assert payload["ok"] is False
     assert payload["error"] == "budget exhausted"
+    assert frames[-1]["status"] == "ok"
+
+
+def test_turn_deadline_seconds_uses_session_timeout_and_floor() -> None:
+    assert turn_deadline_seconds(30) == 600
+    assert turn_deadline_seconds(60) == 900
+    assert turn_deadline_seconds(120) == 1800
+    at_floor = make_turn_budget(
+        llm_calls_left=60,
+        nested_runs_left=20,
+        llm_timeout_seconds=30,
+        now=1000.0,
+    )
+    from_session = make_turn_budget(
+        llm_calls_left=60,
+        nested_runs_left=20,
+        llm_timeout_seconds=120,
+        now=1000.0,
+    )
+    default_timeout = make_turn_budget(
+        llm_calls_left=60,
+        nested_runs_left=20,
+        llm_timeout_seconds=60,
+        now=1000.0,
+    )
+    assert at_floor.deadline_monotonic == 1600.0
+    assert from_session.deadline_monotonic == 2800.0
+    assert default_timeout.deadline_monotonic == 1900.0
+    assert from_session.deadline_monotonic != default_timeout.deadline_monotonic
+    assert turn_deadline_seconds(60) >= 60 * 10
+
+
+def test_expired_deadline_does_not_start_nested_run(db: Database) -> None:
+    sid = create_session(db)
+    skill_id = _script_skill(db)
+    attach_skills(db, sid, [skill_id])
+    record = get_skill(db, skill_id)
+    assert record is not None
+    name = skill_tool_name(record, used=set())
+    provider = _JudgeProvider(["SHOULD NOT RUN"])
+    budget = SkillBudget(
+        llm_calls_left=60,
+        nested_runs_left=20,
+        deadline_monotonic=time.monotonic() - 1,
+    )
+    tools = build_session_skill_tools(
+        db,
+        sid,
+        workspace_dir="/tmp",
+        base_tools=ToolRegistry(),
+        provider=provider,
+        budget=budget,
+    )
+    _, fn = tools.get(name)
+    assert fn is not None
+    out = asyncio.run(fn(text="hello"))
+    assert out["ok"] is False
+    assert out["error"] == "deadline exceeded"
+    assert provider.requests == []
+    assert budget.nested_runs_left == 20
+    assert budget.llm_calls_left == 60
+    assert budget.deadline_hit is True
+    run = get_run(db, out["run_id"])
+    assert run is not None
+    entries = json.loads(run["trace_json"] or "[]")
+    nodes = [e for e in entries if e["kind"] == "deadline"]
+    assert nodes
+    assert nodes[0]["data"]["error"] == "deadline exceeded"
+
+
+def test_budget_exhausted_when_deadline_still_open(db: Database) -> None:
+    sid = create_session(db)
+    skill_id = _script_skill(db)
+    attach_skills(db, sid, [skill_id])
+    record = get_skill(db, skill_id)
+    assert record is not None
+    name = skill_tool_name(record, used=set())
+    budget = SkillBudget(
+        llm_calls_left=60,
+        nested_runs_left=0,
+        deadline_monotonic=time.monotonic() + 900,
+    )
+    tools = build_session_skill_tools(
+        db, sid, workspace_dir="/tmp", base_tools=ToolRegistry(), budget=budget
+    )
+    _, fn = tools.get(name)
+    assert fn is not None
+    out = asyncio.run(fn(text="hello"))
+    assert out["ok"] is False
+    assert out["error"] == "budget exhausted"
+    assert budget.deadline_hit is False
+
+
+def test_nested_runner_stops_between_iterations_on_deadline(
+    db: Database, client
+) -> None:
+    workspace = Path(client.app.state.workspace_manager.root)
+    doc_id = ingest_file(db, workspace, filename="in.md", content=b"hello").id
+    skill_id = _agent_skill(db)
+    record = get_skill(db, skill_id)
+    assert record is not None
+    budget = SkillBudget(
+        llm_calls_left=60,
+        nested_runs_left=20,
+        deadline_monotonic=time.monotonic() + 1000,
+    )
+    hold = budget.reserve(*estimate_skill_budget(record.config))
+    assert hold is not None
+
+    class _ExpireAfterFirst(_JudgeProvider):
+        def __init__(self) -> None:
+            super().__init__([])
+            self.step = 0
+
+        async def complete(self, model, messages, tools=None, temperature=0.0, **kwargs):
+            self.requests.append({"model": model})
+            self.step += 1
+            budget.deadline_monotonic = time.monotonic() - 1
+            return CompletionResult(
+                content=None,
+                tool_calls=[
+                    ToolCall(
+                        id="c1",
+                        name="read_document",
+                        arguments={"doc_id": doc_id},
+                    )
+                ],
+                finish_reason="tool_calls",
+            )
+
+    provider = _ExpireAfterFirst()
+
+    def _run() -> None:
+        with nested_skill_hold(hold, budget):
+            asyncio.run(
+                apply_skill_collect(
+                    provider=provider,
+                    db=db,
+                    workspace_dir=str(workspace),
+                    skill=record.config,
+                    skill_id=skill_id,
+                    input_doc_ids=[doc_id],
+                    base_tools=build_document_tools(db, workspace),
+                    persist=False,
+                )
+            )
+
+    try:
+        _run()
+    finally:
+        budget.release(hold)
+    assert provider.step == 1
+    assert hold.llm_used == 1
+    assert budget.deadline_hit is True
+
+
+def test_ws_deadline_uses_session_llm_timeout(
+    client, provider, db, monkeypatch
+) -> None:
+    captured: list[int] = []
+    real = make_turn_budget
+
+    def _spy(
+        *,
+        llm_calls_left: int,
+        nested_runs_left: int,
+        llm_timeout_seconds: int,
+        now: float | None = None,
+    ) -> SkillBudget:
+        captured.append(llm_timeout_seconds)
+        return real(
+            llm_calls_left=llm_calls_left,
+            nested_runs_left=nested_runs_left,
+            llm_timeout_seconds=llm_timeout_seconds,
+            now=now,
+        )
+
+    monkeypatch.setattr("catalog.api.sessions.make_turn_budget", _spy)
+    sid = client.post("/sessions").json()["id"]
+    patched = client.patch(f"/sessions/{sid}", json={"llm_timeout_seconds": 90})
+    assert patched.status_code == 200
+    assert patched.json()["llm_timeout_seconds"] == 90
+    provider.script = [
+        CompletionResult(content="ok", tool_calls=[], finish_reason="stop"),
+    ]
+    with client.websocket_connect(f"/sessions/{sid}") as ws:
+        first = ws.receive_json()
+        assert first.get("type") == "suggestions"
+        ws.send_text("hi")
+        while True:
+            frame = ws.receive_json()
+            if frame.get("type") == "finish":
+                break
+    assert captured == [90]
+
+
+def test_ws_deadline_exceeded_does_not_fail_turn(
+    client, provider, db, monkeypatch
+) -> None:
+    def _expired(
+        *,
+        llm_calls_left: int,
+        nested_runs_left: int,
+        llm_timeout_seconds: int,
+        now: float | None = None,
+    ) -> SkillBudget:
+        return SkillBudget(
+            llm_calls_left=llm_calls_left,
+            nested_runs_left=nested_runs_left,
+            deadline_monotonic=time.monotonic() - 1,
+        )
+
+    monkeypatch.setattr("catalog.api.sessions.make_turn_budget", _expired)
+    sid = client.post("/sessions").json()["id"]
+    skill_id = _script_skill(db)
+    client.post(f"/sessions/{sid}/tools", json={"skill_ids": [skill_id]})
+    record = get_skill(db, skill_id)
+    assert record is not None
+    name = skill_tool_name(record, used=set())
+    provider.script = [
+        CompletionResult(
+            content=None,
+            tool_calls=[ToolCall(id="t1", name=name, arguments={"text": "one"})],
+            finish_reason="tool_calls",
+        ),
+        CompletionResult(content="продолжаю", tool_calls=[], finish_reason="stop"),
+    ]
+    with client.websocket_connect(f"/sessions/{sid}") as ws:
+        first = ws.receive_json()
+        assert first.get("type") == "suggestions"
+        ws.send_text("вызови скилл")
+        frames: list[dict] = []
+        while True:
+            frame = ws.receive_json()
+            frames.append(frame)
+            if frame.get("type") == "finish":
+                break
+    results = [f for f in frames if f.get("type") == "tool_result"]
+    assert len(results) == 1
+    payload = json.loads(results[0]["result"])
+    assert payload["ok"] is False
+    assert payload["error"] == "deadline exceeded"
     assert frames[-1]["status"] == "ok"

@@ -56,7 +56,7 @@ from catalog.skills.artifact_tools import (
     validate_pipeline_steps,
 )
 from catalog.skills.config import SKILL_KINDS, compute_tags, pipeline_step_to_dict
-from catalog.skills.budget import SkillBudget
+from catalog.skills.budget import SkillBudget, make_turn_budget
 from catalog.skills.skill_tools import SkillCallContext, build_session_skill_tools
 from catalog.skills.script_runner import (
     SCRIPT_CODE_CONTRACT_RU,
@@ -846,9 +846,10 @@ async def session_ws(
                 if session_row is not None
                 else DEFAULT_LLM_TIMEOUT_SECONDS
             )
-            budget = SkillBudget(
+            budget = make_turn_budget(
                 llm_calls_left=settings.skill_budget_llm_calls,
                 nested_runs_left=settings.skill_budget_nested_runs,
+                llm_timeout_seconds=timeout,
             )
             tools = _ws_session_tools(
                 db,
