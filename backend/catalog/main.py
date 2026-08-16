@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import os
-import subprocess
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from importlib.resources import files
@@ -13,6 +12,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
 from catalog.api import checks, documents, export, models, runs, sessions, skills, workspaces
+from catalog.build_stamp import baked_git_sha, git_sha_from_repo
 from catalog.config import get_settings, with_persisted_skill_budget, with_resolved_keys
 from catalog.llm.factory import build_providers, select_provider
 from catalog.llm.openrouter import build_debug_hooks
@@ -144,19 +144,11 @@ def _resolve_git_sha() -> str:
         return env
     global _REPO_GIT_SHA
     if _REPO_GIT_SHA is None:
-        try:
-            out = subprocess.run(
-                ["git", "rev-parse", "--short", "HEAD"],
-                cwd=_REPO_ROOT,
-                check=True,
-                capture_output=True,
-                text=True,
-                timeout=2,
-            )
-            _REPO_GIT_SHA = out.stdout.strip()
-        except (OSError, subprocess.SubprocessError):
-            _REPO_GIT_SHA = ""
-    return _REPO_GIT_SHA
+        _REPO_GIT_SHA = git_sha_from_repo(_REPO_ROOT, timeout=2)
+    if _REPO_GIT_SHA:
+        return _REPO_GIT_SHA
+    baked = baked_git_sha()
+    return "" if baked == "unknown" else baked
 
 
 @app.get("/health")

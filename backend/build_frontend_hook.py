@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import importlib.util
 import os
 import shutil
 import subprocess
@@ -14,14 +15,29 @@ _STATIC_DIR = _BACKEND_DIR / "catalog" / "static"
 _TRUTHY = {"1", "true", "yes", "on"}
 
 
+def _is_dist_build() -> bool:
+    argv = " ".join(sys.argv).lower()
+    return any(token in argv for token in ("bdist_wheel", "sdist", "build_wheel", "build_sdist"))
+
+
 def _should_build_frontend() -> bool:
     forced = os.getenv("CATALOG_BUILD_FRONTEND", "").strip().lower()
     if forced in {"0", "false", "no", "off"}:
         return False
     if forced in _TRUTHY:
         return True
-    argv = " ".join(sys.argv).lower()
-    return any(token in argv for token in ("bdist_wheel", "sdist", "build_wheel", "build_sdist"))
+    return _is_dist_build()
+
+
+def stamp_build_sha() -> str:
+    spec = importlib.util.spec_from_file_location(
+        "catalog_build_stamp", _BACKEND_DIR / "catalog" / "build_stamp.py"
+    )
+    if spec is None or spec.loader is None:
+        return ""
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return str(module.write_build_sha())
 
 
 def build_frontend_assets() -> None:
@@ -40,6 +56,8 @@ def build_frontend_assets() -> None:
 
 class build_py(_build_py):
     def run(self) -> None:
+        if _is_dist_build():
+            stamp_build_sha()
         if _should_build_frontend():
             build_frontend_assets()
         super().run()

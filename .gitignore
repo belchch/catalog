@@ -16,6 +16,9 @@ dist/
 # Packaged SPA assets (copied into the wheel by the backend build hook)
 backend/catalog/static/
 
+# Commit stamp baked into the wheel by the backend build hook
+backend/catalog/_build_sha.py
+
 # Env
 .env
 .env.*
