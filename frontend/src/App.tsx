@@ -742,8 +742,12 @@ export default function App() {
     <div className="catalog-shell flex h-dvh flex-col">
       <header className="catalog-header flex shrink-0 items-center justify-between px-5">
         <div className="flex min-w-0 items-center gap-3">
-          <FolderIcon className="catalog-header__folder size-5 shrink-0" />
-          <h1 className="truncate text-base font-semibold">Catalog — планировщик скиллов</h1>
+          <span className="catalog-header__mark" aria-hidden="true">C</span>
+          <h1 className="flex min-w-0 items-center gap-2.5">
+            <span className="catalog-header__brand">Catalog</span>
+            <span className="catalog-header__divider" aria-hidden="true" />
+            <span className="catalog-header__subtitle truncate">планировщик скиллов</span>
+          </h1>
           {gitSha ? (
             <span className="shrink-0 font-mono text-xs text-ink-faint" title="git sha">
               {gitSha}
@@ -875,7 +879,7 @@ export default function App() {
           ) : !hasWorkspace ? (
             <div className="flex h-full items-center justify-center p-6">
               <div className="max-w-sm text-center">
-                <div className="mb-3 flex justify-center text-ink-faint">
+                <div className="mb-3 flex justify-center text-gold">
                   <FolderIcon className="size-9" />
                 </div>
                 <h2 className="mb-1 text-sm font-semibold text-ink">

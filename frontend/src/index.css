@@ -65,6 +65,9 @@
   --accent-grad-b: #d946ef;
   --accent-grad-a-strong: #7c3aed;
   --accent-grad-b-strong: #c026d3;
+  --gold-grad-a: #ea580c;
+  --gold-grad-b: #f59e0b;
+  --gold-ink: #b45309;
   --glow-violet: rgba(139, 92, 246, 0.18);
   --glow-fuchsia: rgba(217, 70, 239, 0.10);
 
@@ -269,11 +272,42 @@ html, body, #root {
 
 .catalog-shell { background: var(--surface); color: var(--ink); }
 .catalog-header {
+  position: relative;
   min-height: 62px;
   border-bottom: 1px solid var(--header-line);
   background: var(--header-bg);
 }
-.catalog-header__folder { color: var(--header-folder); }
+.catalog-header::before {
+  content: '';
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 2px;
+  background: linear-gradient(90deg, var(--accent-grad-a-strong), var(--accent-grad-b));
+  pointer-events: none;
+}
+.catalog-header__mark {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 26px; height: 26px; flex: none;
+  border-radius: 8px;
+  background: linear-gradient(135deg, var(--gold-grad-b), var(--gold-grad-a));
+  color: #fff;
+  font-family: 'Space Grotesk', Inter, ui-sans-serif, sans-serif;
+  font-size: 15px; font-weight: 700; line-height: 1;
+  box-shadow: 0 1px 3px rgba(234, 88, 12, 0.35);
+}
+.catalog-header__brand {
+  font-family: 'Space Grotesk', Inter, ui-sans-serif, sans-serif;
+  font-size: 17px; font-weight: 700; letter-spacing: -0.02em;
+  color: var(--ink);
+}
+.catalog-header__divider {
+  width: 1px; height: 16px; flex: none;
+  background: var(--line-strong);
+}
+.catalog-header__subtitle {
+  font-size: 13px; font-weight: 400;
+  color: var(--ink-faint);
+}
 .catalog-notice {
   border-bottom: 1px solid var(--notice-line);
   background: var(--notice-bg);
@@ -296,7 +330,7 @@ html, body, #root {
 .catalog-mark {
   display: inline-flex; align-items: center; justify-content: center;
   width: 23px; height: 23px; border-radius: 50%;
-  background: linear-gradient(135deg, var(--accent-grad-a), var(--accent-grad-b));
+  background: linear-gradient(135deg, var(--gold-grad-b), var(--gold-grad-a));
   color: var(--surface);
   font-size: 12px; font-weight: 700;
 }
@@ -312,6 +346,7 @@ html, body, #root {
   color: var(--ink); font-size: 15px; text-align: left;
 }
 .catalog-new-chat:hover { background: var(--sidebar-brand-hover); }
+.catalog-new-chat > span:first-child { color: var(--gold-grad-a); }
 .catalog-sidebar__sections {
   display: flex; flex: 1; flex-direction: column; gap: 10px;
   min-height: 0; overflow-y: auto; overscroll-behavior: contain;

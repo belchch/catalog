@@ -65,6 +65,10 @@ module.exports = {
           soft: "var(--rose-soft)",
           ink: "var(--rose-ink)",
         },
+        gold: {
+          DEFAULT: "var(--gold-grad-a)",
+          ink: "var(--gold-ink)",
+        },
       },
       borderRadius: {
         card: "var(--radius-card)",

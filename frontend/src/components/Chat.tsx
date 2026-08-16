@@ -293,7 +293,7 @@ export function Chat({
           />
         ))}
         {liveStreaming && (
-          <div className="my-2 text-xs text-ink-faint">●●● планировщик думает…</div>
+          <div className="my-2 text-xs text-gold-ink">●●● планировщик думает…</div>
         )}
         {showBanner && (
           <ConnectionBanner

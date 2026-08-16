@@ -17,6 +17,9 @@
 | accent | `bg-accent`, `hover:bg-accent-hover`, `bg-accent-soft`, `text-accent-ink`, `border-accent-line` | Яркий фиолетовый `#7c3aed`: CTA «Создать скилл» (градиент в фуксию), hover подсказок, тег `ai`, сессия «планирование» |
 | teal | `bg-teal-soft`, `text-teal-ink` | тип документа, input `documents` |
 | rose | `bg-rose-soft`, `text-rose-ink` | arity трека, input `previous` |
+| gold | `text-gold`, `text-gold-ink` | Тёплый контраст-акцент: плашка-логотип «C», иконка пера, индикатор «планировщик думает» |
+
+Логотип в шапке: золотая плашка «C» (26px, radius 8) + словомарка «Catalog» шрифтом Space Grotesk (700, сплошной `--ink`) + подзаголовок через тонкий разделитель. Градиентный текст не используется.
 | elev | `rounded-card` / `rounded-card-lg`, `shadow-card` | Карточки 20–24px |
 
 Оверлей модалок: `var(--overlay)` / класс `.modal-overlay`. Сайдбар: `var(--sidebar)` (`#f3f8fc`).
