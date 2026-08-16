@@ -1,86 +1,82 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="500" viewBox="0 0 1200 500" role="img" aria-labelledby="title desc">
-  <title id="title">Реестр системных инструментов</title>
-  <desc id="desc">Системный реестр содержит доступные возможности, а конфигурация скилла выдаёт ему разрешённое подмножество.</desc>
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="490" viewBox="0 0 1200 490" role="img" aria-labelledby="trTitle trDesc">
+  <title id="trTitle">Реестр системных инструментов</title>
+  <desc id="trDesc">Реестр содержит возможности приложения, allowed_tools выдаёт скиллу подмножество, неизвестный инструмент отклоняется до вызова модели.</desc>
   <defs>
-    <marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto">
-      <path d="M0 0L10 5L0 10Z" fill="#829ab1"/>
-    </marker>
-    <marker id="arrowRed" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto">
-      <path d="M0 0L10 5L0 10Z" fill="#c53030"/>
-    </marker>
-    <filter id="shadow" x="-10%" y="-20%" width="120%" height="150%">
-      <feDropShadow dx="0" dy="5" stdDeviation="8" flood-color="#102a43" flood-opacity=".08"/>
+    <filter id="trShadow" x="-20%" y="-40%" width="140%" height="200%">
+      <feDropShadow dx="0" dy="2" stdDeviation="5" flood-color="#0f2b46" flood-opacity="0.07"/>
     </filter>
   </defs>
-  <rect width="1200" height="500" rx="28" fill="#f7fafc"/>
-  <text x="60" y="62" fill="#102a43" font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="26" font-weight="650">Возможности системы и разрешения скилла — разные уровни</text>
-  <text x="60" y="92" fill="#627d98" font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="16">Скилл видит только инструменты, перечисленные в его конфигурации.</text>
-  <g fill="none" stroke="#829ab1" stroke-width="2.5" marker-end="url(#arrow)">
-    <path d="M319 281H390"/>
-    <path d="M730 281H801"/>
-  </g>
-  <path d="M730 207C850 126 1004 159 1082 232" fill="none" stroke="#c53030" stroke-width="2" stroke-dasharray="7 7" marker-end="url(#arrowRed)"/>
-  <path d="M196 390V422H560V391" fill="none" stroke="#b8a3e8" stroke-width="2" stroke-dasharray="7 7" marker-end="url(#arrow)"/>
-  <g font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" filter="url(#shadow)">
-    <g transform="translate(60 153)">
-      <rect width="259" height="238" rx="22" fill="#ffffff" stroke="#d9e2ec"/>
-      <text x="24" y="38" fill="#102a43" font-size="18" font-weight="700">Системный реестр</text>
-      <text x="24" y="61" fill="#627d98" font-size="13">Доступно приложению</text>
-      <g transform="translate(20 82)">
-        <rect width="219" height="38" rx="10" fill="#f0f4f8"/>
-        <text x="14" y="24" fill="#243b53" font-size="14" font-family="'SFMono-Regular', Consolas, monospace">list_documents</text>
-        <rect x="169" y="9" width="38" height="20" rx="10" fill="#e3f8f4"/>
-        <text x="178" y="23" fill="#147d83" font-size="10" font-weight="700">READ</text>
-      </g>
-      <g transform="translate(20 130)">
-        <rect width="219" height="38" rx="10" fill="#f0f4f8"/>
-        <text x="14" y="24" fill="#243b53" font-size="14" font-family="'SFMono-Regular', Consolas, monospace">read_document</text>
-        <rect x="169" y="9" width="38" height="20" rx="10" fill="#e3f8f4"/>
-        <text x="178" y="23" fill="#147d83" font-size="10" font-weight="700">READ</text>
-      </g>
-      <g transform="translate(20 178)">
-        <rect width="219" height="38" rx="10" fill="#fff5e6"/>
-        <text x="14" y="24" fill="#243b53" font-size="14" font-family="'SFMono-Regular', Consolas, monospace">export_docx</text>
-        <rect x="164" y="9" width="43" height="20" rx="10" fill="#ffe8cc"/>
-        <text x="171" y="23" fill="#b44d12" font-size="10" font-weight="700">WRITE</text>
-      </g>
+  <rect x="0.5" y="0.5" width="1199" height="489" rx="24" fill="#fbfcfe" stroke="#e4e9f0"/>
+  <g font-family="Inter, -apple-system, 'Segoe UI', sans-serif">
+    <text x="64" y="62" fill="#16324c" font-size="25" font-weight="650">Возможности системы и разрешения скилла</text>
+    <text x="64" y="92" fill="#64748b" font-size="15.5">Скилл видит только инструменты из своего allowed_tools.</text>
+    <g stroke="#9fb0c1" stroke-width="2.5" fill="none" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M396 257L404 265L396 273"/>
+      <path d="M806 257L814 265L806 273"/>
     </g>
-    <g transform="translate(390 184)">
-      <rect width="340" height="207" rx="22" fill="#e8f4fc" stroke="#85c8ef" stroke-width="1.5"/>
-      <text x="24" y="38" fill="#102a43" font-size="18" font-weight="700">allowed_tools</text>
-      <text x="24" y="61" fill="#486581" font-size="13">Зафиксировано в конфигурации скилла</text>
-      <g transform="translate(22 84)">
-        <rect width="296" height="42" rx="11" fill="#ffffff" stroke="#b6d9f2"/>
-        <circle cx="21" cy="21" r="9" fill="#1d83c4"/>
-        <path d="M17 21L20 24L26 17" fill="none" stroke="#ffffff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-        <text x="40" y="26" fill="#243b53" font-size="14" font-family="'SFMono-Regular', Consolas, monospace">read_document</text>
+    <path d="M214 388V404" stroke="#cbbcf0" stroke-width="2" stroke-dasharray="4 5"/>
+    <path d="M609 364V404" stroke="#e4a69d" stroke-width="2" stroke-dasharray="4 5"/>
+    <g filter="url(#trShadow)">
+      <g transform="translate(64 140)">
+        <rect width="300" height="248" rx="18" fill="#ffffff" stroke="#e4e9f0"/>
+        <text x="24" y="42" fill="#16324c" font-size="18" font-weight="700">Системный реестр</text>
+        <text x="24" y="64" fill="#8b98a9" font-size="12.5">возможности приложения</text>
+        <g transform="translate(20 84)">
+          <rect width="260" height="40" rx="10" fill="#f2f6fa"/>
+          <text x="16" y="25" fill="#33475c" font-size="13.5" font-family="'SF Mono', Consolas, monospace">list_documents</text>
+          <rect x="198" y="9" width="46" height="22" rx="11" fill="#e5f6ec"/>
+          <text x="221" y="24" fill="#1f7a4d" text-anchor="middle" font-size="10" font-weight="700">READ</text>
+        </g>
+        <g transform="translate(20 132)">
+          <rect width="260" height="40" rx="10" fill="#f2f6fa"/>
+          <text x="16" y="25" fill="#33475c" font-size="13.5" font-family="'SF Mono', Consolas, monospace">read_document</text>
+          <rect x="198" y="9" width="46" height="22" rx="11" fill="#e5f6ec"/>
+          <text x="221" y="24" fill="#1f7a4d" text-anchor="middle" font-size="10" font-weight="700">READ</text>
+        </g>
+        <g transform="translate(20 180)">
+          <rect width="260" height="40" rx="10" fill="#fdf3e3"/>
+          <text x="16" y="25" fill="#33475c" font-size="13.5" font-family="'SF Mono', Consolas, monospace">export_docx</text>
+          <rect x="194" y="9" width="50" height="22" rx="11" fill="#f8e3c2"/>
+          <text x="219" y="24" fill="#9a5410" text-anchor="middle" font-size="10" font-weight="700">WRITE</text>
+        </g>
       </g>
-      <g transform="translate(22 137)">
-        <rect width="296" height="42" rx="11" fill="#ffffff" stroke="#b6d9f2"/>
-        <circle cx="21" cy="21" r="9" fill="#1d83c4"/>
-        <path d="M17 21L20 24L26 17" fill="none" stroke="#ffffff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-        <text x="40" y="26" fill="#243b53" font-size="14" font-family="'SFMono-Regular', Consolas, monospace">export_docx</text>
+      <g transform="translate(444 170)">
+        <rect width="330" height="190" rx="18" fill="#eaf4fc" stroke="#a8d2ee"/>
+        <text x="24" y="42" fill="#16324c" font-size="17" font-weight="700" font-family="'SF Mono', Consolas, monospace">allowed_tools</text>
+        <text x="24" y="64" fill="#5b7590" font-size="12.5">разрешённое подмножество для скилла</text>
+        <g transform="translate(22 82)">
+          <rect width="286" height="42" rx="10" fill="#ffffff" stroke="#bcd9ee"/>
+          <circle cx="21" cy="21" r="9" fill="#1d83c4"/>
+          <path d="M17 21l3 3 6-7" fill="none" stroke="#ffffff" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+          <text x="40" y="26" fill="#33475c" font-size="13.5" font-family="'SF Mono', Consolas, monospace">read_document</text>
+        </g>
+        <g transform="translate(22 134)">
+          <rect width="286" height="42" rx="10" fill="#ffffff" stroke="#bcd9ee"/>
+          <circle cx="21" cy="21" r="9" fill="#1d83c4"/>
+          <path d="M17 21l3 3 6-7" fill="none" stroke="#ffffff" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+          <text x="40" y="26" fill="#33475c" font-size="13.5" font-family="'SF Mono', Consolas, monospace">export_docx</text>
+        </g>
       </g>
-    </g>
-    <g transform="translate(801 216)">
-      <rect width="203" height="143" rx="22" fill="#ffffff" stroke="#9ae6b4" stroke-width="1.5"/>
-      <circle cx="42" cy="43" r="22" fill="#e6ffed"/>
-      <path d="M32 43L39 50L54 35" fill="none" stroke="#2f855a" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
-      <text x="24" y="94" fill="#102a43" font-size="18" font-weight="700">Прогон</text>
-      <text x="24" y="117" fill="#627d98" font-size="13">только разрешённое</text>
-    </g>
-    <g transform="translate(1060 242)">
-      <rect width="80" height="80" rx="20" fill="#fff0f0" stroke="#f7b2b2"/>
-      <path d="M28 28L52 52M52 28L28 52" stroke="#c53030" stroke-width="4" stroke-linecap="round"/>
-      <text x="40" y="105" fill="#9b2c2c" text-anchor="middle" font-size="12" font-weight="650">неизвестный</text>
-      <text x="40" y="121" fill="#9b2c2c" text-anchor="middle" font-size="12" font-weight="650">тул</text>
-    </g>
-    <g transform="translate(60 422)">
-      <rect width="500" height="52" rx="14" fill="#f0eaff" stroke="#b8a3e8" stroke-dasharray="7 6"/>
-      <text x="18" y="32" fill="#6741b6" font-size="14" font-weight="650">Плагин</text>
-      <text x="90" y="32" fill="#486581" font-size="14">инструменты · проверки · форматы · шаблоны</text>
-      <rect x="394" y="13" width="88" height="26" rx="13" fill="#ffffff"/>
-      <text x="438" y="31" fill="#6741b6" text-anchor="middle" font-size="11" font-weight="700">ROADMAP</text>
+      <g transform="translate(854 182)">
+        <rect width="282" height="166" rx="18" fill="#ffffff" stroke="#e4e9f0"/>
+        <rect x="20" y="20" width="44" height="44" rx="12" fill="#e5f6ec"/>
+        <path d="M32 43l7 7 14-15" fill="none" stroke="#2f855a" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/>
+        <text x="20" y="102" fill="#16324c" font-size="17" font-weight="650">Прогон скилла</text>
+        <text x="20" y="126" fill="#8b98a9" font-size="12.5">видит только выданные тулы</text>
+      </g>
+      <g transform="translate(64 404)">
+        <rect width="330" height="48" rx="12" fill="#ffffff" stroke="#cbbcf0" stroke-dasharray="6 5"/>
+        <text x="20" y="30" fill="#6d4fc4" font-size="13.5" font-weight="700">Плагин</text>
+        <text x="82" y="30" fill="#64748b" font-size="12.5">тулы · проверки · форматы</text>
+        <rect x="256" y="13" width="58" height="22" rx="11" fill="#efeafb"/>
+        <text x="285" y="28" fill="#6d4fc4" text-anchor="middle" font-size="9.5" font-weight="700">ROADMAP</text>
+      </g>
+      <g transform="translate(444 404)">
+        <rect width="330" height="48" rx="12" fill="#fdecea" stroke="#f2c4bd"/>
+        <circle cx="26" cy="24" r="10" fill="#c0392b"/>
+        <path d="M22 20l8 8M30 20l-8 8" stroke="#ffffff" stroke-width="1.8" stroke-linecap="round"/>
+        <text x="46" y="29" fill="#8f2a1f" font-size="13">неизвестный тул — отказ до вызова LLM</text>
+      </g>
     </g>
   </g>
 </svg>
