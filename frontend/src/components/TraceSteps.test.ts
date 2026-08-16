@@ -3,8 +3,10 @@ import type { RunStep } from '../hooks/useRunStream.ts'
 import {
   extractChildRunId,
   foldNestedRuns,
+  formatCheckParams,
   runTraceToSteps,
   segmentTraceSteps,
+  toCheckOutcomes,
   traceGroupStatus,
 } from '../lib/traceSegments.ts'
 
@@ -231,6 +233,7 @@ describe('runTraceToSteps', () => {
       text: 'Проверка (итерация 1)',
       passed: true,
     })
+    expect(steps[2].checks).toBeUndefined()
     expect(steps[3]).toMatchObject({
       kind: 'tool_call',
       toolName: 'read_document',
@@ -256,5 +259,144 @@ describe('runTraceToSteps', () => {
   it('returns an empty list for a null or empty trace', () => {
     expect(runTraceToSteps(null, runId)).toEqual([])
     expect(runTraceToSteps([], runId)).toEqual([])
+  })
+
+  it('attaches normalized checks on a verify entry', () => {
+    const steps = runTraceToSteps(
+      [
+        {
+          kind: 'verify',
+          iteration: 1,
+          data: {
+            passed: false,
+            failures: ['too short'],
+            checks: [
+              { check: 'non_empty', passed: true },
+              { check: 'min_length', passed: false, reason: 'too short' },
+            ],
+          },
+        },
+      ],
+      runId,
+    )
+    expect(steps[0].checks).toEqual([
+      {
+        check: 'non_empty',
+        params: {},
+        passed: true,
+        reason: null,
+        source: 'builtin',
+        skipped: false,
+      },
+      {
+        check: 'min_length',
+        params: {},
+        passed: false,
+        reason: 'too short',
+        source: 'builtin',
+        skipped: false,
+      },
+    ])
+  })
+
+  it('leaves checks undefined when the verify entry has none', () => {
+    const steps = runTraceToSteps(
+      [{ kind: 'verify', iteration: 1, data: { passed: true, failures: [] } }],
+      runId,
+    )
+    expect(steps[0].checks).toBeUndefined()
+  })
+})
+
+describe('toCheckOutcomes', () => {
+  it('normalizes a valid list and skips junk entries', () => {
+    expect(
+      toCheckOutcomes([
+        { check: 'non_empty' },
+        { notACheck: true },
+        null,
+        'x',
+        {
+          check: 'has_section',
+          params: { heading: 'X' },
+          passed: true,
+          reason: 'ok',
+          source: 'custom',
+          skipped: true,
+        },
+      ]),
+    ).toEqual([
+      {
+        check: 'non_empty',
+        params: {},
+        passed: false,
+        reason: null,
+        source: 'builtin',
+        skipped: false,
+      },
+      {
+        check: 'has_section',
+        params: { heading: 'X' },
+        passed: true,
+        reason: 'ok',
+        source: 'custom',
+        skipped: true,
+      },
+    ])
+  })
+
+  it('returns undefined for missing, empty, or invalid payloads', () => {
+    expect(toCheckOutcomes(undefined)).toBeUndefined()
+    expect(toCheckOutcomes([])).toBeUndefined()
+    expect(toCheckOutcomes('nope')).toBeUndefined()
+    expect(toCheckOutcomes([1, 'x', null, {}, { check: '' }])).toBeUndefined()
+  })
+
+  it('coerces params, reason and source defaults', () => {
+    expect(
+      toCheckOutcomes([
+        {
+          check: 'regex_matches',
+          params: ['not-an-object'],
+          passed: 'yes',
+          reason: 12,
+          source: 0,
+          skipped: 1,
+        },
+      ]),
+    ).toEqual([
+      {
+        check: 'regex_matches',
+        params: {},
+        passed: false,
+        reason: null,
+        source: 'builtin',
+        skipped: false,
+      },
+    ])
+  })
+})
+
+describe('formatCheckParams', () => {
+  it('returns an empty string for empty params', () => {
+    expect(formatCheckParams({})).toBe('')
+  })
+
+  it('joins key=value pairs', () => {
+    expect(formatCheckParams({ heading: 'Тезисы' })).toBe('heading=Тезисы')
+    expect(formatCheckParams({ min: 500, unit: 'chars' })).toBe('min=500, unit=chars')
+  })
+
+  it('stringifies objects via formatToolArgs', () => {
+    expect(formatCheckParams({ schema: { type: 'string' } })).toBe(
+      'schema={"type":"string"}',
+    )
+  })
+
+  it('truncates signatures longer than 80 characters', () => {
+    const result = formatCheckParams({ pattern: 'x'.repeat(100) })
+    expect(result.endsWith('…')).toBe(true)
+    expect(result.startsWith('pattern=')).toBe(true)
+    expect(result.length).toBe(81)
   })
 })

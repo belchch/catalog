@@ -1,5 +1,46 @@
 import type { RunStep } from '../hooks/useRunStream.ts'
-import { formatToolArgs, formatToolResult } from '../ws.ts'
+import { formatToolArgs, formatToolResult, type VerifyCheckOutcome } from '../ws.ts'
+
+export function toCheckOutcomes(raw: unknown): VerifyCheckOutcome[] | undefined {
+  if (!Array.isArray(raw) || raw.length === 0) return undefined
+  const out: VerifyCheckOutcome[] = []
+  for (const item of raw) {
+    if (!item || typeof item !== 'object' || Array.isArray(item)) continue
+    const rec = item as Record<string, unknown>
+    if (typeof rec.check !== 'string' || rec.check.length === 0) continue
+    const params =
+      rec.params && typeof rec.params === 'object' && !Array.isArray(rec.params)
+        ? (rec.params as Record<string, unknown>)
+        : {}
+    out.push({
+      check: rec.check,
+      params,
+      passed: rec.passed === true,
+      reason: typeof rec.reason === 'string' ? rec.reason : null,
+      source: typeof rec.source === 'string' ? rec.source : 'builtin',
+      skipped: rec.skipped === true,
+    })
+  }
+  return out.length > 0 ? out : undefined
+}
+
+export function joinCheckParams(params: Record<string, unknown>): string {
+  const parts: string[] = []
+  for (const [key, value] of Object.entries(params)) {
+    const formatted =
+      value !== null && typeof value === 'object'
+        ? formatToolArgs(value as Record<string, unknown>)
+        : String(value)
+    parts.push(`${key}=${formatted}`)
+  }
+  return parts.join(', ')
+}
+
+export function formatCheckParams(params: Record<string, unknown>): string {
+  const full = joinCheckParams(params)
+  if (full.length > 80) return `${full.slice(0, 80)}…`
+  return full
+}
 
 const CHILD_RUN_ID_RE = /"run_id"\s*:\s*"([0-9a-f]{8,})"/i
 
@@ -131,6 +172,7 @@ export function runTraceToSteps(
         text: `Проверка (итерация ${iteration ?? ''})`,
         passed: data.passed === true,
         failures,
+        checks: toCheckOutcomes(data.checks),
         iteration,
         stepId,
       }

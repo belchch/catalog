@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { extractChildRunId, extractToolInput } from '../lib/traceSegments.ts'
+import { extractChildRunId, extractToolInput, toCheckOutcomes } from '../lib/traceSegments.ts'
 import {
   connectRun,
   formatToolArgs,
   formatToolResult,
   type RunConnection,
   type ServerEvent,
+  type VerifyCheckOutcome,
 } from '../ws.ts'
 
 export interface RunMeta {
@@ -29,6 +30,7 @@ export interface RunStep {
   ok?: boolean
   passed?: boolean
   failures?: string[]
+  checks?: VerifyCheckOutcome[]
   iteration?: number
   // CATALOG-16: tool result payload (previously discarded) + script stage fields.
   result?: string
@@ -143,6 +145,7 @@ export function useRunStream(runId: string | null): UseRunStreamResult {
             text: `Проверка (итерация ${e.iteration})`,
             passed: e.passed,
             failures: e.failures,
+            checks: toCheckOutcomes(e.checks),
             iteration: e.iteration,
             stepId: e.step_id,
           },

@@ -10,12 +10,94 @@ import { ApiError, getRun, type RunOut } from '../api.ts'
 import type { RunStep } from '../hooks/useRunStream.ts'
 import {
   foldNestedRuns,
+  formatCheckParams,
+  joinCheckParams,
   runTraceToSteps,
   segmentTraceSteps,
+  toCheckOutcomes,
   traceGroupStatus,
   type TraceGroupStatus,
   type TraceItemNode,
 } from '../lib/traceSegments.ts'
+import type { VerifyCheckOutcome } from '../ws.ts'
+
+function formatCheckName(check: string): { label: string; title?: string } {
+  if (!check.startsWith('custom:')) return { label: check }
+  const id = check.slice('custom:'.length)
+  if (id.length <= 8) return { label: check }
+  return { label: `custom:${id.slice(0, 8)}…`, title: check }
+}
+
+function checkStatusWord(c: VerifyCheckOutcome): string {
+  if (c.passed) return 'пройдена'
+  if (c.skipped) return 'пропущена'
+  return 'не пройдена'
+}
+
+function VerifyCheckRow({ c }: { c: VerifyCheckOutcome }) {
+  const glyph = c.passed ? '✓' : c.skipped ? '–' : '✗'
+  const tone = c.passed
+    ? 'text-success-ink'
+    : c.skipped
+      ? 'text-ink-faint'
+      : 'text-danger-ink'
+  const { label: checkLabel, title: checkTitle } = formatCheckName(c.check)
+  const paramsFull = joinCheckParams(c.params)
+  const paramsLabel = formatCheckParams(c.params)
+  const reason = c.reason && c.reason.length > 0 ? c.reason : null
+  return (
+    <li className={'flex items-baseline gap-1 ' + tone}>
+      <span aria-hidden="true" className="shrink-0">
+        {glyph}
+      </span>
+      <span className="min-w-0 break-words">
+        <span className="sr-only">{checkStatusWord(c)}</span>
+        <span title={checkTitle}>{checkLabel}</span>
+        {c.source === 'custom' && <span className="text-ink-faint"> · AI</span>}
+        {paramsLabel ? (
+          <span title={paramsFull.length > 80 ? paramsFull : undefined}>
+            {' · '}
+            {paramsLabel}
+          </span>
+        ) : null}
+        {c.skipped ? ' · пропущена' : null}
+        {reason ? ` — ${reason}` : null}
+      </span>
+    </li>
+  )
+}
+
+function VerifyChecksSummary({
+  checks,
+  passed,
+  label,
+}: {
+  checks: VerifyCheckOutcome[]
+  passed: boolean
+  label?: string
+}) {
+  const total = checks.length
+  const okCount = checks.filter((c) => c.passed).length
+  const skippedCount = checks.filter((c) => c.skipped).length
+  const glyph = passed ? '✓' : '✗'
+  const tone = passed ? 'text-success-ink' : 'text-danger-ink'
+  return (
+    <details className="mt-0.5 block pl-3" open={!passed}>
+      <summary className={'cursor-pointer ' + tone}>
+        <span aria-hidden="true">{glyph}</span>
+        {' '}
+        {label ?? ''}
+        {okCount} из {total}
+        {skippedCount > 0 ? ` · пропущено ${skippedCount}` : ''}
+      </summary>
+      <ul className="mt-0.5 flex flex-col gap-0.5 pl-3">
+        {checks.map((c, index) => (
+          <VerifyCheckRow key={`${c.check}-${index}`} c={c} />
+        ))}
+      </ul>
+    </details>
+  )
+}
 
 function eventCountLabel(n: number): string {
   const n10 = n % 10
@@ -102,10 +184,17 @@ function TraceItem({ s }: { s: RunStep }) {
           </pre>
         </details>
       )}
-      {s.kind === 'verify' && !s.passed && s.failures && s.failures.length > 0 && (
-        <span className="ml-1 block pl-3 text-danger-ink">
-          {s.failures.join('; ')}
-        </span>
+      {s.kind === 'verify' && s.checks && s.checks.length > 0 ? (
+        <VerifyChecksSummary checks={s.checks} passed={s.passed === true} />
+      ) : (
+        s.kind === 'verify' &&
+        !s.passed &&
+        s.failures &&
+        s.failures.length > 0 && (
+          <span className="ml-1 block pl-3 text-danger-ink">
+            {s.failures.join('; ')}
+          </span>
+        )
       )}
     </li>
   )
@@ -206,6 +295,26 @@ function verifyFailuresOf(run: RunOut): string[] {
   return failures
 }
 
+function lastVerifyChecks(
+  run: RunOut,
+): { checks: VerifyCheckOutcome[]; passed: boolean } | undefined {
+  if (!run.trace) return undefined
+  let found: { checks: VerifyCheckOutcome[]; passed: boolean } | undefined
+  for (const raw of run.trace) {
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) continue
+    const entry = raw as { kind?: unknown; data?: unknown }
+    if (entry.kind !== 'verify') continue
+    const data =
+      entry.data && typeof entry.data === 'object' && !Array.isArray(entry.data)
+        ? (entry.data as Record<string, unknown>)
+        : null
+    if (!data) continue
+    const checks = toCheckOutcomes(data.checks)
+    if (checks) found = { checks, passed: data.passed === true }
+  }
+  return found
+}
+
 function verifyEntriesCount(run: RunOut): number {
   if (!run.trace) return 0
   return run.trace.filter((raw) => {
@@ -304,6 +413,7 @@ export function TraceRunNode({
   const { glyph, cls, word } = runStatusGlyph(run, ok)
   const failures = run ? verifyFailuresOf(run) : []
   const verifyCount = run ? verifyEntriesCount(run) : 0
+  const lastVerify = run ? lastVerifyChecks(run) : undefined
   const childSteps = run ? runTraceToSteps(run.trace, runId) : []
   const inFlight = run?.status === 'pending' || run?.status === 'running'
   const failed = run?.status === 'failed' || run?.status === 'cancelled'
@@ -391,11 +501,21 @@ export function TraceRunNode({
               </pre>
             </details>
           ) : null}
-          {run && verifyCount > 0 && failures.length > 0 && (
-            <p className="text-danger-ink">✗ проверки: {failures.join('; ')}</p>
-          )}
-          {run && verifyCount > 0 && failures.length === 0 && (
-            <p className="text-success-ink">✓ проверки пройдены</p>
+          {run && lastVerify ? (
+            <VerifyChecksSummary
+              checks={lastVerify.checks}
+              passed={lastVerify.passed}
+              label="проверки: "
+            />
+          ) : (
+            <>
+              {run && verifyCount > 0 && failures.length > 0 && (
+                <p className="text-danger-ink">✗ проверки: {failures.join('; ')}</p>
+              )}
+              {run && verifyCount > 0 && failures.length === 0 && (
+                <p className="text-success-ink">✓ проверки пройдены</p>
+              )}
+            </>
           )}
           {run && childSteps.length === 0 && (
             <p className="text-xs text-ink-faint">Шагов нет.</p>
