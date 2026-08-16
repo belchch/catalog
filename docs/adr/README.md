@@ -27,6 +27,7 @@
 | [0019](0019-skill-as-session-tool.md) | Пользовательский script-скилл как вызываемый тул сессии | Accepted |
 | [0020](0020-llm-judge-custom-checks.md) | LLM-судья — второй тип проверки, не в детерминированном реестре | Accepted |
 | [0021](0021-skill-tool-budget.md) | Ограничитель вложенных skill-тулов: глубина 2, бюджет хода, дедлайн | Accepted |
+| [0022](0022-pipeline-skill-step.md) | Шаг pipeline типа skill: снапшот на сборке, вложенный apply в рантайме | Accepted |
 
 ## Связанные материалы
 - Исходные транскрипции: `../pre-design/` (`opus-chat.json` — фундаментальные решения; `fable-review.json` — критика и уточнения).
