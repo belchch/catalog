@@ -195,6 +195,12 @@ export function Chat({
     attachedSkillCount > 0
       ? `Инструменты, включено ${attachedSkillCount}`
       : 'Инструменты'
+  const toolsDisabled = streaming || !sessionId
+  const toolsTitle = streaming
+    ? 'Идёт генерация'
+    : !sessionId
+      ? 'Отправьте сообщение, чтобы начать сессию'
+      : 'Инструменты'
 
   const skillBusy = buildingSkill || proposingTracks
   const skillLabel = proposingTracks
@@ -406,9 +412,10 @@ export function Chat({
               type="button"
               className="btn-icon-ghost relative"
               onClick={() => onOpenTools?.()}
-              disabled={streaming || !sessionId}
+              disabled={toolsDisabled}
               aria-label={toolsLabel}
-              title="Инструменты"
+              title={toolsTitle}
+              aria-description={toolsDisabled ? toolsTitle : undefined}
               aria-haspopup="dialog"
               aria-expanded={toolsOpen}
               aria-controls={toolsPopoverId}

@@ -16,6 +16,7 @@ function skill(partial: Partial<SkillOut> & Pick<SkillOut, 'id' | 'name'>): Skil
     provider: null,
     model: null,
     reasoning: null,
+    estimated_llm_calls: 0,
     ...partial,
   }
 }
@@ -32,12 +33,14 @@ const SUMMARIZE = skill({
   description: 'Краткое изложение',
   kind: 'agent',
   tags: ['ai'],
+  estimated_llm_calls: 4,
 })
 const PIPE = skill({
   id: 's3',
   name: 'Pipeline',
   kind: 'pipeline',
   tags: ['python', 'ai'],
+  estimated_llm_calls: 6,
 })
 
 function renderPopover(overrides: Partial<Parameters<typeof ToolsPopover>[0]> = {}) {
@@ -69,10 +72,11 @@ describe('ToolsPopover', () => {
     expect(screen.getByText('Доступны')).toBeTruthy()
     expect(screen.getByText('Extract')).toBeTruthy()
     expect(screen.getByText('Достаёт тезисы')).toBeTruthy()
-    expect(screen.getByText('script')).toBeTruthy()
+    expect(screen.getByText('script · без LLM')).toBeTruthy()
     expect(screen.getAllByText('python').length).toBeGreaterThan(0)
     expect(screen.getByText('Summarize')).toBeTruthy()
-    expect(screen.getByText('agent · не вызывается как инструмент')).toBeTruthy()
+    expect(screen.getByText('agent · до 4 LLM-вызовов')).toBeTruthy()
+    expect(screen.getByText('pipeline · до 6 LLM-вызовов')).toBeTruthy()
     expect(screen.getByRole('button', { name: 'Создать скилл' })).toBeTruthy()
   })
 
@@ -155,24 +159,56 @@ describe('ToolsPopover', () => {
     expect(screen.getByText('Extract')).toBeTruthy()
   })
 
-  it('toggles a script skill and blocks non-script and pending rows', () => {
-    renderPopover({ pendingIds: ['s1'] })
+  it('toggles any kind and only blocks pending rows', () => {
+    const { onToggle } = renderPopover({ pendingIds: ['s1'] })
     const pendingSwitch = screen.getByRole('switch', { name: 'Отключить Extract' })
     expect(pendingSwitch.hasAttribute('disabled')).toBe(true)
+    expect(pendingSwitch.getAttribute('title')).toBe('Применяем…')
+    expect(pendingSwitch.getAttribute('aria-description')).toBe('Применяем…')
     expect(screen.getByText('Extract').closest('li')?.getAttribute('aria-busy')).toBe(
       'true',
     )
 
-    const agentSwitch = screen.getByRole('switch', { name: 'Включить Summarize как инструмент' })
-    expect(agentSwitch.hasAttribute('disabled')).toBe(true)
-    expect(agentSwitch.getAttribute('title')).toBe(
-      'Инструментом может стать только script-скилл',
-    )
-    expect(
-      screen.getByRole('switch', { name: 'Включить Pipeline как инструмент' }).hasAttribute(
-        'disabled',
-      ),
-    ).toBe(true)
+    const agentSwitch = screen.getByRole('switch', {
+      name: 'Включить Summarize как инструмент',
+    })
+    expect(agentSwitch.hasAttribute('disabled')).toBe(false)
+    expect(agentSwitch.getAttribute('title')).toBeNull()
+    fireEvent.click(agentSwitch)
+    expect(onToggle).toHaveBeenCalledWith('s2', true)
+
+    const pipelineSwitch = screen.getByRole('switch', {
+      name: 'Включить Pipeline как инструмент',
+    })
+    expect(pipelineSwitch.hasAttribute('disabled')).toBe(false)
+    expect(pipelineSwitch.getAttribute('title')).toBeNull()
+    fireEvent.click(pipelineSwitch)
+    expect(onToggle).toHaveBeenCalledWith('s3', true)
+    expect(screen.queryByText('Инструментом может стать только script-скилл')).toBeNull()
+  })
+
+  it('shows singular cost and omits zero estimate for non-script skills', () => {
+    const once = skill({
+      id: 's5',
+      name: 'Once',
+      kind: 'agent',
+      estimated_llm_calls: 1,
+    })
+    const free = skill({
+      id: 's6',
+      name: 'Free',
+      kind: 'pipeline',
+      estimated_llm_calls: 0,
+    })
+    renderPopover({
+      skills: [EXTRACT, once, free],
+      attachedIds: [],
+    })
+    expect(screen.getByText('agent · до 1 LLM-вызова')).toBeTruthy()
+    const freeRow = screen.getByText('Free').closest('li')
+    expect(freeRow?.textContent).toMatch(/pipeline/)
+    expect(freeRow?.textContent).not.toContain('до 0')
+    expect(freeRow?.textContent).not.toContain('без LLM')
   })
 
   it('calls onToggle for an available script skill', () => {

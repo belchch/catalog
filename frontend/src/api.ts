@@ -22,6 +22,7 @@ export interface SkillOut {
   provider: string | null
   model: string | null
   reasoning: string | null
+  estimated_llm_calls: number
 }
 
 export interface RunOut {
