@@ -2,7 +2,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-cd "$SCRIPT_DIR"
+cd "$SCRIPT_DIR/.."
 
 IMAGE="catalog-app:latest"
 OUT_DIR="dist/catalog-app"
@@ -79,6 +79,7 @@ build_image() {
         --platform "$PLATFORM" \
         --build-arg "GIT_SHA=$sha" \
         -t "$IMAGE" \
+        -f deploy/Dockerfile \
         --load \
         .
     log "Образ собран."
@@ -154,7 +155,7 @@ pack_zip() {
     write_runtime_compose
     write_runtime_env
 
-    cp Catalog.command "$OUT_DIR/Catalog.command"
+    cp deploy/Catalog.command "$OUT_DIR/Catalog.command"
     cp README-RUN.md "$OUT_DIR/README-RUN.md"
     chmod +x "$OUT_DIR/Catalog.command"
 
@@ -170,8 +171,8 @@ pack_zip() {
 }
 
 main() {
-    if [[ ! -f Dockerfile ]] || [[ ! -f Catalog.command ]] || [[ ! -f README-RUN.md ]]; then
-        err "Запускайте из корня репозитория Catalog (нужны Dockerfile, Catalog.command, README-RUN.md)."
+    if [[ ! -f deploy/Dockerfile ]] || [[ ! -f deploy/Catalog.command ]] || [[ ! -f README-RUN.md ]]; then
+        err "Запускайте deploy/Build.command из репозитория Catalog (нужны deploy/Dockerfile, deploy/Catalog.command, README-RUN.md)."
         read -rp "Нажмите Enter, чтобы закрыть окно…"
         exit 1
     fi
