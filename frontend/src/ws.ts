@@ -6,6 +6,15 @@
 
 import { wsBaseUrl, type DocumentOut, type SessionArtifact } from './api.ts'
 
+export interface VerifyCheckOutcome {
+  check: string
+  params: Record<string, unknown>
+  passed: boolean
+  reason: string | null
+  source: string
+  skipped: boolean
+}
+
 export type ServerEvent =
   | { type: 'step'; iteration: number; step_id?: string }
   | { type: 'token'; delta: string; step_id?: string }
@@ -29,6 +38,7 @@ export type ServerEvent =
       iteration: number
       passed: boolean
       failures: string[]
+      checks?: VerifyCheckOutcome[]
       step_id?: string
     }
   | {

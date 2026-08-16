@@ -55,8 +55,10 @@ from catalog.skills.artifact_tools import (
     parse_steps_content,
     validate_pipeline_steps,
 )
+from catalog.skills.budget import SkillBudget, estimate_skill_llm_calls, make_turn_budget
 from catalog.skills.config import SKILL_KINDS, compute_tags, pipeline_step_to_dict
-from catalog.skills.skill_tools import build_session_skill_tools
+from catalog.skills.repo_skill import get_skill
+from catalog.skills.skill_tools import SkillCallContext, build_session_skill_tools
 from catalog.skills.script_runner import (
     SCRIPT_CODE_CONTRACT_RU,
     ScriptValidationError,
@@ -354,6 +356,7 @@ def _session_skill_out(row) -> SkillOut:
         provider=row.config.provider or None,
         model=row.config.model or None,
         reasoning=row.config.reasoning or None,
+        estimated_llm_calls=estimate_skill_llm_calls(row.config),
     )
 
 
@@ -375,6 +378,23 @@ async def attach_session_tools_endpoint(
 ) -> SessionToolsAttachResult:
     if get_session(db, session_id) is None:
         raise HTTPException(status_code=404, detail="session not found")
+    for skill_id in body.skill_ids:
+        skill = get_skill(db, skill_id)
+        if skill is None:
+            continue
+        if skill.status == "draft":
+            raise HTTPException(
+                status_code=422,
+                detail=f"cannot attach draft skill {skill_id}",
+            )
+        if skill.config.kind not in SKILL_KINDS:
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    f"cannot attach skill {skill_id} with unknown kind "
+                    f"{skill.config.kind!r}"
+                ),
+            )
     skipped = attach_skills(db, session_id, body.skill_ids)
     return SessionToolsAttachResult(
         skipped_skill_ids=skipped,
@@ -717,6 +737,9 @@ def _ws_session_tools(
     provider: LLMProvider | None = None,
     fallback_model: str = "",
     providers: dict[str, LLMProvider] | None = None,
+    call_context: SkillCallContext | None = None,
+    max_skill_depth: int = 2,
+    budget: SkillBudget | None = None,
 ) -> ToolRegistry:
     tools: ToolRegistry = build_document_tools(db, workspace, session_id)
 
@@ -742,6 +765,9 @@ def _ws_session_tools(
         provider=provider,
         fallback_model=fallback_model,
         providers=providers,
+        call_context=call_context or SkillCallContext(),
+        max_skill_depth=max_skill_depth,
+        budget=budget,
     )
     for name in skill_tools.names():
         entry = skill_tools.get(name)
@@ -809,18 +835,6 @@ async def session_ws(
                 await websocket.send_json({"type": "error", "message": "workspace not open"})
                 await websocket.close()
                 return
-            tools = _ws_session_tools(
-                db,
-                workspace,
-                session_id,
-                base_tools,
-                websocket,
-                provider=state.provider,
-                fallback_model=(
-                    getattr(state, "active_model", None) or settings.default_model
-                ),
-                providers=getattr(state, "providers", None),
-            )
 
             if buffered is not None:
                 raw = buffered
@@ -850,6 +864,26 @@ async def session_ws(
                 session_row.llm_timeout_seconds
                 if session_row is not None
                 else DEFAULT_LLM_TIMEOUT_SECONDS
+            )
+            budget = make_turn_budget(
+                llm_calls_left=settings.skill_budget_llm_calls,
+                nested_runs_left=settings.skill_budget_nested_runs,
+                llm_timeout_seconds=timeout,
+            )
+            tools = _ws_session_tools(
+                db,
+                workspace,
+                session_id,
+                base_tools,
+                websocket,
+                provider=state.provider,
+                fallback_model=(
+                    getattr(state, "active_model", None) or settings.default_model
+                ),
+                providers=getattr(state, "providers", None),
+                call_context=SkillCallContext(),
+                max_skill_depth=settings.max_skill_depth,
+                budget=budget,
             )
             _inc_active_planner_turns(state)
             try:

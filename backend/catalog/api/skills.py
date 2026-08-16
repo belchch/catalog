@@ -51,6 +51,7 @@ from catalog.skills.artifact_tools import (
     parse_steps_content,
     validate_pipeline_steps,
 )
+from catalog.skills.budget import estimate_skill_llm_calls
 from catalog.skills.config import (
     SKILL_KINDS,
     SkillConfig,
@@ -1099,6 +1100,7 @@ async def rename_skill_endpoint(
         kind=updated.config.kind,
         tags=compute_tags(updated.config),
         input_arity=updated.config.input_arity,
+        estimated_llm_calls=estimate_skill_llm_calls(updated.config),
     )
 
 
@@ -1131,6 +1133,7 @@ async def list_skills_endpoint(
             provider=r.get("provider"),
             model=r.get("model"),
             reasoning=r.get("reasoning"),
+            estimated_llm_calls=r.get("estimated_llm_calls", 0),
         )
         for r in rows
     ]

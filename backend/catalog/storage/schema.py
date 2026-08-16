@@ -18,7 +18,9 @@ CREATE TABLE IF NOT EXISTS app_settings(
   provider TEXT NOT NULL DEFAULT '',
   model TEXT NOT NULL DEFAULT '',
   openrouter_api_key TEXT NOT NULL DEFAULT '',
-  zai_api_key TEXT NOT NULL DEFAULT ''
+  zai_api_key TEXT NOT NULL DEFAULT '',
+  skill_budget_llm_calls INTEGER NOT NULL DEFAULT 60,
+  skill_budget_nested_runs INTEGER NOT NULL DEFAULT 20
 );
 INSERT OR IGNORE INTO app_settings(id, provider, model) VALUES (1, '', '');
 """
@@ -33,6 +35,16 @@ APP_ADDITIVE_MIGRATIONS: list[tuple[str, str, str]] = [
         "app_settings",
         "zai_api_key",
         "ALTER TABLE app_settings ADD COLUMN zai_api_key TEXT NOT NULL DEFAULT ''",
+    ),
+    (
+        "app_settings",
+        "skill_budget_llm_calls",
+        "ALTER TABLE app_settings ADD COLUMN skill_budget_llm_calls INTEGER NOT NULL DEFAULT 60",
+    ),
+    (
+        "app_settings",
+        "skill_budget_nested_runs",
+        "ALTER TABLE app_settings ADD COLUMN skill_budget_nested_runs INTEGER NOT NULL DEFAULT 20",
     ),
 ]
 

@@ -4,6 +4,7 @@
 - **Status:** Accepted
 - **Extends:** ADR-0002, ADR-0008, ADR-0014, ADR-0015
 - **Clarifies:** ADR-0018 (альтернатива `run_script` как тул)
+- **Extended by:** ADR-0021 (п.2 — `agent`/`pipeline` при ограничителе)
 
 ## Context
 
@@ -26,7 +27,9 @@ ADR-0018 отклонил «`run_script` как тул», потому что в
    билдом).
 2. Каждый прикреплённый `kind="script"` скилл регистрируется как tool в
    WS-сессии. Имя — slug `skill_<name>`, `^[a-z0-9_]+$`, без коллизий с
-   document/artifact tools. `agent` и `pipeline` — позже.
+   document/artifact tools. **П.2 пересмотрен ADR-0021:** `agent` и
+   `pipeline` разрешены при ограничителе (глубина, цепочка, бюджет,
+   дедлайн).
 3. Вызов создаёт отдельный `skill_run` с `parent_run_id` и прогоняет
    `verify_checks` вызванного скилла. Первый срез: глубина 1, без
    рекурсии (вложенный скилл не получает чужие skill-тулы).

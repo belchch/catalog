@@ -59,3 +59,40 @@ def set_api_keys(
             (next_or, next_zai),
         )
     return next_or, next_zai
+
+
+def get_skill_budget_limits(db: Database) -> tuple[int, int]:
+    with db.connect() as conn:
+        row = conn.execute(
+            "SELECT skill_budget_llm_calls, skill_budget_nested_runs "
+            "FROM app_settings WHERE id = 1"
+        ).fetchone()
+    if row is None:
+        return 60, 20
+    llm = row["skill_budget_llm_calls"]
+    runs = row["skill_budget_nested_runs"]
+    return (
+        60 if llm is None else int(llm),
+        20 if runs is None else int(runs),
+    )
+
+
+def set_skill_budget_limits(
+    db: Database,
+    *,
+    llm_calls: int | None = None,
+    nested_runs: int | None = None,
+) -> tuple[int, int]:
+    current_llm, current_runs = get_skill_budget_limits(db)
+    next_llm = current_llm if llm_calls is None else llm_calls
+    next_runs = current_runs if nested_runs is None else nested_runs
+    with db.connect() as conn:
+        conn.execute(
+            "INSERT INTO app_settings(id, skill_budget_llm_calls, skill_budget_nested_runs) "
+            "VALUES (1, ?, ?) "
+            "ON CONFLICT(id) DO UPDATE SET "
+            "skill_budget_llm_calls = excluded.skill_budget_llm_calls, "
+            "skill_budget_nested_runs = excluded.skill_budget_nested_runs",
+            (next_llm, next_runs),
+        )
+    return next_llm, next_runs

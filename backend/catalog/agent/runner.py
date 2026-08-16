@@ -90,14 +90,28 @@ async def _run_agent_core(
     Both :func:`run_agent` and :func:`run_agent_collect` delegate here so the
     trace and the event stream always agree.
     """
+    from catalog.skills.budget import (
+        charge_nested_skill_llm,
+        nested_deadline_exceeded,
+    )
+
     history: list[Message] = [Message(role="system", content=system_prompt), *messages]
     last_text: str | None = None
 
     for i in range(1, max_iterations + 1):
+        if nested_deadline_exceeded():
+            trace.entries.append(
+                TraceEntry("deadline", i, {"error": "deadline exceeded"})
+            )
+            finish_deadline = FinishEvent(last_text, "deadline", capped=True, usage={})
+            yield finish_deadline
+            log_agent_event(finish_deadline)
+            return
         step_event = StepEvent(i)
         yield step_event
         log_agent_event(step_event)
         trace.entries.append(TraceEntry("llm", i, {}))
+        charge_nested_skill_llm()
         # Bind the iteration to the prompt-log context for this turn. The
         # session_id/run_id/purpose are set by the API layer; only iteration
         # changes per turn, so it is set directly rather than via the manager.

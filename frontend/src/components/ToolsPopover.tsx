@@ -2,8 +2,6 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import type { SkillOut } from '../api.ts'
 import { ChevronRightIcon } from './icons.tsx'
 
-const SCRIPT_ONLY_HINT = 'Инструментом может стать только script-скилл'
-
 export interface ToolsPopoverProps {
   open: boolean
   onClose: () => void
@@ -27,9 +25,14 @@ function skillMatchesQuery(skill: SkillOut, query: string): boolean {
   return name.includes(q) || desc.includes(q)
 }
 
-function guaranteeLine(kind: string): string {
-  if (kind === 'script') return 'script'
-  return `${kind} · не вызывается как инструмент`
+function costLine(skill: SkillOut): string {
+  if (skill.kind === 'script') return 'script · без LLM'
+  const n = skill.estimated_llm_calls
+  if (n > 0) {
+    const word = n === 1 ? 'вызова' : 'вызовов'
+    return `${skill.kind} · до ${n} LLM-${word}`
+  }
+  return skill.kind
 }
 
 function SkillSwitch({
@@ -88,8 +91,7 @@ function SkillRow({
   onToggle: (skillId: string, enabled: boolean) => void
   onOpenSkillCard?: (skillId: string) => void
 }) {
-  const isScript = skill.kind === 'script'
-  const switchDisabled = pending || !isScript
+  const switchDisabled = pending
   const desc = skill.description?.trim() ?? ''
   const descText = desc || 'Без описания'
   return (
@@ -112,7 +114,7 @@ function SkillRow({
         <p className="truncate text-[11px] text-ink-faint" title={desc || undefined}>
           {descText}
         </p>
-        <p className="text-[11px] text-ink-faint">{guaranteeLine(skill.kind)}</p>
+        <p className="text-[11px] text-ink-faint">{costLine(skill)}</p>
       </div>
       <div className="flex shrink-0 items-center gap-1">
         {onOpenSkillCard && (
@@ -129,7 +131,7 @@ function SkillRow({
           name={skill.name}
           enabled={enabled}
           disabled={switchDisabled}
-          hint={isScript ? undefined : SCRIPT_ONLY_HINT}
+          hint={pending ? 'Применяем…' : undefined}
           onToggle={() => onToggle(skill.id, !enabled)}
         />
       </div>

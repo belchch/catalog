@@ -127,6 +127,9 @@ describe('Chat composer', () => {
     )
 
     const tools = screen.getByRole('button', { name: 'Инструменты, включено 2' })
+    expect(tools.hasAttribute('disabled')).toBe(false)
+    expect(tools.getAttribute('title')).toBe('Инструменты')
+    expect(tools.getAttribute('aria-description')).toBeNull()
     expect(tools.getAttribute('aria-expanded')).toBe('false')
     expect(tools.getAttribute('aria-haspopup')).toBe('dialog')
     expect(tools.getAttribute('aria-controls')).toBeTruthy()
@@ -160,6 +163,7 @@ describe('Chat composer', () => {
           provider: null,
           model: null,
           reasoning: null,
+          estimated_llm_calls: 0,
         },
       ],
       attachedSkillIds: ['sk1'],
@@ -176,5 +180,25 @@ describe('Chat composer', () => {
     const onCloseTools = vi.fn()
     renderChat({ toolsOpen: true, onCloseTools, streaming: true })
     expect(onCloseTools).toHaveBeenCalled()
+  })
+
+  it('explains a disabled tools button without a session', () => {
+    renderChat({ sessionId: null })
+    const tools = screen.getByRole('button', { name: 'Инструменты' })
+    expect(tools.hasAttribute('disabled')).toBe(true)
+    expect(tools.getAttribute('title')).toBe(
+      'Отправьте сообщение, чтобы начать сессию',
+    )
+    expect(tools.getAttribute('aria-description')).toBe(
+      'Отправьте сообщение, чтобы начать сессию',
+    )
+  })
+
+  it('explains a disabled tools button while streaming', () => {
+    renderChat({ streaming: true, sessionId: null })
+    const tools = screen.getByRole('button', { name: 'Инструменты' })
+    expect(tools.hasAttribute('disabled')).toBe(true)
+    expect(tools.getAttribute('title')).toBe('Идёт генерация')
+    expect(tools.getAttribute('aria-description')).toBe('Идёт генерация')
   })
 })

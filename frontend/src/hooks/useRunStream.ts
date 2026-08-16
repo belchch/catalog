@@ -1,11 +1,17 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { extractChildRunId, extractToolInput } from '../lib/traceSegments.ts'
+import {
+  attachSkillToolFields,
+  extractToolInput,
+  toCheckOutcomes,
+  type LimiterInfo,
+} from '../lib/traceSegments.ts'
 import {
   connectRun,
   formatToolArgs,
   formatToolResult,
   type RunConnection,
   type ServerEvent,
+  type VerifyCheckOutcome,
 } from '../ws.ts'
 
 export interface RunMeta {
@@ -29,6 +35,7 @@ export interface RunStep {
   ok?: boolean
   passed?: boolean
   failures?: string[]
+  checks?: VerifyCheckOutcome[]
   iteration?: number
   // CATALOG-16: tool result payload (previously discarded) + script stage fields.
   result?: string
@@ -41,6 +48,8 @@ export interface RunStep {
   toolName?: string
   childRunId?: string
   input?: string
+  skillDepth?: number
+  limiter?: LimiterInfo
 }
 
 export interface UseRunStreamResult {
@@ -117,9 +126,8 @@ export function useRunStream(runId: string | null): UseRunStreamResult {
           },
         ])
         break
-      case 'tool_result':
-        // CATALOG-16: keep the result payload so the trace can show what the
-        // tool returned, not just its name + ok flag.
+      case 'tool_result': {
+        const fields = attachSkillToolFields(e.name, e.ok, e.result)
         setSteps((prev) => [
           ...prev,
           {
@@ -129,11 +137,14 @@ export function useRunStream(runId: string | null): UseRunStreamResult {
             ok: e.ok,
             result: formatToolResult(e.result),
             toolName: e.name,
-            childRunId: extractChildRunId(e.name, e.result) ?? undefined,
+            childRunId: fields.childRunId,
+            skillDepth: fields.skillDepth,
+            limiter: fields.limiter,
             stepId: e.step_id,
           },
         ])
         break
+      }
       case 'verify':
         setSteps((prev) => [
           ...prev,
@@ -143,6 +154,7 @@ export function useRunStream(runId: string | null): UseRunStreamResult {
             text: `Проверка (итерация ${e.iteration})`,
             passed: e.passed,
             failures: e.failures,
+            checks: toCheckOutcomes(e.checks),
             iteration: e.iteration,
             stepId: e.step_id,
           },

@@ -28,6 +28,7 @@ from asyncio import CancelledError
 from collections.abc import AsyncIterator
 from dataclasses import dataclass, replace
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from catalog.agent.events import AgentEvent, FinishEvent, RunMetaEvent, ScriptEvent, VerifyEvent
 from catalog.agent.logging import log_agent_event
@@ -47,6 +48,7 @@ from catalog.documents.obsidian import (
 )
 from catalog.llm.base import LLMProvider, Message
 from catalog.llm.factory import provider_for_skill
+from catalog.skills.budget import nested_deadline_exceeded
 from catalog.skills.config import PipelineStep, SkillConfig, ensure_read_document_tool
 from catalog.skills.repo_run import claim_run, create_run, finish_run, get_run
 from catalog.skills.script_runner import ScriptRuntimeError, run_script_async
@@ -54,6 +56,9 @@ from catalog.skills.verify import run_verify_async
 from catalog.storage.db import Database
 from catalog.storage.repo_document import create_document, get_document
 from catalog.storage.repo_session_document import attach_documents
+
+if TYPE_CHECKING:
+    from catalog.skills.skill_tools import SkillCallContext
 
 logger = logging.getLogger("catalog.skills.apply")
 
@@ -72,6 +77,15 @@ def _value_as_documents(value: PipelineValue) -> list[str]:
     if isinstance(value, list):
         return list(value)
     return [value]
+
+
+def _deadline_reached(trace: Trace, iteration: int) -> bool:
+    if not nested_deadline_exceeded():
+        return False
+    trace.entries.append(
+        TraceEntry("deadline", iteration, {"error": "deadline exceeded"})
+    )
+    return True
 
 
 def _with_step_id(event: AgentEvent, step_id: str) -> AgentEvent:
@@ -107,7 +121,7 @@ def _pipeline_llm_user_content(
     input_doc_ids: list[str],
     doc_texts: list[str],
 ) -> str:
-    if from_documents:
+    if from_documents and docs:
         link_hint = (
             "Не вставляй связи с входными документами в текст ответа — "
             "система добавит раздел «Ссылки» при сохранении. "
@@ -189,6 +203,7 @@ async def _apply_core(
     input_texts: list[str] | None = None,
     parent_run_id: str | None = None,
     fallback_model: str = "",
+    call_context: SkillCallContext | None = None,
 ) -> AsyncIterator[AgentEvent]:
     """Shared apply loop: streams events, fills ``trace`` and ``outcome``.
 
@@ -212,8 +227,7 @@ async def _apply_core(
     message lists every input.
 
     ADR-0019: ``input_texts`` supplies raw text inputs without document rows
-    (nested skill-as-tool). When set, documents are not loaded. First cut:
-    ``kind=script`` only.
+    (nested skill-as-tool). When set, documents are not loaded.
 
     CATALOG-56: ``user_prompt`` is an optional runtime clarification appended
     to the agent start user message; script skills ignore it.
@@ -224,8 +238,6 @@ async def _apply_core(
         doc_texts = [t if isinstance(t, str) else str(t) for t in (input_texts or [])]
         if not doc_texts:
             raise ValueError("apply requires at least one input text")
-        if skill.kind != "script":
-            raise ValueError("input_texts is only supported for kind=script")
         if skill.input_arity is not None and len(doc_texts) != skill.input_arity:
             raise ValueError(
                 f"skill expects {skill.input_arity} input document(s), "
@@ -292,6 +304,7 @@ async def _apply_core(
                     "skill_id": skill_id,
                     "config_hash": pinned,
                     "parent_run_id": parent_run_id,
+                    "depth": 0 if call_context is None else call_context.depth,
                 },
             )
         )
@@ -307,6 +320,7 @@ async def _apply_core(
     last_text: str | None = None
     last_capped = False
     passed = False
+    deadline_stopped = False
     output_doc_id: str | None = None
     verify_model = skill.model or fallback_model
     verify_provider = provider_for_skill(providers, provider, skill.provider)
@@ -377,31 +391,35 @@ async def _apply_core(
                 )
             )
             last_text = text
-
-            result = await run_verify_async(
-                text or "",
-                skill.verify_checks,
-                db=db,
-                provider=verify_provider,
-                model=verify_model,
-            )
-            verify_event = VerifyEvent(iteration=1, result=result)
-            yield verify_event
-            log_agent_event(verify_event)
-            trace.entries.append(
-                TraceEntry(
-                    kind="verify",
-                    iteration=1,
-                    data={
-                        "passed": result.passed,
-                        "failures": list(result.failures),
-                    },
+            if _deadline_reached(trace, 1):
+                deadline_stopped = True
+                last_capped = True
+            else:
+                result = await run_verify_async(
+                    text or "",
+                    skill.verify_checks,
+                    db=db,
+                    provider=verify_provider,
+                    model=verify_model,
                 )
-            )
-            passed = result.passed
+                verify_event = VerifyEvent(iteration=1, result=result)
+                yield verify_event
+                log_agent_event(verify_event)
+                trace.entries.append(
+                    TraceEntry(
+                        kind="verify",
+                        iteration=1,
+                        data=result.as_payload(),
+                    )
+                )
+                passed = result.passed
         elif skill.kind == "pipeline":
             current: PipelineValue | None = None
             for index, step in enumerate(skill.steps):
+                if _deadline_reached(trace, index + 1):
+                    deadline_stopped = True
+                    last_capped = True
+                    break
                 step_input = _pipeline_step_input(step, current, doc_texts)
                 from_documents = step.input == "documents"
                 if step.type == "script":
@@ -487,7 +505,7 @@ async def _apply_core(
                     )
                     async for event in _run_agent_core(
                         provider=step_provider,
-                        model=step.model or skill.model,
+                        model=step.model or skill.model or fallback_model,
                         system_prompt=step.system_prompt,
                         messages=messages,
                         tools=step_tools,
@@ -502,79 +520,98 @@ async def _apply_core(
                         if isinstance(event, FinishEvent):
                             text = event.text
                             capped = event.capped
+                            if event.finish_reason == "deadline":
+                                deadline_stopped = True
                     for entry in trace.entries[before:]:
                         entry.data["step_id"] = step.id
                     current = text or ""
                     last_text = current
+                    if deadline_stopped:
+                        last_capped = True
+                        break
                     if index == len(skill.steps) - 1:
                         last_capped = capped
                 else:
                     raise ValueError(
                         f"unknown pipeline step type: {step.type!r}"
                     )
-            final_text = last_text or ""
-            result = await run_verify_async(
-                final_text,
-                skill.verify_checks,
-                db=db,
-                provider=verify_provider,
-                model=verify_model,
-            )
-            verify_event = VerifyEvent(iteration=1, result=result)
-            yield verify_event
-            log_agent_event(verify_event)
-            trace.entries.append(
-                TraceEntry(
-                    kind="verify",
-                    iteration=1,
-                    data={
-                        "passed": result.passed,
-                        "failures": list(result.failures),
-                    },
+            if not deadline_stopped and _deadline_reached(
+                trace, max(len(skill.steps), 1)
+            ):
+                deadline_stopped = True
+                last_capped = True
+            if not deadline_stopped:
+                final_text = last_text or ""
+                result = await run_verify_async(
+                    final_text,
+                    skill.verify_checks,
+                    db=db,
+                    provider=verify_provider,
+                    model=verify_model,
                 )
-            )
-            passed = result.passed
+                verify_event = VerifyEvent(iteration=1, result=result)
+                yield verify_event
+                log_agent_event(verify_event)
+                trace.entries.append(
+                    TraceEntry(
+                        kind="verify",
+                        iteration=1,
+                        data=result.as_payload(),
+                    )
+                )
+                passed = result.passed
         else:
             # ---- Agent path (ADR-0001/0002) ----
             # Build the start message listing every input document (CATALOG-4).
-            link_hint = (
-                "Не вставляй связи с входными документами в текст ответа — "
-                "система добавит раздел «Ссылки» при сохранении. "
-                "Если нужны другие Obsidian-ссылки [[...]], используй имя файла "
-                "(stem без расширения и пути), а не title."
-            )
-            content_note = (
-                "Ниже приведён полный текст каждого входного документа — "
-                "опирайся на него. Это не вложение файла: текст уже в этом "
-                "сообщении. При необходимости дополнительно вызови "
-                "read_document(doc_id=...)."
-            )
-            stem_lines = "\n".join(
-                f"- «{d.title}» → [[{Path(d.path).stem}]]" for d in docs
-            )
-            inline_blocks = "\n\n".join(
-                f"--- документ {did}: {d.title} ---\n{text}"
-                for did, d, text in zip(input_doc_ids, docs, doc_texts)
-            )
-            if len(docs) == 1:
-                start_content = (
-                    f"Обработай документ {input_doc_ids[0]} ({docs[0].title}).\n"
-                    f"{content_note}\n{link_hint}\n{stem_lines}\n\n{inline_blocks}"
+            if texts_mode:
+                start_content = _pipeline_llm_user_content(
+                    step_input=doc_texts[0] if len(doc_texts) == 1 else list(doc_texts),
+                    from_documents=False,
+                    docs=docs,
+                    input_doc_ids=input_doc_ids,
+                    doc_texts=doc_texts,
                 )
             else:
-                listing = ", ".join(
-                    f"{did} ({d.title})" for did, d in zip(input_doc_ids, docs)
+                link_hint = (
+                    "Не вставляй связи с входными документами в текст ответа — "
+                    "система добавит раздел «Ссылки» при сохранении. "
+                    "Если нужны другие Obsidian-ссылки [[...]], используй имя файла "
+                    "(stem без расширения и пути), а не title."
                 )
-                start_content = (
-                    f"Обработай документы: {listing}.\n"
-                    f"{content_note}\n{link_hint}\n{stem_lines}\n\n{inline_blocks}"
+                content_note = (
+                    "Ниже приведён полный текст каждого входного документа — "
+                    "опирайся на него. Это не вложение файла: текст уже в этом "
+                    "сообщении. При необходимости дополнительно вызови "
+                    "read_document(doc_id=...)."
                 )
+                stem_lines = "\n".join(
+                    f"- «{d.title}» → [[{Path(d.path).stem}]]" for d in docs
+                )
+                inline_blocks = "\n\n".join(
+                    f"--- документ {did}: {d.title} ---\n{text}"
+                    for did, d, text in zip(input_doc_ids, docs, doc_texts)
+                )
+                if len(docs) == 1:
+                    start_content = (
+                        f"Обработай документ {input_doc_ids[0]} ({docs[0].title}).\n"
+                        f"{content_note}\n{link_hint}\n{stem_lines}\n\n{inline_blocks}"
+                    )
+                else:
+                    listing = ", ".join(
+                        f"{did} ({d.title})" for did, d in zip(input_doc_ids, docs)
+                    )
+                    start_content = (
+                        f"Обработай документы: {listing}.\n"
+                        f"{content_note}\n{link_hint}\n{stem_lines}\n\n{inline_blocks}"
+                    )
             if runtime_prompt is not None:
                 start_content = (
                     f"{start_content}\n\nУточнение к заданию:\n{runtime_prompt}"
                 )
             user_msg = Message(role="user", content=start_content)
             messages: list[Message] = [user_msg]
+            run_provider = provider_for_skill(providers, provider, skill.provider)
+            run_model = skill.model or fallback_model
 
             # max_retries = number of retries after the first attempt.
             for r in range(skill.max_retries + 1):
@@ -584,8 +621,8 @@ async def _apply_core(
                 # stream and capture the final text/capped from its FinishEvent,
                 # while _run_agent_core appends to our shared ``trace``.
                 async for event in _run_agent_core(
-                    provider=provider,
-                    model=skill.model,
+                    provider=run_provider,
+                    model=run_model,
                     system_prompt=skill.system_prompt,
                     messages=messages,
                     tools=tools,
@@ -601,9 +638,17 @@ async def _apply_core(
                     if isinstance(event, FinishEvent):
                         text = event.text
                         capped = event.capped
+                        if event.finish_reason == "deadline":
+                            deadline_stopped = True
 
                 last_text = text
                 last_capped = capped
+                if deadline_stopped:
+                    break
+                if _deadline_reached(trace, r + 1):
+                    deadline_stopped = True
+                    last_capped = True
+                    break
 
                 result = await run_verify_async(
                     text or "",
@@ -619,10 +664,7 @@ async def _apply_core(
                     TraceEntry(
                         kind="verify",
                         iteration=r + 1,
-                        data={
-                            "passed": result.passed,
-                            "failures": list(result.failures),
-                        },
+                        data=result.as_payload(),
                     )
                 )
 
@@ -715,9 +757,17 @@ async def _apply_core(
         )
 
         # 7. Emit finish.
+        if deadline_stopped:
+            apply_reason = "deadline"
+        elif passed:
+            apply_reason = "stop"
+        elif last_capped:
+            apply_reason = "capped"
+        else:
+            apply_reason = "verify_failed"
         finish_apply = FinishEvent(
             text=last_text,
-            finish_reason="stop" if passed else ("capped" if last_capped else "verify_failed"),
+            finish_reason=apply_reason,
             capped=(not passed) and last_capped,
             usage={},
         )
@@ -799,6 +849,7 @@ async def apply_skill(
     input_texts: list[str] | None = None,
     parent_run_id: str | None = None,
     fallback_model: str = "",
+    call_context: SkillCallContext | None = None,
 ) -> AsyncIterator[AgentEvent]:
     """Run a skill over one or more documents, streaming :data:`AgentEvent` items.
 
@@ -843,6 +894,7 @@ async def apply_skill(
         input_texts=input_texts,
         parent_run_id=parent_run_id,
         fallback_model=fallback_model,
+        call_context=call_context,
     ):
         yield event
 
@@ -865,6 +917,7 @@ async def apply_skill_collect(
     input_texts: list[str] | None = None,
     parent_run_id: str | None = None,
     fallback_model: str = "",
+    call_context: SkillCallContext | None = None,
 ) -> ApplyResult:
     """Drain :func:`apply_skill` and return the final :class:`ApplyResult`."""
     trace = Trace()
@@ -888,6 +941,7 @@ async def apply_skill_collect(
         input_texts=input_texts,
         parent_run_id=parent_run_id,
         fallback_model=fallback_model,
+        call_context=call_context,
     ):
         pass
     return ApplyResult(

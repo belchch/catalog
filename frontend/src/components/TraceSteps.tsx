@@ -10,12 +10,100 @@ import { ApiError, getRun, type RunOut } from '../api.ts'
 import type { RunStep } from '../hooks/useRunStream.ts'
 import {
   foldNestedRuns,
+  formatCheckParams,
+  joinCheckParams,
+  limiterExplanation,
+  limiterRemainder,
+  limiterTitle,
+  llmCostLabel,
+  nestedRunCost,
   runTraceToSteps,
   segmentTraceSteps,
+  toCheckOutcomes,
   traceGroupStatus,
+  traceSkillDepth,
   type TraceGroupStatus,
   type TraceItemNode,
 } from '../lib/traceSegments.ts'
+import type { VerifyCheckOutcome } from '../ws.ts'
+
+function formatCheckName(check: string): { label: string; title?: string } {
+  if (!check.startsWith('custom:')) return { label: check }
+  const id = check.slice('custom:'.length)
+  if (id.length <= 8) return { label: check }
+  return { label: `custom:${id.slice(0, 8)}…`, title: check }
+}
+
+function checkStatusWord(c: VerifyCheckOutcome): string {
+  if (c.passed) return 'пройдена'
+  if (c.skipped) return 'пропущена'
+  return 'не пройдена'
+}
+
+function VerifyCheckRow({ c }: { c: VerifyCheckOutcome }) {
+  const glyph = c.passed ? '✓' : c.skipped ? '–' : '✗'
+  const tone = c.passed
+    ? 'text-success-ink'
+    : c.skipped
+      ? 'text-ink-faint'
+      : 'text-danger-ink'
+  const { label: checkLabel, title: checkTitle } = formatCheckName(c.check)
+  const paramsFull = joinCheckParams(c.params)
+  const paramsLabel = formatCheckParams(c.params)
+  const reason = c.reason && c.reason.length > 0 ? c.reason : null
+  return (
+    <li className={'flex items-baseline gap-1 ' + tone}>
+      <span aria-hidden="true" className="shrink-0">
+        {glyph}
+      </span>
+      <span className="min-w-0 break-words">
+        <span className="sr-only">{checkStatusWord(c)}</span>
+        <span title={checkTitle}>{checkLabel}</span>
+        {c.source === 'custom' && <span className="text-ink-faint"> · AI</span>}
+        {paramsLabel ? (
+          <span title={paramsFull.length > 80 ? paramsFull : undefined}>
+            {' · '}
+            {paramsLabel}
+          </span>
+        ) : null}
+        {c.skipped ? ' · пропущена' : null}
+        {reason ? ` — ${reason}` : null}
+      </span>
+    </li>
+  )
+}
+
+function VerifyChecksSummary({
+  checks,
+  passed,
+  label,
+}: {
+  checks: VerifyCheckOutcome[]
+  passed: boolean
+  label?: string
+}) {
+  const total = checks.length
+  const okCount = checks.filter((c) => c.passed).length
+  const skippedCount = checks.filter((c) => c.skipped).length
+  const glyph = passed ? '✓' : '✗'
+  const tone = passed ? 'text-success-ink' : 'text-danger-ink'
+  return (
+    <details className="mt-0.5 block pl-3" open={!passed}>
+      <summary className={'cursor-pointer ' + tone}>
+        <span aria-hidden="true">{glyph}</span>
+        {' '}
+        {label ?? ''}
+        {okCount} из {total}
+        {skippedCount > 0 ? ` · пропущено ${skippedCount}` : ''}
+      </summary>
+      <ul className="mt-0.5 flex flex-col gap-0.5 pl-3">
+        {checks.map((c, index) => (
+          <VerifyCheckRow key={`${c.check}-${index}`} c={c} />
+        ))}
+      </ul>
+    </details>
+  )
+}
 
 function eventCountLabel(n: number): string {
   const n10 = n % 10
@@ -94,6 +182,9 @@ function TraceItem({ s }: { s: RunStep }) {
       <span className="mr-1 text-ink-faint">›</span>
       {s.text}
       {s.kind === 'tool_result' && (s.ok ? ' ✓' : ' ✗')}
+      {s.kind === 'tool_result' && s.skillDepth != null && (
+        <span className="text-ink-faint"> · глубина {s.skillDepth}</span>
+      )}
       {s.kind === 'tool_result' && s.result && (
         <details className="mt-0.5 pl-3">
           <summary className="cursor-pointer text-ink-faint">результат</summary>
@@ -102,18 +193,69 @@ function TraceItem({ s }: { s: RunStep }) {
           </pre>
         </details>
       )}
-      {s.kind === 'verify' && !s.passed && s.failures && s.failures.length > 0 && (
-        <span className="ml-1 block pl-3 text-danger-ink">
-          {s.failures.join('; ')}
-        </span>
+      {s.kind === 'verify' && s.checks && s.checks.length > 0 ? (
+        <VerifyChecksSummary checks={s.checks} passed={s.passed === true} />
+      ) : (
+        s.kind === 'verify' &&
+        !s.passed &&
+        s.failures &&
+        s.failures.length > 0 && (
+          <span className="ml-1 block pl-3 text-danger-ink">
+            {s.failures.join('; ')}
+          </span>
+        )
       )}
     </li>
   )
 }
 
 function nodeList(items: RunStep[], depth: number): TraceItemNode[] {
-  if (depth === 0) return foldNestedRuns(items)
-  return items.map((item) => ({ kind: 'item' as const, item }))
+  return foldNestedRuns(items, { foldRuns: depth === 0 })
+}
+
+function nodeKey(node: TraceItemNode): string {
+  if (node.kind === 'item') return node.item.id
+  return node.result.id
+}
+
+function TraceLimiterNode({
+  node,
+  depth,
+}: {
+  node: Extract<TraceItemNode, { kind: 'limiter' }>
+  depth: number
+}) {
+  const { limiter, input } = node
+  const hard = limiter.reason !== 'unavailable'
+  const remainder = limiterRemainder(limiter)
+  return (
+    <li
+      className={
+        hard
+          ? 'flex flex-col gap-1.5 rounded border border-warning-line bg-warning-soft p-1.5 font-mono text-[11px] text-warning-ink'
+          : 'flex flex-col gap-1.5 rounded border border-line bg-surface-muted p-1.5 font-mono text-[11px] text-ink-muted'
+      }
+    >
+      <p>
+        <span aria-hidden="true">{hard ? '⚠' : '–'}</span>
+        <span className="sr-only">{hard ? 'ограничитель' : 'пометка'}</span>
+        {' '}
+        {limiterTitle(limiter.reason)}
+      </p>
+      <p>{limiterExplanation(limiter)}</p>
+      {remainder ? <p className="text-ink-muted">{remainder}</p> : null}
+      {limiter.runId ? (
+        <TraceRunNode
+          runId={limiter.runId}
+          toolName={limiter.toolName}
+          input={input}
+          ok={false}
+          depth={depth}
+          skillDepth={limiter.depth}
+        />
+      ) : null}
+    </li>
+  )
 }
 
 function TraceNodeView({ node, depth }: { node: TraceItemNode; depth: number }) {
@@ -126,9 +268,13 @@ function TraceNodeView({ node, depth }: { node: TraceItemNode; depth: number }) 
           input={node.input}
           ok={node.ok}
           depth={depth}
+          skillDepth={node.result.skillDepth}
         />
       </li>
     )
+  }
+  if (node.kind === 'limiter') {
+    return <TraceLimiterNode node={node} depth={depth} />
   }
   return <TraceItem s={node.item} />
 }
@@ -178,7 +324,7 @@ function TraceStepGroup({
         <ol className="mt-1 flex flex-col gap-1.5 border-l border-line pl-3">
           {nodes.map((node) => (
             <TraceNodeView
-              key={node.kind === 'run' ? node.result.id : node.item.id}
+              key={nodeKey(node)}
               node={node}
               depth={depth}
             />
@@ -204,6 +350,26 @@ function verifyFailuresOf(run: RunOut): string[] {
     if (Array.isArray(data.failures)) failures.push(...data.failures.map(String))
   }
   return failures
+}
+
+function lastVerifyChecks(
+  run: RunOut,
+): { checks: VerifyCheckOutcome[]; passed: boolean } | undefined {
+  if (!run.trace) return undefined
+  let found: { checks: VerifyCheckOutcome[]; passed: boolean } | undefined
+  for (const raw of run.trace) {
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) continue
+    const entry = raw as { kind?: unknown; data?: unknown }
+    if (entry.kind !== 'verify') continue
+    const data =
+      entry.data && typeof entry.data === 'object' && !Array.isArray(entry.data)
+        ? (entry.data as Record<string, unknown>)
+        : null
+    if (!data) continue
+    const checks = toCheckOutcomes(data.checks)
+    if (checks) found = { checks, passed: data.passed === true }
+  }
+  return found
 }
 
 function verifyEntriesCount(run: RunOut): number {
@@ -241,6 +407,7 @@ export function TraceRunNode({
   input,
   ok,
   depth = 0,
+  skillDepth,
   className,
 }: {
   runId: string
@@ -248,6 +415,7 @@ export function TraceRunNode({
   input?: string
   ok?: boolean
   depth?: number
+  skillDepth?: number
   className?: string
 }) {
   const [run, setRun] = useState<RunOut | null>(null)
@@ -304,9 +472,14 @@ export function TraceRunNode({
   const { glyph, cls, word } = runStatusGlyph(run, ok)
   const failures = run ? verifyFailuresOf(run) : []
   const verifyCount = run ? verifyEntriesCount(run) : 0
+  const lastVerify = run ? lastVerifyChecks(run) : undefined
   const childSteps = run ? runTraceToSteps(run.trace, runId) : []
   const inFlight = run?.status === 'pending' || run?.status === 'running'
   const failed = run?.status === 'failed' || run?.status === 'cancelled'
+  const shownDepth = skillDepth ?? (run ? traceSkillDepth(run.trace) : undefined)
+  const cost =
+    run && !inFlight && run.trace != null ? nestedRunCost(run.trace) : null
+  const costLabel = cost != null ? llmCostLabel(cost) : null
   const caption =
     run == null
       ? null
@@ -328,6 +501,8 @@ export function TraceRunNode({
             <span aria-hidden="true" className={cls}>
               {glyph}
             </span>
+            {shownDepth != null && <span>· глубина {shownDepth}</span>}
+            {costLabel && <span>· {costLabel}</span>}
             <span>· запуск {runId.slice(0, 8)}</span>
           </span>
           <span className="sr-only">{word}</span>
@@ -391,11 +566,21 @@ export function TraceRunNode({
               </pre>
             </details>
           ) : null}
-          {run && verifyCount > 0 && failures.length > 0 && (
-            <p className="text-danger-ink">✗ проверки: {failures.join('; ')}</p>
-          )}
-          {run && verifyCount > 0 && failures.length === 0 && (
-            <p className="text-success-ink">✓ проверки пройдены</p>
+          {run && lastVerify ? (
+            <VerifyChecksSummary
+              checks={lastVerify.checks}
+              passed={lastVerify.passed}
+              label="проверки: "
+            />
+          ) : (
+            <>
+              {run && verifyCount > 0 && failures.length > 0 && (
+                <p className="text-danger-ink">✗ проверки: {failures.join('; ')}</p>
+              )}
+              {run && verifyCount > 0 && failures.length === 0 && (
+                <p className="text-success-ink">✓ проверки пройдены</p>
+              )}
+            </>
           )}
           {run && childSteps.length === 0 && (
             <p className="text-xs text-ink-faint">Шагов нет.</p>
@@ -454,7 +639,7 @@ export function TraceSteps({
     for (const node of nodeList(flats, depth)) {
       children.push(
         <TraceNodeView
-          key={node.kind === 'run' ? node.result.id : node.item.id}
+          key={nodeKey(node)}
           node={node}
           depth={depth}
         />,

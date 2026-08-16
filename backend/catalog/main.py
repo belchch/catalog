@@ -13,7 +13,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
 from catalog.api import checks, documents, models, runs, sessions, skills, workspaces
-from catalog.config import get_settings, with_resolved_keys
+from catalog.config import get_settings, with_persisted_skill_budget, with_resolved_keys
 from catalog.llm.factory import build_providers, select_provider
 from catalog.llm.openrouter import build_debug_hooks
 from catalog.logging_config import setup_logging
@@ -22,6 +22,7 @@ from catalog.storage.db import Database
 from catalog.storage.repo_app_settings import (
     get_api_keys,
     get_app_settings,
+    get_skill_budget_limits,
     set_app_settings,
 )
 from catalog.storage.schema import (
@@ -60,6 +61,12 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         settings,
         persisted_openrouter=persisted_or,
         persisted_zai=persisted_zai,
+    )
+    persisted_llm, persisted_runs = get_skill_budget_limits(app_db)
+    settings = with_persisted_skill_budget(
+        settings,
+        persisted_llm_calls=persisted_llm,
+        persisted_nested_runs=persisted_runs,
     )
     http_client = httpx.AsyncClient(timeout=60.0, event_hooks=build_debug_hooks())
     app.state.app_db = app_db
