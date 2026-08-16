@@ -349,7 +349,7 @@ html, body, #root {
 .catalog-composer textarea:focus { box-shadow: none; }
 .catalog-composer textarea::placeholder { color: var(--ink-placeholder); }
 
-.catalog-draft-area { padding: 18px 20px 0 0; background: var(--surface); }
+.catalog-draft-area { padding: 18px 20px; background: var(--surface); }
 .artifact-summary {
   border: 1px solid var(--line); border-radius: var(--radius-card-lg);
   background: var(--surface); box-shadow: var(--shadow-card); overflow: hidden;

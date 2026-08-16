@@ -984,7 +984,7 @@ export default function App() {
                   role={isLg ? undefined : 'tabpanel'}
                   aria-label={isLg ? undefined : 'Черновик'}
                   className={
-                    'catalog-draft-area min-h-0 w-full overflow-hidden lg:w-[408px] lg:shrink-0 ' +
+                    'catalog-draft-area min-h-0 w-full overflow-hidden lg:w-[428px] lg:shrink-0 ' +
                     (showDraft ? 'flex' : 'hidden') +
                     ' lg:flex'
                   }
