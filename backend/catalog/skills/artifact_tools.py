@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Mapping
+from dataclasses import replace
 from typing import Any
 
 from catalog.agent.registry import ToolRegistry
@@ -14,6 +15,9 @@ from catalog.skills.config import (
     pipeline_step_to_dict,
     pipeline_steps_from_value,
 )
+from catalog.skills.repo_skill import SkillRecord, get_skill
+from catalog.skills.skill_tools import config_hash
+from catalog.storage.repo_session_skill import list_session_skills
 from catalog.skills.script_runner import (
     SCRIPT_CODE_CONTRACT_EN,
     ScriptValidationError,
@@ -76,11 +80,40 @@ def _validate_meta_fields(
     return errors
 
 
+def _skill_step_ref_errors(
+    step: PipelineStep,
+    label: str,
+    *,
+    session_skills: Mapping[str, SkillRecord] | None,
+    lookup_skill: Callable[[str], SkillRecord | None] | None,
+) -> list[str]:
+    skill_id = step.skill_id.strip()
+    if not skill_id:
+        return [f"step {label}: skill_id is empty"]
+    if step.config is not None or session_skills is None:
+        return []
+    record = session_skills.get(skill_id)
+    if record is None:
+        found = lookup_skill(skill_id) if lookup_skill is not None else None
+        if found is None:
+            return [f"step {label}: skill {skill_id!r} not found"]
+        return [f"step {label}: skill {skill_id!r} is not attached to this session"]
+    if record.status != "committed":
+        return [f"step {label}: skill {skill_id!r} is not committed"]
+    if record.config.kind not in SKILL_KINDS:
+        return [
+            f"step {label}: skill {skill_id!r} has unknown kind {record.config.kind!r}"
+        ]
+    return []
+
+
 def validate_pipeline_steps(
     steps: list[PipelineStep],
     available_tools: list[str],
     *,
     require_content: bool = True,
+    session_skills: Mapping[str, SkillRecord] | None = None,
+    lookup_skill: Callable[[str], SkillRecord | None] | None = None,
 ) -> list[str]:
     errors: list[str] = []
     if not steps:
@@ -111,7 +144,70 @@ def validate_pipeline_steps(
             for name in step.allowed_tools:
                 if name not in available_tools:
                     errors.append(f"step {label}: unknown tool: {name!r}")
+        elif step.type == "skill":
+            errors.extend(
+                _skill_step_ref_errors(
+                    step,
+                    label,
+                    session_skills=session_skills,
+                    lookup_skill=lookup_skill,
+                )
+            )
+            if require_content and step.config is None:
+                errors.append(f"step {label}: skill snapshot is missing")
     return errors
+
+
+def resolve_pipeline_skill_steps(
+    steps: list[PipelineStep],
+    db: Database,
+    session_id: str,
+) -> tuple[list[PipelineStep], list[str]]:
+    attached = {row.id: row for row in list_session_skills(db, session_id)}
+    filled: list[PipelineStep] = []
+    errors: list[str] = []
+    for step in steps:
+        if step.type != "skill":
+            filled.append(step)
+            continue
+        label = step.id or "(missing id)"
+        record = attached.get(step.skill_id.strip())
+        if (
+            record is not None
+            and record.status == "committed"
+            and record.config.kind in SKILL_KINDS
+        ):
+            snapshot = record.config
+            filled.append(
+                replace(
+                    step,
+                    skill_id=record.id,
+                    skill_name=record.name,
+                    config_hash=config_hash(snapshot.to_json()),
+                    config=snapshot,
+                )
+            )
+            continue
+        if step.skill_id.strip() and step.config is not None:
+            filled.append(step)
+            continue
+        errors.extend(
+            _skill_step_ref_errors(
+                step,
+                label,
+                session_skills=attached,
+                lookup_skill=lambda skill_id: get_skill(db, skill_id),
+            )
+        )
+        filled.append(step)
+    return filled, errors
+
+
+def session_skill_lookup(
+    db: Database, session_id: str
+) -> tuple[dict[str, SkillRecord], Callable[[str], SkillRecord | None]]:
+    attached = {row.id: row for row in list_session_skills(db, session_id)}
+    return attached, lambda skill_id: get_skill(db, skill_id)
 
 
 def parse_steps_content(content: str) -> tuple[list[PipelineStep], list[str]]:
@@ -235,9 +331,14 @@ def build_artifact_tools(
         except (TypeError, ValueError) as exc:
             errors.append(str(exc))
         if not errors:
+            attached, lookup = session_skill_lookup(db, session_id)
             errors.extend(
                 validate_pipeline_steps(
-                    parsed, available_tools, require_content=False
+                    parsed,
+                    available_tools,
+                    require_content=False,
+                    session_skills=attached,
+                    lookup_skill=lookup,
                 )
             )
         payload = {"steps": [pipeline_step_to_dict(s) for s in parsed]}
@@ -254,6 +355,25 @@ def build_artifact_tools(
         )
         await _notify()
         return {"ok": is_valid, "artifact": _artifact_payload(row), "error": error}
+
+    async def _list_session_skills() -> dict[str, Any]:
+        rows = [
+            row
+            for row in list_session_skills(db, session_id)
+            if row.status == "committed"
+        ]
+        return {
+            "skills": [
+                {
+                    "id": row.id,
+                    "name": row.name,
+                    "kind": row.config.kind,
+                    "status": row.status,
+                    "description": row.description or "",
+                }
+                for row in rows
+            ]
+        }
 
     async def _read_skill_draft() -> dict[str, Any]:
         rows = list_artifacts(db, session_id)
@@ -356,9 +476,10 @@ def build_artifact_tools(
             name="save_skill_steps",
             description=(
                 "Save the pipeline steps draft for this session. Each step "
-                "has id, type (script|llm), input (documents|previous). "
+                "has id, type (script|llm|skill), input (documents|previous). "
                 "script steps need code; llm steps need system_prompt, "
-                "optional model/provider/reasoning/allowed_tools. "
+                "optional model/provider/reasoning/allowed_tools; skill steps "
+                "need skill_id of a committed skill attached to this session. "
                 "Call after set_skill_meta(kind=pipeline)."
             ),
             parameters={
@@ -372,7 +493,7 @@ def build_artifact_tools(
                                 "id": {"type": "string"},
                                 "type": {
                                     "type": "string",
-                                    "enum": ["script", "llm"],
+                                    "enum": list(PIPELINE_STEP_TYPES),
                                 },
                                 "input": {
                                     "type": "string",
@@ -388,6 +509,7 @@ def build_artifact_tools(
                                 "model": {"type": "string"},
                                 "provider": {"type": "string"},
                                 "reasoning": {"type": "string"},
+                                "skill_id": {"type": "string"},
                             },
                             "required": ["id", "type"],
                         },
@@ -397,6 +519,17 @@ def build_artifact_tools(
             },
         ),
         _save_skill_steps,
+    )
+    reg.register(
+        ToolSpec(
+            name="list_session_skills",
+            description=(
+                "List committed skills attached to this session. Use the id "
+                "as skill_id on a pipeline step with type=skill."
+            ),
+            parameters={"type": "object", "properties": {}},
+        ),
+        _list_session_skills,
     )
     reg.register(
         ToolSpec(

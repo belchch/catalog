@@ -6,10 +6,12 @@ import json
 import pytest
 
 from catalog.llm.base import CompletionResult, ToolCall
+from catalog.api.sessions import _planner_system_prompt
 from catalog.skills.artifact_tools import build_artifact_tools
+from catalog.skills.skill_tools import config_hash
 from catalog.skills.verify import registered_checks, verify_checks_params_hint
-from catalog.skills.config import SkillConfig, VerifyCheck
-from catalog.skills.repo_skill import create_skill, get_skill
+from catalog.skills.config import PipelineStep, SkillConfig, VerifyCheck
+from catalog.skills.repo_skill import create_skill, get_skill, update_skill
 from catalog.storage.db import Database
 from catalog.storage.repo_message import list_messages
 from catalog.storage.repo_session import create_session
@@ -19,6 +21,7 @@ from catalog.storage.repo_session_artifact import (
     list_artifacts,
     upsert_artifact,
 )
+from catalog.storage.repo_session_skill import attach_skills
 
 
 @pytest.fixture()
@@ -969,6 +972,414 @@ def test_build_pipeline_from_split_artifacts(client, provider, db) -> None:
     assert skill.config.steps[0].code == "result = document.upper()\n"
     assert skill.config.steps[1].system_prompt == "rewrite the text"
     assert provider.requests == []
+
+
+def _committed_script(db: Database, *, name: str = "Upper", code: str | None = None) -> str:
+    source = code if code is not None else "result = document.upper()\n"
+    config = SkillConfig(
+        name=name,
+        description="upper",
+        system_prompt="",
+        allowed_tools=[],
+        model="m",
+        kind="script",
+        code=source,
+    )
+    return create_skill(
+        db,
+        name=config.name,
+        description=config.description,
+        config=config,
+        status="committed",
+    )
+
+
+def test_save_skill_steps_accepts_skill_id(mem_db: Database) -> None:
+    session_id = create_session(mem_db)
+    skill_id = _committed_script(mem_db)
+    attach_skills(mem_db, session_id, [skill_id])
+    tools = build_artifact_tools(
+        mem_db, session_id, available_tools=["read_document"]
+    )
+    _, save_steps = tools.get("save_skill_steps")
+
+    async def _run():
+        return await save_steps(
+            steps=[
+                {
+                    "id": "call",
+                    "type": "skill",
+                    "input": "documents",
+                    "skill_id": skill_id,
+                }
+            ]
+        )
+
+    result = asyncio.run(_run())
+    assert result["ok"] is True
+    row = get_artifact(mem_db, session_id, "steps")
+    assert row is not None
+    payload = json.loads(row.content)
+    assert payload["steps"][0]["type"] == "skill"
+    assert payload["steps"][0]["skill_id"] == skill_id
+    assert "config" not in payload["steps"][0]
+
+
+def test_save_skill_steps_rejects_empty_skill_id(mem_db: Database) -> None:
+    session_id = create_session(mem_db)
+    tools = build_artifact_tools(
+        mem_db, session_id, available_tools=["read_document"]
+    )
+    _, save_steps = tools.get("save_skill_steps")
+
+    async def _run():
+        return await save_steps(
+            steps=[{"id": "call", "type": "skill", "input": "documents"}]
+        )
+
+    result = asyncio.run(_run())
+    assert result["ok"] is False
+    assert "skill_id is empty" in (result["error"] or "")
+
+
+def test_save_skill_steps_rejects_unattached_skill_id(mem_db: Database) -> None:
+    session_id = create_session(mem_db)
+    skill_id = _committed_script(mem_db)
+    tools = build_artifact_tools(
+        mem_db, session_id, available_tools=["read_document"]
+    )
+    _, save_steps = tools.get("save_skill_steps")
+
+    async def _run():
+        return await save_steps(
+            steps=[
+                {
+                    "id": "call",
+                    "type": "skill",
+                    "input": "documents",
+                    "skill_id": skill_id,
+                }
+            ]
+        )
+
+    result = asyncio.run(_run())
+    assert result["ok"] is False
+    assert "not attached" in (result["error"] or "")
+
+
+def test_list_session_skills_tool(mem_db: Database) -> None:
+    session_id = create_session(mem_db)
+    skill_id = _committed_script(mem_db, name="Ready")
+    attach_skills(mem_db, session_id, [skill_id])
+    tools = build_artifact_tools(
+        mem_db, session_id, available_tools=["read_document"]
+    )
+    spec, list_fn = tools.get("list_session_skills")
+    assert spec is not None
+    assert spec.name == "list_session_skills"
+
+    async def _run():
+        return await list_fn()
+
+    result = asyncio.run(_run())
+    assert result["skills"][0]["id"] == skill_id
+    assert result["skills"][0]["name"] == "Ready"
+    assert result["skills"][0]["kind"] == "script"
+
+
+def test_planner_prompt_lists_attached_skill_ids(mem_db: Database) -> None:
+    session_id = create_session(mem_db)
+    skill_id = _committed_script(mem_db, name="Ready")
+    attach_skills(mem_db, session_id, [skill_id])
+    prompt = _planner_system_prompt(mem_db, session_id)
+    assert skill_id in prompt
+    assert "Ready" in prompt
+    assert "type=skill" in prompt
+
+
+def test_build_pipeline_skill_step_snapshots_and_isolates(
+    client, provider, db
+) -> None:
+    session_id = client.post("/sessions").json()["id"]
+    child_id = _committed_script(db, name="Child", code="result = document.upper()\n")
+    child = get_skill(db, child_id)
+    assert child is not None
+    pinned = config_hash(child.config.to_json())
+    attach = client.post(
+        f"/sessions/{session_id}/tools", json={"skill_ids": [child_id]}
+    )
+    assert attach.status_code == 200, attach.text
+    client.patch(
+        f"/sessions/{session_id}/skill-meta",
+        json={
+            "name": "Parent",
+            "description": "calls child",
+            "kind": "pipeline",
+        },
+    )
+    steps = {
+        "steps": [
+            {
+                "id": "call",
+                "type": "skill",
+                "input": "documents",
+                "skill_id": child_id,
+            }
+        ]
+    }
+    patch = client.patch(
+        f"/sessions/{session_id}/artifacts/steps",
+        json={"content": json.dumps(steps, ensure_ascii=False)},
+    )
+    assert patch.status_code == 200, patch.text
+    assert patch.json()["is_valid"] is True
+    provider.script = []
+    resp = client.post(f"/sessions/{session_id}/skills")
+    assert resp.status_code == 200, resp.text
+    parent = get_skill(db, resp.json()["skill_id"])
+    assert parent is not None
+    step = parent.config.steps[0]
+    assert step.type == "skill"
+    assert step.skill_id == child_id
+    assert step.skill_name == "Child"
+    assert step.config_hash == pinned
+    assert step.config is not None
+    assert step.config.code == "result = document.upper()\n"
+    parent_json = parent.config.to_json()
+
+    updated = SkillConfig(
+        name="Child",
+        description="upper",
+        system_prompt="",
+        allowed_tools=[],
+        model="m",
+        kind="script",
+        code="result = document.lower()\n",
+    )
+    update_skill(
+        db,
+        child_id,
+        name=updated.name,
+        description=updated.description,
+        config=updated,
+    )
+    after = get_skill(db, parent.id)
+    assert after is not None
+    assert after.config.to_json() == parent_json
+    assert after.config.steps[0].config is not None
+    assert after.config.steps[0].config.code == "result = document.upper()\n"
+    assert after.config.steps[0].config_hash != config_hash(updated.to_json())
+
+
+def test_build_pipeline_skill_step_rejects_missing_id(client, provider) -> None:
+    session_id = client.post("/sessions").json()["id"]
+    client.patch(
+        f"/sessions/{session_id}/skill-meta",
+        json={"name": "Parent", "description": "x", "kind": "pipeline"},
+    )
+    steps = {
+        "steps": [
+            {
+                "id": "call",
+                "type": "skill",
+                "input": "documents",
+                "skill_id": "missing-skill",
+            }
+        ]
+    }
+    client.patch(
+        f"/sessions/{session_id}/artifacts/steps",
+        json={"content": json.dumps(steps, ensure_ascii=False)},
+    )
+    provider.script = []
+    resp = client.post(f"/sessions/{session_id}/skills")
+    assert resp.status_code == 422
+    assert "not found" in resp.json()["detail"]
+
+
+def test_build_pipeline_skill_step_rejects_unattached(client, provider, db) -> None:
+    session_id = client.post("/sessions").json()["id"]
+    child_id = _committed_script(db)
+    client.patch(
+        f"/sessions/{session_id}/skill-meta",
+        json={"name": "Parent", "description": "x", "kind": "pipeline"},
+    )
+    steps = {
+        "steps": [
+            {
+                "id": "call",
+                "type": "skill",
+                "input": "documents",
+                "skill_id": child_id,
+            }
+        ]
+    }
+    client.patch(
+        f"/sessions/{session_id}/artifacts/steps",
+        json={"content": json.dumps(steps, ensure_ascii=False)},
+    )
+    provider.script = []
+    resp = client.post(f"/sessions/{session_id}/skills")
+    assert resp.status_code == 422
+    assert "not attached" in resp.json()["detail"]
+
+
+def test_build_pipeline_skill_step_rejects_draft(client, provider, db) -> None:
+    session_id = client.post("/sessions").json()["id"]
+    draft_config = SkillConfig(
+        name="Draft",
+        description="d",
+        system_prompt="",
+        allowed_tools=[],
+        model="m",
+        kind="script",
+        code="result = document\n",
+    )
+    draft_id = create_skill(
+        db,
+        name=draft_config.name,
+        description=draft_config.description,
+        config=draft_config,
+        status="draft",
+    )
+    attach_skills(db, session_id, [draft_id])
+    client.patch(
+        f"/sessions/{session_id}/skill-meta",
+        json={"name": "Parent", "description": "x", "kind": "pipeline"},
+    )
+    steps = {
+        "steps": [
+            {
+                "id": "call",
+                "type": "skill",
+                "input": "documents",
+                "skill_id": draft_id,
+            }
+        ]
+    }
+    client.patch(
+        f"/sessions/{session_id}/artifacts/steps",
+        json={"content": json.dumps(steps, ensure_ascii=False)},
+    )
+    provider.script = []
+    resp = client.post(f"/sessions/{session_id}/skills")
+    assert resp.status_code == 422
+    assert "not committed" in resp.json()["detail"]
+
+
+def _pipeline_calling_child(db: Database, child_id: str) -> str:
+    child = get_skill(db, child_id)
+    assert child is not None
+    parent = SkillConfig(
+        name="Parent",
+        description="calls child",
+        system_prompt="",
+        allowed_tools=[],
+        model="m",
+        kind="pipeline",
+        steps=[
+            PipelineStep(
+                id="call",
+                type="skill",
+                input="documents",
+                skill_id=child.id,
+                skill_name=child.name,
+                config_hash=config_hash(child.config.to_json()),
+                config=child.config,
+            )
+        ],
+    )
+    return create_skill(
+        db,
+        name=parent.name,
+        description=parent.description,
+        config=parent,
+        status="committed",
+    )
+
+
+def test_edit_pipeline_attaches_skill_ids_and_rebuilds(client, provider, db) -> None:
+    child_id = _committed_script(db, name="Child")
+    parent_id = _pipeline_calling_child(db, child_id)
+    edit = client.post(f"/skills/{parent_id}/edit")
+    assert edit.status_code == 200, edit.text
+    session_id = edit.json()["session_id"]
+    attached = client.get(f"/sessions/{session_id}/tools")
+    assert attached.status_code == 200
+    assert [s["id"] for s in attached.json()] == [child_id]
+    provider.script = []
+    first = client.post(f"/sessions/{session_id}/skills")
+    assert first.status_code == 200, first.text
+    assert first.json()["skill_id"] == parent_id
+
+    tools = build_artifact_tools(db, session_id, available_tools=["read_document"])
+    _, save_steps = tools.get("save_skill_steps")
+
+    async def _run():
+        return await save_steps(
+            steps=[
+                {
+                    "id": "call",
+                    "type": "skill",
+                    "input": "documents",
+                    "skill_id": child_id,
+                }
+            ]
+        )
+
+    saved = asyncio.run(_run())
+    assert saved["ok"] is True
+    provider.script = []
+    resp = client.post(f"/sessions/{session_id}/skills")
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["skill_id"] == parent_id
+    parent = get_skill(db, parent_id)
+    assert parent is not None
+    step = parent.config.steps[0]
+    assert step.type == "skill"
+    assert step.skill_id == child_id
+    assert step.config is not None
+    assert step.config.code == "result = document.upper()\n"
+
+
+def test_save_skill_steps_accepts_snapshotted_skill_without_attach(
+    mem_db: Database,
+) -> None:
+    session_id = create_session(mem_db)
+    nested = SkillConfig(
+        name="Inner",
+        description="d",
+        system_prompt="",
+        allowed_tools=[],
+        model="m",
+        kind="script",
+        code="result = document.upper()\n",
+    )
+    tools = build_artifact_tools(
+        mem_db, session_id, available_tools=["read_document"]
+    )
+    _, save_steps = tools.get("save_skill_steps")
+
+    async def _run():
+        return await save_steps(
+            steps=[
+                {
+                    "id": "call",
+                    "type": "skill",
+                    "input": "documents",
+                    "skill_id": "gone-child",
+                    "config": json.loads(nested.to_json()),
+                }
+            ]
+        )
+
+    result = asyncio.run(_run())
+    assert result["ok"] is True
+    row = get_artifact(mem_db, session_id, "steps")
+    assert row is not None
+    payload = json.loads(row.content)
+    assert payload["steps"][0]["skill_id"] == "gone-child"
+    assert payload["steps"][0]["config"]["name"] == "Inner"
 
 
 def test_build_pipeline_rejects_unfilled_empty_steps(client, provider) -> None:

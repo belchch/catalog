@@ -49,6 +49,7 @@ from catalog.llm.timeout import (
 from catalog.agent.registry import ToolRegistry
 from catalog.skills.artifact_tools import (
     parse_steps_content,
+    resolve_pipeline_skill_steps,
     validate_pipeline_steps,
 )
 from catalog.skills.budget import estimate_skill_llm_calls
@@ -90,6 +91,7 @@ from catalog.storage.repo_session_artifact import (
     list_artifacts,
     upsert_artifact,
 )
+from catalog.storage.repo_session_skill import attach_skills
 
 router = APIRouter()
 
@@ -542,6 +544,14 @@ def _build_skill_from_artifacts(
                 step = replace(step, system_prompt=prompt.content)
                 prompt_used = True
             filled.append(step)
+        filled, resolve_errors = resolve_pipeline_skill_steps(
+            filled, db, session_id
+        )
+        if resolve_errors:
+            raise HTTPException(
+                status_code=422,
+                detail="steps are invalid: " + "; ".join(resolve_errors),
+            )
         args["steps"] = [pipeline_step_to_dict(s) for s in filled]
         args["code"] = ""
         args["system_prompt"] = ""
@@ -818,6 +828,13 @@ def seed_session_artifacts_from_skill(
             is_valid=True,
             error=None,
         )
+        child_ids = [
+            step.skill_id.strip()
+            for step in config.steps
+            if step.type == "skill" and step.skill_id.strip()
+        ]
+        if child_ids:
+            attach_skills(db, session_id, child_ids)
     if config.system_prompt:
         upsert_artifact(
             db,

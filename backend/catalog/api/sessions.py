@@ -53,6 +53,7 @@ from catalog.skills.artifact_tools import (
     artifacts_frame,
     build_artifact_tools,
     parse_steps_content,
+    session_skill_lookup,
     validate_pipeline_steps,
 )
 from catalog.skills.budget import SkillBudget, estimate_skill_llm_calls, make_turn_budget
@@ -107,8 +108,10 @@ PLANNER_SYSTEM_PROMPT = (
     "Когда задача прояснилась — определи kind (agent, script или pipeline) и "
     "материализуй черновик инструментами: set_skill_meta, затем "
     "save_skill_prompt (для agent), save_skill_script (для script) "
-    "или save_skill_steps (для pipeline; затем save_skill_script / "
-    "save_skill_prompt по шагам). "
+    "или save_skill_steps (для pipeline; шаг type=script|llm|skill; "
+    "для skill укажи skill_id прикреплённого committed-скилла — id в "
+    "списке привязанных скиллов или через list_session_skills; затем "
+    "save_skill_script / save_skill_prompt по шагам). "
     "Для kind=script: "
     + SCRIPT_CODE_CONTRACT_RU
     + ". "
@@ -176,11 +179,27 @@ def _parse_user_payload(raw: str) -> tuple[str, list[str]]:
 
 def _planner_system_prompt(db: Database, session_id: str) -> str:
     docs = list_session_documents(db, session_id)
-    if not docs:
+    skills = [
+        row
+        for row in list_session_skills(db, session_id)
+        if row.status == "committed"
+    ]
+    if not docs and not skills:
         return PLANNER_SYSTEM_PROMPT
-    lines = [PLANNER_SYSTEM_PROMPT, "", "Привязанные к сессии документы:"]
-    for doc in docs:
-        lines.append(f"- {doc.id}: {doc.title}")
+    lines = [PLANNER_SYSTEM_PROMPT]
+    if docs:
+        lines.extend(["", "Привязанные к сессии документы:"])
+        for doc in docs:
+            lines.append(f"- {doc.id}: {doc.title}")
+    if skills:
+        lines.extend(
+            [
+                "",
+                "Привязанные к сессии скиллы (для шага type=skill используй skill_id):",
+            ]
+        )
+        for skill in skills:
+            lines.append(f"- {skill.id}: {skill.name} ({skill.config.kind})")
     return "\n".join(lines)
 
 
@@ -579,9 +598,14 @@ async def patch_session_artifact_endpoint(
     if artifact_type == "steps":
         parsed, errors = parse_steps_content(req.content)
         if not errors:
+            attached, lookup = session_skill_lookup(db, session_id)
             errors.extend(
                 validate_pipeline_steps(
-                    parsed, tools.names(), require_content=False
+                    parsed,
+                    tools.names(),
+                    require_content=False,
+                    session_skills=attached,
+                    lookup_skill=lookup,
                 )
             )
         payload = {"steps": [pipeline_step_to_dict(s) for s in parsed]}

@@ -92,13 +92,20 @@ _active_budget: ContextVar[SkillBudget | None] = ContextVar(
 )
 
 
-def estimate_skill_llm_calls(skill: SkillConfig) -> int:
+def estimate_skill_llm_calls(skill: SkillConfig, *, _depth: int = 0) -> int:
     from catalog.skills.verify import is_custom_check_id
 
+    if _depth > 8:
+        return 0
     if skill.kind == "script":
         base = 0
     elif skill.kind == "pipeline":
-        base = len(skill.steps) * skill.max_iterations
+        base = 0
+        for step in skill.steps:
+            if step.type == "skill" and step.config is not None:
+                base += estimate_skill_llm_calls(step.config, _depth=_depth + 1)
+            else:
+                base += skill.max_iterations
     else:
         base = skill.max_iterations * (skill.max_retries + 1)
     n_custom = sum(

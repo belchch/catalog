@@ -961,6 +961,31 @@ def test_estimate_skill_budget_by_kind() -> None:
     assert estimate_skill_llm_calls(agent_custom) == 27
     assert estimate_skill_llm_calls(pipeline_custom) == 17
     assert estimate_skill_budget(script_custom) == (1, 1)
+    nested_agent = SkillConfig(
+        name="nested",
+        description="",
+        system_prompt="p",
+        allowed_tools=[],
+        model="x",
+        kind="agent",
+        max_iterations=4,
+        max_retries=1,
+    )
+    with_skill_step = SkillConfig(
+        name="outer",
+        description="",
+        system_prompt="",
+        allowed_tools=[],
+        model="x",
+        kind="pipeline",
+        max_iterations=5,
+        steps=[
+            PipelineStep(id="prep", type="script"),
+            PipelineStep(id="call", type="skill", config=nested_agent),
+            PipelineStep(id="note", type="llm"),
+        ],
+    )
+    assert estimate_skill_llm_calls(with_skill_step) == 18
 
 
 def test_budget_reserve_release_two_of_twenty_four() -> None:

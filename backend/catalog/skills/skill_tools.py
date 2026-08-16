@@ -55,6 +55,7 @@ _RESERVED = frozenset(
         "set_skill_meta",
         "save_skill_steps",
         "read_skill_draft",
+        "list_session_skills",
     }
 )
 

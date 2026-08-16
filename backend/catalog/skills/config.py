@@ -12,7 +12,7 @@ import json
 from dataclasses import dataclass, field
 
 SKILL_KINDS = ("agent", "script", "pipeline")
-PIPELINE_STEP_TYPES = ("script", "llm")
+PIPELINE_STEP_TYPES = ("script", "llm", "skill")
 PIPELINE_STEP_INPUTS = ("documents", "previous")
 
 
@@ -39,10 +39,14 @@ class PipelineStep:
     model: str = ""
     provider: str = ""
     reasoning: str = ""
+    skill_id: str = ""
+    skill_name: str = ""
+    config_hash: str = ""
+    config: SkillConfig | None = None
 
 
 def pipeline_step_to_dict(step: PipelineStep) -> dict:
-    return {
+    data = {
         "id": step.id,
         "type": step.type,
         "input": step.input,
@@ -53,6 +57,29 @@ def pipeline_step_to_dict(step: PipelineStep) -> dict:
         "provider": step.provider,
         "reasoning": step.reasoning,
     }
+    if step.skill_id:
+        data["skill_id"] = step.skill_id
+    if step.skill_name:
+        data["skill_name"] = step.skill_name
+    if step.config_hash:
+        data["config_hash"] = step.config_hash
+    if step.config is not None:
+        data["config"] = json.loads(step.config.to_json())
+    return data
+
+
+def _nested_skill_config(value: object) -> SkillConfig | None:
+    if isinstance(value, SkillConfig):
+        return value
+    raw = value
+    if isinstance(value, dict):
+        raw = json.dumps(value, ensure_ascii=False)
+    if not isinstance(raw, str) or not raw.strip():
+        return None
+    try:
+        return SkillConfig.from_json(raw)
+    except (KeyError, TypeError, ValueError, json.JSONDecodeError):
+        return None
 
 
 def pipeline_step_from_dict(data: dict, index: int = 0) -> PipelineStep:
@@ -80,6 +107,9 @@ def pipeline_step_from_dict(data: dict, index: int = 0) -> PipelineStep:
     model = data.get("model")
     provider = data.get("provider")
     reasoning = data.get("reasoning")
+    skill_id = data.get("skill_id")
+    skill_name = data.get("skill_name")
+    step_hash = data.get("config_hash")
     return PipelineStep(
         id=step_id,
         type=step_type,
@@ -90,6 +120,10 @@ def pipeline_step_from_dict(data: dict, index: int = 0) -> PipelineStep:
         model=model if isinstance(model, str) else "",
         provider=provider if isinstance(provider, str) else "",
         reasoning=reasoning if isinstance(reasoning, str) else "",
+        skill_id=skill_id.strip() if isinstance(skill_id, str) else "",
+        skill_name=skill_name.strip() if isinstance(skill_name, str) else "",
+        config_hash=step_hash.strip() if isinstance(step_hash, str) else "",
+        config=_nested_skill_config(data.get("config")),
     )
 
 

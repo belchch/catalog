@@ -28,12 +28,16 @@ from catalog.llm.base import (
     ToolSpec,
 )
 from catalog.skills.apply import apply_skill, apply_skill_collect
-from catalog.skills.artifact_tools import validate_pipeline_steps
+from catalog.skills.artifact_tools import (
+    resolve_pipeline_skill_steps,
+    validate_pipeline_steps,
+)
 from catalog.skills.config import (
     PipelineStep,
     SkillConfig,
     VerifyCheck,
     pipeline_step_from_dict,
+    pipeline_step_to_dict,
 )
 from catalog.skills.repo_run import get_run
 from catalog.skills.repo_skill import create_skill, get_skill
@@ -1223,6 +1227,116 @@ def test_pipeline_step_from_dict_defaults_missing_input() -> None:
     later = pipeline_step_from_dict({"id": "b", "type": "script"}, 1)
     assert first.input == "documents"
     assert later.input == "previous"
+
+
+def test_pipeline_step_legacy_roundtrip_omits_skill_fields() -> None:
+    raw = {
+        "id": "a",
+        "type": "script",
+        "input": "documents",
+        "code": "result = document\n",
+        "system_prompt": "",
+        "allowed_tools": [],
+        "model": "",
+        "provider": "",
+        "reasoning": "",
+    }
+    step = pipeline_step_from_dict(raw, 0)
+    assert step.skill_id == ""
+    assert step.config is None
+    assert pipeline_step_to_dict(step) == raw
+
+
+def test_pipeline_step_skill_roundtrip() -> None:
+    nested = SkillConfig(
+        name="Inner",
+        description="d",
+        system_prompt="",
+        allowed_tools=[],
+        model="m",
+        kind="script",
+        code="result = document.upper()\n",
+    )
+    step = PipelineStep(
+        id="call",
+        type="skill",
+        input="previous",
+        skill_id="abc",
+        skill_name="Inner",
+        config_hash="deadbeef",
+        config=nested,
+    )
+    restored = pipeline_step_from_dict(pipeline_step_to_dict(step), 1)
+    assert restored.type == "skill"
+    assert restored.skill_id == "abc"
+    assert restored.skill_name == "Inner"
+    assert restored.config_hash == "deadbeef"
+    assert restored.config is not None
+    assert restored.config.name == "Inner"
+    assert restored.config.code == nested.code
+
+
+def test_validate_skill_step_draft_requires_skill_id() -> None:
+    step = PipelineStep(id="call", type="skill")
+    errors = validate_pipeline_steps([step], [], require_content=False)
+    assert any("skill_id is empty" in e for e in errors)
+
+
+def test_validate_skill_step_build_requires_snapshot() -> None:
+    step = PipelineStep(id="call", type="skill", skill_id="abc")
+    errors = validate_pipeline_steps([step], [], require_content=True)
+    assert any("snapshot is missing" in e for e in errors)
+
+
+def test_validate_skill_step_snapshot_skips_attach_check() -> None:
+    nested = SkillConfig(
+        name="Inner",
+        description="d",
+        system_prompt="",
+        allowed_tools=[],
+        model="m",
+        kind="script",
+        code="result = document\n",
+    )
+    step = PipelineStep(
+        id="call",
+        type="skill",
+        skill_id="abc",
+        config=nested,
+    )
+    errors = validate_pipeline_steps(
+        [step],
+        [],
+        require_content=False,
+        session_skills={},
+    )
+    assert errors == []
+
+
+def test_resolve_keeps_snapshot_when_skill_not_attached(db: Database) -> None:
+    session_id = create_session(db)
+    nested = SkillConfig(
+        name="Inner",
+        description="d",
+        system_prompt="",
+        allowed_tools=[],
+        model="m",
+        kind="script",
+        code="result = document.upper()\n",
+    )
+    step = PipelineStep(
+        id="call",
+        type="skill",
+        skill_id="missing-child",
+        skill_name="Inner",
+        config_hash="deadbeef",
+        config=nested,
+    )
+    filled, errors = resolve_pipeline_skill_steps([step], db, session_id)
+    assert errors == []
+    assert filled[0].config is not None
+    assert filled[0].config.code == nested.code
+    assert filled[0].config_hash == "deadbeef"
 
 
 def test_apply_pipeline_script_llm_script(db: Database, workspace: Path) -> None:
