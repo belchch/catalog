@@ -8,6 +8,7 @@ from catalog.skills.config import SkillConfig, VerifyCheck
 from catalog.skills.verify import (
     VerifyResult,
     registered_checks,
+    run_custom_judge,
     run_verify,
     run_verify_async,
     validate_verify_check,
@@ -542,3 +543,17 @@ def test_run_verify_async_judge_fail() -> None:
     )
     assert result.passed is False
     assert result.failures == ["custom:Has Python: нет стека"]
+
+
+def test_run_custom_judge_missing_model() -> None:
+    provider = _JudgeProvider(["PASS"])
+    reason = asyncio.run(
+        run_custom_judge(
+            "hello",
+            "есть опыт Python",
+            provider=provider,
+            model="",
+        )
+    )
+    assert reason == "custom:preview: missing model"
+    assert provider.requests == []

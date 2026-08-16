@@ -188,6 +188,7 @@ async def _apply_core(
     providers: dict[str, LLMProvider] | None = None,
     input_texts: list[str] | None = None,
     parent_run_id: str | None = None,
+    fallback_model: str = "",
 ) -> AsyncIterator[AgentEvent]:
     """Shared apply loop: streams events, fills ``trace`` and ``outcome``.
 
@@ -307,6 +308,7 @@ async def _apply_core(
     last_capped = False
     passed = False
     output_doc_id: str | None = None
+    verify_model = skill.model or fallback_model
     # ``done`` guards finish_run so it runs exactly once across the normal
     # path, the exception path, and the finally safety net.
     done = False
@@ -380,7 +382,7 @@ async def _apply_core(
                 skill.verify_checks,
                 db=db,
                 provider=provider,
-                model=skill.model,
+                model=verify_model,
             )
             verify_event = VerifyEvent(iteration=1, result=result)
             yield verify_event
@@ -515,7 +517,7 @@ async def _apply_core(
                 skill.verify_checks,
                 db=db,
                 provider=provider,
-                model=skill.model,
+                model=verify_model,
             )
             verify_event = VerifyEvent(iteration=1, result=result)
             yield verify_event
@@ -607,7 +609,7 @@ async def _apply_core(
                     skill.verify_checks,
                     db=db,
                     provider=provider,
-                    model=skill.model,
+                    model=verify_model,
                 )
                 verify_event = VerifyEvent(iteration=r + 1, result=result)
                 yield verify_event
@@ -795,6 +797,7 @@ async def apply_skill(
     providers: dict[str, LLMProvider] | None = None,
     input_texts: list[str] | None = None,
     parent_run_id: str | None = None,
+    fallback_model: str = "",
 ) -> AsyncIterator[AgentEvent]:
     """Run a skill over one or more documents, streaming :data:`AgentEvent` items.
 
@@ -838,6 +841,7 @@ async def apply_skill(
         providers=providers,
         input_texts=input_texts,
         parent_run_id=parent_run_id,
+        fallback_model=fallback_model,
     ):
         yield event
 
@@ -859,6 +863,7 @@ async def apply_skill_collect(
     providers: dict[str, LLMProvider] | None = None,
     input_texts: list[str] | None = None,
     parent_run_id: str | None = None,
+    fallback_model: str = "",
 ) -> ApplyResult:
     """Drain :func:`apply_skill` and return the final :class:`ApplyResult`."""
     trace = Trace()
@@ -881,6 +886,7 @@ async def apply_skill_collect(
         providers=providers,
         input_texts=input_texts,
         parent_run_id=parent_run_id,
+        fallback_model=fallback_model,
     ):
         pass
     return ApplyResult(

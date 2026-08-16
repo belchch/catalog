@@ -6,6 +6,7 @@ import re
 
 from catalog.agent.registry import ToolRegistry
 from catalog.api.sessions import _ws_session_tools
+from catalog.llm.base import CompletionResult, Message
 from catalog.skills.config import SkillConfig, VerifyCheck
 from catalog.skills.repo_run import get_run
 from catalog.skills.repo_skill import create_skill, get_skill
@@ -16,6 +17,7 @@ from catalog.skills.skill_tools import (
     skill_tool_name,
 )
 from catalog.storage.db import Database
+from catalog.storage.repo_custom_check import create_custom_check
 from catalog.storage.repo_document import list_documents
 from catalog.storage.repo_session import create_session
 from catalog.storage.repo_session_skill import (
@@ -28,6 +30,29 @@ from catalog.storage.repo_session_skill import (
 _TOOL_NAME_RE = re.compile(r"^[a-z0-9_]+$")
 
 
+class _JudgeProvider:
+    def __init__(self, answers: list[str]) -> None:
+        self.answers = list(answers)
+        self.requests: list[dict] = []
+
+    async def complete(
+        self,
+        model: str,
+        messages: list[Message],
+        tools=None,
+        temperature: float = 0.0,
+        **kwargs,
+    ) -> CompletionResult:
+        self.requests.append({"model": model, "messages": messages, "tools": tools})
+        if not self.answers:
+            raise AssertionError("judge script exhausted")
+        return CompletionResult(
+            content=self.answers.pop(0),
+            tool_calls=[],
+            finish_reason="stop",
+        )
+
+
 def _script_skill(
     db: Database,
     *,
@@ -35,13 +60,14 @@ def _script_skill(
     code: str = "def main(document):\n    return document.upper()\n",
     verify_checks: list[VerifyCheck] | None = None,
     input_arity: int | None = 1,
+    model: str = "x",
 ) -> str:
     config = SkillConfig(
         name=name,
         description="Uppercase input",
         system_prompt="",
         allowed_tools=[],
-        model="x",
+        model=model,
         kind="script",
         code=code,
         verify_checks=verify_checks
@@ -162,6 +188,63 @@ def test_get_run_returns_parent_run_id(client, db: Database) -> None:
     assert run["result_text"] == "HELLO"
 
 
+def test_session_skill_tool_custom_verify_uses_provider(db: Database) -> None:
+    row = create_custom_check(db, name="Has Hello", prompt="contains hello")
+    sid = create_session(db)
+    skill_id = _script_skill(
+        db,
+        model="",
+        verify_checks=[VerifyCheck(check=f"custom:{row.id}")],
+    )
+    attach_skills(db, sid, [skill_id])
+    record = get_skill(db, skill_id)
+    assert record is not None
+    name = skill_tool_name(record, used=set())
+    provider = _JudgeProvider(["PASS"])
+    tools = build_session_skill_tools(
+        db,
+        sid,
+        workspace_dir="/tmp",
+        base_tools=ToolRegistry(),
+        provider=provider,
+        fallback_model="workspace/model",
+    )
+    _, fn = tools.get(name)
+    assert fn is not None
+    out = asyncio.run(fn(text="hello"))
+    assert out["ok"] is True
+    assert out["verify_failures"] == []
+    assert len(provider.requests) == 1
+    assert provider.requests[0]["model"] == "workspace/model"
+
+
+def test_session_skill_tool_custom_verify_without_provider_fails(
+    db: Database,
+) -> None:
+    row = create_custom_check(db, name="Has Hello", prompt="contains hello")
+    sid = create_session(db)
+    skill_id = _script_skill(
+        db,
+        model="",
+        verify_checks=[VerifyCheck(check=f"custom:{row.id}")],
+    )
+    attach_skills(db, sid, [skill_id])
+    record = get_skill(db, skill_id)
+    assert record is not None
+    name = skill_tool_name(record, used=set())
+    tools = build_session_skill_tools(
+        db, sid, workspace_dir="/tmp", base_tools=ToolRegistry()
+    )
+    _, fn = tools.get(name)
+    assert fn is not None
+    out = asyncio.run(fn(text="hello"))
+    assert out["ok"] is False
+    assert any(
+        "missing model" in f or "provider" in f or "judge error" in f
+        for f in out["verify_failures"]
+    )
+
+
 def test_session_skill_tool_verify_failure(db: Database) -> None:
     sid = create_session(db)
     skill_id = _script_skill(
@@ -249,6 +332,40 @@ def test_ws_session_tools_includes_attached_script(db: Database) -> None:
     assert expected in tools.names()
     assert "list_documents" in tools.names()
     assert "save_skill_prompt" in tools.names()
+
+
+def test_ws_session_tools_custom_verify_uses_provider(db: Database) -> None:
+    row = create_custom_check(db, name="Has Hello", prompt="contains hello")
+    sid = create_session(db)
+    skill_id = _script_skill(
+        db,
+        model="",
+        verify_checks=[VerifyCheck(check=f"custom:{row.id}")],
+    )
+    attach_skills(db, sid, [skill_id])
+    record = get_skill(db, skill_id)
+    assert record is not None
+    expected = skill_tool_name(record, used=set())
+
+    class _WS:
+        async def send_json(self, payload: dict) -> None:
+            return None
+
+    provider = _JudgeProvider(["PASS"])
+    tools = _ws_session_tools(
+        db,
+        "/tmp",
+        sid,
+        ToolRegistry(),
+        _WS(),
+        provider=provider,
+        fallback_model="ws/model",
+    )
+    _, fn = tools.get(expected)
+    assert fn is not None
+    out = asyncio.run(fn(text="hello"))
+    assert out["ok"] is True
+    assert provider.requests[0]["model"] == "ws/model"
 
 
 def test_rest_attach_detach_list_session_tools(client, db: Database) -> None:

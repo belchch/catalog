@@ -46,7 +46,7 @@ from catalog.api.schemas import (
 )
 from catalog.config import Settings
 from catalog.documents.tools import build_document_tools
-from catalog.llm.base import Message
+from catalog.llm.base import LLMProvider, Message
 from catalog.llm.log_context import prompt_log_context
 from catalog.llm.timeout import DEFAULT_LLM_TIMEOUT_SECONDS, llm_timeout_context
 from catalog.skills.artifact_tools import (
@@ -709,7 +709,13 @@ async def _run_planner_turn(
 
 
 def _ws_session_tools(
-    db: Database, workspace: str, session_id: str, base_tools: ToolRegistry, websocket: WebSocket
+    db: Database,
+    workspace: str,
+    session_id: str,
+    base_tools: ToolRegistry,
+    websocket: WebSocket,
+    provider: LLMProvider | None = None,
+    fallback_model: str = "",
 ) -> ToolRegistry:
     tools: ToolRegistry = build_document_tools(db, workspace, session_id)
 
@@ -732,6 +738,8 @@ def _ws_session_tools(
         workspace_dir=workspace,
         base_tools=base_tools,
         reserved=set(tools.names()),
+        provider=provider,
+        fallback_model=fallback_model,
     )
     for name in skill_tools.names():
         entry = skill_tools.get(name)
@@ -801,7 +809,17 @@ async def session_ws(
                     await websocket.send_json({"type": "error", "message": "workspace not open"})
                     await websocket.close()
                     return
-                tools = _ws_session_tools(db, workspace, session_id, base_tools, websocket)
+                tools = _ws_session_tools(
+                    db,
+                    workspace,
+                    session_id,
+                    base_tools,
+                    websocket,
+                    provider=state.provider,
+                    fallback_model=(
+                        getattr(state, "active_model", None) or settings.default_model
+                    ),
+                )
 
                 if buffered is not None:
                     raw = buffered

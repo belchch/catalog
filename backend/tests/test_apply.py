@@ -38,6 +38,7 @@ from catalog.skills.config import (
 from catalog.skills.repo_run import get_run
 from catalog.skills.repo_skill import create_skill, get_skill
 from catalog.storage.db import Database
+from catalog.storage.repo_custom_check import create_custom_check
 from catalog.storage.repo_session import create_session
 from catalog.storage.repo_session_document import list_session_documents
 
@@ -642,6 +643,146 @@ def test_apply_script_verify_failure_saved_in_trace(
     assert verify_entries[0]["data"]["passed"] is False
     assert verify_entries[0]["data"]["failures"]
     assert any("non_empty" in f for f in verify_entries[0]["data"]["failures"])
+
+
+class _JudgeProvider:
+    def __init__(self, answers: list[str]) -> None:
+        self.answers = list(answers)
+        self.requests: list[dict] = []
+
+    async def complete(
+        self,
+        model: str,
+        messages: list[Message],
+        tools=None,
+        temperature: float = 0.0,
+        **kwargs,
+    ) -> CompletionResult:
+        self.requests.append({"model": model, "messages": messages, "tools": tools})
+        if not self.answers:
+            raise AssertionError("judge script exhausted")
+        return CompletionResult(
+            content=self.answers.pop(0),
+            tool_calls=[],
+            finish_reason="stop",
+        )
+
+
+def test_apply_script_custom_verify_falls_back_to_default_model(
+    db: Database, workspace: Path
+) -> None:
+    row = create_custom_check(db, name="Has source", prompt="есть source")
+    skill = SkillConfig(
+        name="echo",
+        description="echo",
+        system_prompt="",
+        allowed_tools=[],
+        model="",
+        verify_checks=[VerifyCheck(check=f"custom:{row.id}")],
+        kind="script",
+        code="result = document\n",
+    )
+    skill_id = create_skill(
+        db, name=skill.name, description=skill.description, config=skill
+    )
+    input_doc_id = _ingest_input(db, workspace)
+    provider = _JudgeProvider(["PASS"])
+
+    result = asyncio.run(
+        apply_skill_collect(
+            provider=provider,
+            db=db,
+            workspace_dir=str(workspace),
+            skill=skill,
+            skill_id=skill_id,
+            input_doc_ids=[input_doc_id],
+            base_tools=build_document_tools(db, workspace),
+            persist=False,
+            fallback_model="workspace/model",
+        )
+    )
+
+    assert result.status == "ok"
+    assert len(provider.requests) == 1
+    assert provider.requests[0]["model"] == "workspace/model"
+
+
+def test_apply_script_custom_verify_empty_model_without_fallback_fails(
+    db: Database, workspace: Path
+) -> None:
+    row = create_custom_check(db, name="Has source", prompt="есть source")
+    skill = SkillConfig(
+        name="echo",
+        description="echo",
+        system_prompt="",
+        allowed_tools=[],
+        model="",
+        verify_checks=[VerifyCheck(check=f"custom:{row.id}")],
+        kind="script",
+        code="result = document\n",
+    )
+    skill_id = create_skill(
+        db, name=skill.name, description=skill.description, config=skill
+    )
+    input_doc_id = _ingest_input(db, workspace)
+    provider = _JudgeProvider(["PASS"])
+
+    result = asyncio.run(
+        apply_skill_collect(
+            provider=provider,
+            db=db,
+            workspace_dir=str(workspace),
+            skill=skill,
+            skill_id=skill_id,
+            input_doc_ids=[input_doc_id],
+            base_tools=build_document_tools(db, workspace),
+            persist=False,
+        )
+    )
+
+    assert result.status == "failed"
+    verify_entries = _verify_entries(result.trace)
+    assert verify_entries
+    assert any("missing model" in f for f in verify_entries[0].data["failures"])
+    assert provider.requests == []
+
+
+def test_apply_script_custom_verify_prefers_skill_model(
+    db: Database, workspace: Path
+) -> None:
+    row = create_custom_check(db, name="Has source", prompt="есть source")
+    skill = SkillConfig(
+        name="echo",
+        description="echo",
+        system_prompt="",
+        allowed_tools=[],
+        model="skill/model",
+        verify_checks=[VerifyCheck(check=f"custom:{row.id}")],
+        kind="script",
+        code="result = document\n",
+    )
+    skill_id = create_skill(
+        db, name=skill.name, description=skill.description, config=skill
+    )
+    input_doc_id = _ingest_input(db, workspace)
+    provider = _JudgeProvider(["PASS"])
+
+    result = asyncio.run(
+        apply_skill_collect(
+            provider=provider,
+            db=db,
+            workspace_dir=str(workspace),
+            skill=skill,
+            skill_id=skill_id,
+            input_doc_ids=[input_doc_id],
+            base_tools=build_document_tools(db, workspace),
+            persist=False,
+            fallback_model="workspace/model",
+        )
+    )
+
+    assert result.status == "ok"
+    assert provider.requests[0]["model"] == "skill/model"
 
 
 def test_apply_agent_user_prompt_in_start_message(

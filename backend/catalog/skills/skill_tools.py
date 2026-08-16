@@ -86,10 +86,11 @@ def build_session_skill_tools(
     base_tools: ToolRegistry,
     reserved: set[str] | None = None,
     provider: LLMProvider | None = None,
+    fallback_model: str = "",
 ) -> ToolRegistry:
     reg = ToolRegistry()
     used: set[str] = set(reserved or ())
-    unused_provider: LLMProvider = provider or _UnusedProvider()
+    resolved_provider: LLMProvider = provider or _UnusedProvider()
     for skill in list_session_skills(db, session_id):
         if skill.config.kind != "script":
             continue
@@ -137,7 +138,7 @@ def build_session_skill_tools(
                 }
             try:
                 result = await apply_skill_collect(
-                    provider=unused_provider,
+                    provider=resolved_provider,
                     db=db,
                     workspace_dir=workspace_dir,
                     skill=_config,
@@ -148,6 +149,7 @@ def build_session_skill_tools(
                     input_texts=input_texts,
                     persist=False,
                     parent_run_id=SESSION_TOOL_PARENT_RUN_ID,
+                    fallback_model=fallback_model,
                 )
             except Exception as exc:
                 return {
