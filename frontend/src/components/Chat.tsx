@@ -309,7 +309,7 @@ export function Chat({
         <div className="catalog-chat__content">
         {visibleSuggestions.length > 0 && (
           <div
-            className="mb-2 flex gap-2 overflow-x-auto overscroll-contain pb-0.5"
+            className="mb-2 flex flex-wrap gap-2 pb-0.5"
             role="group"
             aria-label="Быстрые ответы"
           >
@@ -317,7 +317,7 @@ export function Chat({
               <button
                 key={s}
                 type="button"
-                className="chip shrink-0 transition-colors hover:border-line-brand hover:bg-surface-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand disabled:cursor-not-allowed disabled:bg-surface-muted disabled:text-ink-faint"
+                className="chip max-w-full text-left transition-colors hover:border-line-brand hover:bg-surface-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand disabled:cursor-not-allowed disabled:bg-surface-muted disabled:text-ink-faint"
                 onClick={() => sendCurrent(s)}
                 disabled={liveStreaming || socketDown}
               >
