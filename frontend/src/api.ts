@@ -693,7 +693,64 @@ export interface SkillMetaPatch {
   kind: string
   input_arity: number | null
   allowed_tools: string[]
-  verify_checks: { check: string }[]
+  verify_checks: { check: string; params?: Record<string, unknown> }[]
+}
+
+export interface VerifyChecksCatalog {
+  builtin: string[]
+  labels: Record<string, string>
+}
+
+export interface CustomCheckOut {
+  id: string
+  name: string
+  prompt: string
+  hidden: boolean
+  created_at: string
+}
+
+export interface CustomCheckPreviewOut {
+  passed: boolean
+  failures: string[]
+}
+
+export function listVerifyCheckCatalog(): Promise<VerifyChecksCatalog> {
+  return jsonFetch<VerifyChecksCatalog>('/verify-checks')
+}
+
+export function listCustomChecks(): Promise<CustomCheckOut[]> {
+  return jsonFetch<CustomCheckOut[]>('/custom-checks')
+}
+
+export function createCustomCheck(body: {
+  name: string
+  prompt: string
+}): Promise<CustomCheckOut> {
+  return jsonFetch<CustomCheckOut>('/custom-checks', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  })
+}
+
+export function previewCustomCheck(body: {
+  prompt: string
+  sample: string
+}): Promise<CustomCheckPreviewOut> {
+  return jsonFetch<CustomCheckPreviewOut>('/custom-checks/preview', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  })
+}
+
+export async function hideCustomCheck(id: string): Promise<void> {
+  const res = await fetch(`${API_URL}/custom-checks/${encodeURIComponent(id)}/hide`, {
+    method: 'POST',
+  })
+  if (res.status === 204) return
+  const body = await res.text().catch(() => '')
+  throw new ApiError(res.status, res.statusText, body)
 }
 
 export function getSessionArtifacts(sessionId: string): Promise<SessionArtifact[]> {

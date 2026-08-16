@@ -7,6 +7,7 @@ import {
   type SkillMetaPatch,
 } from '../api.ts'
 import { StepsList } from './StepsList.tsx'
+import { VerifyChecksPicker, type VerifyCheckDraft } from './VerifyChecksPicker.tsx'
 
 type InputArity = 1 | 2 | null
 type SectionSaving = ArtifactType | null
@@ -17,7 +18,7 @@ interface MetaDraft {
   kind: SkillKind
   inputArity: InputArity
   allowedTools: string
-  verifyChecks: string
+  verifyChecks: VerifyCheckDraft[]
 }
 
 interface ArtifactsPanelProps {
@@ -45,13 +46,15 @@ const KIND_OPTIONS: { value: SkillKind; label: string }[] = [
   { value: 'pipeline', label: 'pipeline' },
 ]
 
-const EMPTY_META: MetaDraft = {
-  name: '',
-  description: '',
-  kind: 'agent',
-  inputArity: 1,
-  allowedTools: '',
-  verifyChecks: '',
+function emptyMeta(): MetaDraft {
+  return {
+    name: '',
+    description: '',
+    kind: 'agent',
+    inputArity: 1,
+    allowedTools: '',
+    verifyChecks: [],
+  }
 }
 
 const fieldCls = 'field'
@@ -63,8 +66,41 @@ function findArtifact(
   return artifacts.find((a) => a.type === type)
 }
 
+function parseVerifyChecks(raw: unknown): VerifyCheckDraft[] {
+  if (typeof raw === 'string') {
+    return raw
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean)
+      .map((check) => ({ check }))
+  }
+  if (!Array.isArray(raw)) return []
+  const out: VerifyCheckDraft[] = []
+  for (const item of raw) {
+    if (typeof item === 'string') {
+      const check = item.trim()
+      if (check) out.push({ check })
+      continue
+    }
+    if (!item || typeof item !== 'object' || !('check' in item)) continue
+    const obj = item as { check: unknown; params?: unknown }
+    const check = String(obj.check).trim()
+    if (!check) continue
+    const params =
+      obj.params && typeof obj.params === 'object' && !Array.isArray(obj.params)
+        ? { ...(obj.params as Record<string, unknown>) }
+        : undefined
+    if (check === 'custom' && params && typeof params.id === 'string' && params.id.trim()) {
+      out.push({ check: `custom:${params.id.trim()}` })
+      continue
+    }
+    out.push(params ? { check, params } : { check })
+  }
+  return out
+}
+
 function parseMetaContent(content: string): MetaDraft {
-  if (!content.trim()) return { ...EMPTY_META }
+  if (!content.trim()) return emptyMeta()
   try {
     const parsed = JSON.parse(content) as Record<string, unknown>
     const kind: SkillKind =
@@ -75,26 +111,16 @@ function parseMetaContent(content: string): MetaDraft {
     const tools = Array.isArray(parsed.allowed_tools)
       ? (parsed.allowed_tools as unknown[]).map(String).join(', ')
       : ''
-    const checks = Array.isArray(parsed.verify_checks)
-      ? (parsed.verify_checks as unknown[])
-          .map((c) =>
-            c && typeof c === 'object' && 'check' in c
-              ? String((c as { check: unknown }).check)
-              : '',
-          )
-          .filter(Boolean)
-          .join(', ')
-      : ''
     return {
       name: typeof parsed.name === 'string' ? parsed.name : '',
       description: typeof parsed.description === 'string' ? parsed.description : '',
       kind,
       inputArity,
       allowedTools: tools,
-      verifyChecks: checks,
+      verifyChecks: parseVerifyChecks(parsed.verify_checks),
     }
   } catch {
-    return { ...EMPTY_META }
+    return emptyMeta()
   }
 }
 
@@ -103,11 +129,11 @@ function metaToPatch(draft: MetaDraft): SkillMetaPatch {
     .split(',')
     .map((s) => s.trim())
     .filter(Boolean)
-  const checks = draft.verifyChecks
-    .split(',')
-    .map((s) => s.trim())
-    .filter(Boolean)
-    .map((check) => ({ check }))
+  const checks = draft.verifyChecks.map((item) =>
+    item.params && Object.keys(item.params).length > 0
+      ? { check: item.check, params: item.params }
+      : { check: item.check },
+  )
   return {
     name: draft.name.trim(),
     description: draft.description,
@@ -152,10 +178,10 @@ export function ArtifactsPanel({
 }: ArtifactsPanelProps) {
   const [promptDraft, setPromptDraft] = useState('')
   const [scriptDraft, setScriptDraft] = useState('')
-  const [metaDraft, setMetaDraft] = useState<MetaDraft>({ ...EMPTY_META })
+  const [metaDraft, setMetaDraft] = useState<MetaDraft>(emptyMeta)
   const [serverPrompt, setServerPrompt] = useState('')
   const [serverScript, setServerScript] = useState('')
-  const [serverMetaSnap, setServerMetaSnap] = useState(metaSnapshot(EMPTY_META))
+  const [serverMetaSnap, setServerMetaSnap] = useState(() => metaSnapshot(emptyMeta()))
   const [saving, setSaving] = useState<SectionSaving>(null)
   const [saveErrors, setSaveErrors] = useState<Partial<Record<ArtifactType, string>>>({})
   const [savedFlash, setSavedFlash] = useState<Partial<Record<ArtifactType, boolean>>>({})
@@ -183,10 +209,10 @@ export function ArtifactsPanel({
   useEffect(() => {
     setPromptDraft('')
     setScriptDraft('')
-    setMetaDraft({ ...EMPTY_META })
+    setMetaDraft(emptyMeta())
     setServerPrompt('')
     setServerScript('')
-    setServerMetaSnap(metaSnapshot(EMPTY_META))
+    setServerMetaSnap(metaSnapshot(emptyMeta()))
     setSaving(null)
     setSaveErrors({})
     setSavedFlash({})
@@ -615,20 +641,16 @@ export function ArtifactsPanel({
                 </span>
               )}
             </label>
-            <label className="mb-1 block text-[11px] text-ink-faint">
-              verify_checks
-              <input
-                type="text"
-                className={`mt-1 ${fieldCls}`}
+            <div className="mb-1">
+              <VerifyChecksPicker
                 value={metaDraft.verifyChecks}
                 disabled={inputsDisabled}
-                placeholder="non_empty, markdown_well_formed"
-                onChange={(e) => {
-                  setMetaDraft((d) => ({ ...d, verifyChecks: e.target.value }))
+                onChange={(next) => {
+                  setMetaDraft((d) => ({ ...d, verifyChecks: next }))
                   clearHighlightIf('meta')
                 }}
               />
-            </label>
+            </div>
             {(nameClientError || metaArt?.error) && (
               <p id="meta-error" className="mt-1 text-[11px] text-danger-ink">
                 {nameClientError ? 'Имя не может быть пустым' : metaArt?.error}
