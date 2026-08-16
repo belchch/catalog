@@ -28,6 +28,7 @@ from asyncio import CancelledError
 from collections.abc import AsyncIterator
 from dataclasses import dataclass, replace
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from catalog.agent.events import AgentEvent, FinishEvent, RunMetaEvent, ScriptEvent, VerifyEvent
 from catalog.agent.logging import log_agent_event
@@ -54,6 +55,9 @@ from catalog.skills.verify import run_verify_async
 from catalog.storage.db import Database
 from catalog.storage.repo_document import create_document, get_document
 from catalog.storage.repo_session_document import attach_documents
+
+if TYPE_CHECKING:
+    from catalog.skills.skill_tools import SkillCallContext
 
 logger = logging.getLogger("catalog.skills.apply")
 
@@ -189,6 +193,7 @@ async def _apply_core(
     input_texts: list[str] | None = None,
     parent_run_id: str | None = None,
     fallback_model: str = "",
+    call_context: SkillCallContext | None = None,
 ) -> AsyncIterator[AgentEvent]:
     """Shared apply loop: streams events, fills ``trace`` and ``outcome``.
 
@@ -292,6 +297,7 @@ async def _apply_core(
                     "skill_id": skill_id,
                     "config_hash": pinned,
                     "parent_run_id": parent_run_id,
+                    "depth": 0 if call_context is None else call_context.depth,
                 },
             )
         )
@@ -790,6 +796,7 @@ async def apply_skill(
     input_texts: list[str] | None = None,
     parent_run_id: str | None = None,
     fallback_model: str = "",
+    call_context: SkillCallContext | None = None,
 ) -> AsyncIterator[AgentEvent]:
     """Run a skill over one or more documents, streaming :data:`AgentEvent` items.
 
@@ -834,6 +841,7 @@ async def apply_skill(
         input_texts=input_texts,
         parent_run_id=parent_run_id,
         fallback_model=fallback_model,
+        call_context=call_context,
     ):
         yield event
 
@@ -856,6 +864,7 @@ async def apply_skill_collect(
     input_texts: list[str] | None = None,
     parent_run_id: str | None = None,
     fallback_model: str = "",
+    call_context: SkillCallContext | None = None,
 ) -> ApplyResult:
     """Drain :func:`apply_skill` and return the final :class:`ApplyResult`."""
     trace = Trace()
@@ -879,6 +888,7 @@ async def apply_skill_collect(
         input_texts=input_texts,
         parent_run_id=parent_run_id,
         fallback_model=fallback_model,
+        call_context=call_context,
     ):
         pass
     return ApplyResult(

@@ -12,6 +12,7 @@ from catalog.skills.repo_run import get_run
 from catalog.skills.repo_skill import create_skill, get_skill
 from catalog.skills.skill_tools import (
     SESSION_TOOL_PARENT_RUN_ID,
+    SkillCallContext,
     build_session_skill_tools,
     config_hash,
     skill_tool_name,
@@ -142,6 +143,7 @@ def test_session_skill_tool_runs_script_and_pins(db: Database) -> None:
     assert out["skill_id"] == skill_id
     assert out["config_hash"] == config_hash(record.config.to_json())
     assert out["run_id"]
+    assert out["depth"] == 1
     assert out["verify_failures"] == []
     assert list(out) == [
         "ok",
@@ -150,6 +152,7 @@ def test_session_skill_tool_runs_script_and_pins(db: Database) -> None:
         "skill_id",
         "skill_name",
         "config_hash",
+        "depth",
         "verify_failures",
         "text",
     ]
@@ -165,6 +168,7 @@ def test_session_skill_tool_runs_script_and_pins(db: Database) -> None:
     assert pins
     assert pins[0]["data"]["skill_id"] == skill_id
     assert pins[0]["data"]["config_hash"] == out["config_hash"]
+    assert pins[0]["data"]["depth"] == 1
     verify = [e for e in entries if e["kind"] == "verify"]
     assert verify
     assert verify[0]["data"]["passed"] is True
@@ -439,3 +443,66 @@ def test_rest_attach_detach_list_session_tools(client, db: Database) -> None:
     )
     empty = client.post(f"/sessions/{session_id}/tools", json={"skill_ids": []})
     assert empty.status_code == 422
+
+
+def test_depth_2_registers_no_skill_tools(db: Database) -> None:
+    sid = create_session(db)
+    skill_id = _script_skill(db)
+    attach_skills(db, sid, [skill_id])
+    tools = build_session_skill_tools(
+        db,
+        sid,
+        workspace_dir="/tmp",
+        base_tools=ToolRegistry(),
+        call_context=SkillCallContext(depth=2),
+    )
+    assert tools.names() == []
+
+
+def test_chain_skips_self_registers_neighbor(db: Database) -> None:
+    sid = create_session(db)
+    skill_a = _script_skill(db, name="Alpha")
+    skill_b = _script_skill(db, name="Beta")
+    attach_skills(db, sid, [skill_a, skill_b])
+    rec_a = get_skill(db, skill_a)
+    rec_b = get_skill(db, skill_b)
+    assert rec_a is not None and rec_b is not None
+    name_a = skill_tool_name(rec_a, used=set())
+    name_b = skill_tool_name(rec_b, used=set())
+    tools = build_session_skill_tools(
+        db,
+        sid,
+        workspace_dir="/tmp",
+        base_tools=ToolRegistry(),
+        call_context=SkillCallContext(depth=1, chain=(skill_a,)),
+    )
+    names = tools.names()
+    assert name_a not in names
+    assert name_b in names
+
+
+def test_self_call_a_to_a_is_impossible(db: Database) -> None:
+    sid = create_session(db)
+    skill_a = _script_skill(db, name="Alpha")
+    attach_skills(db, sid, [skill_a])
+    rec_a = get_skill(db, skill_a)
+    assert rec_a is not None
+    name_a = skill_tool_name(rec_a, used=set())
+    root = build_session_skill_tools(
+        db, sid, workspace_dir="/tmp", base_tools=ToolRegistry()
+    )
+    assert name_a in root.names()
+    _, fn = root.get(name_a)
+    assert fn is not None
+    out = asyncio.run(fn(text="hello"))
+    assert out["ok"] is True
+    assert out["depth"] == 1
+    nested = build_session_skill_tools(
+        db,
+        sid,
+        workspace_dir="/tmp",
+        base_tools=ToolRegistry(),
+        call_context=SkillCallContext(depth=1, chain=(skill_a,)),
+    )
+    assert name_a not in nested.names()
+    assert nested.names() == []

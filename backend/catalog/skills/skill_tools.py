@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import re
 from collections.abc import AsyncIterator
+from dataclasses import dataclass
 from typing import Any
 
 from catalog.agent.registry import ToolRegistry
@@ -20,6 +21,19 @@ from catalog.storage.db import Database
 from catalog.storage.repo_session_skill import list_session_skills
 
 SESSION_TOOL_PARENT_RUN_ID = "session"
+
+
+@dataclass(frozen=True)
+class SkillCallContext:
+    depth: int = 0
+    chain: tuple[str, ...] = ()
+
+    def nested(self, skill_id: str) -> SkillCallContext:
+        return SkillCallContext(
+            depth=self.depth + 1,
+            chain=self.chain + (skill_id,),
+        )
+
 
 _SLUG_RE = re.compile(r"[^a-z0-9]+")
 _RESERVED = frozenset(
@@ -78,6 +92,16 @@ def config_hash(config_json: str) -> str:
     return hashlib.sha256(config_json.encode("utf-8")).hexdigest()[:16]
 
 
+def _merge_tools(*registries: ToolRegistry) -> ToolRegistry:
+    merged = ToolRegistry()
+    for registry in registries:
+        for name in registry.names():
+            entry = registry.get(name)
+            if entry is not None:
+                merged.register(entry[0], entry[1])
+    return merged
+
+
 def build_session_skill_tools(
     db: Database,
     session_id: str,
@@ -88,11 +112,19 @@ def build_session_skill_tools(
     provider: LLMProvider | None = None,
     fallback_model: str = "",
     providers: dict[str, LLMProvider] | None = None,
+    call_context: SkillCallContext | None = None,
+    max_skill_depth: int = 2,
 ) -> ToolRegistry:
+    ctx = call_context or SkillCallContext()
     reg = ToolRegistry()
-    used: set[str] = set(reserved or ())
+    if ctx.depth >= max_skill_depth:
+        return reg
+    reserved_names = frozenset(reserved or ())
+    used: set[str] = set(reserved_names)
     resolved_provider: LLMProvider = provider or _UnusedProvider()
     for skill in list_session_skills(db, session_id):
+        if skill.id in ctx.chain:
+            continue
         if skill.config.kind != "script":
             continue
         tool_name = skill_tool_name(skill, used=used)
@@ -118,7 +150,11 @@ def build_session_skill_tools(
             _config=skill_config,
             _hash: str = pinned_hash,
             _name: str = skill.name,
+            _ctx: SkillCallContext = ctx,
+            _max_depth: int = max_skill_depth,
+            _reserved: frozenset[str] = reserved_names,
         ) -> dict[str, Any]:
+            nested = _ctx.nested(_skill_id)
             if texts is not None:
                 input_texts = [str(t) for t in texts]
             elif text:
@@ -129,6 +165,7 @@ def build_session_skill_tools(
                     "error": "provide text or texts",
                     "skill_id": _skill_id,
                     "config_hash": _hash,
+                    "depth": nested.depth,
                 }
             if not input_texts:
                 return {
@@ -136,7 +173,21 @@ def build_session_skill_tools(
                     "error": "provide text or texts",
                     "skill_id": _skill_id,
                     "config_hash": _hash,
+                    "depth": nested.depth,
                 }
+            nested_skill_tools = build_session_skill_tools(
+                db,
+                session_id,
+                workspace_dir=workspace_dir,
+                base_tools=base_tools,
+                reserved=_reserved | set(base_tools.names()),
+                provider=resolved_provider,
+                fallback_model=fallback_model,
+                providers=providers,
+                call_context=nested,
+                max_skill_depth=_max_depth,
+            )
+            apply_tools = _merge_tools(base_tools, nested_skill_tools)
             try:
                 result = await apply_skill_collect(
                     provider=resolved_provider,
@@ -145,13 +196,14 @@ def build_session_skill_tools(
                     skill=_config,
                     skill_id=_skill_id,
                     input_doc_ids=[],
-                    base_tools=base_tools,
+                    base_tools=apply_tools,
                     session_id=session_id,
                     input_texts=input_texts,
                     persist=False,
                     parent_run_id=SESSION_TOOL_PARENT_RUN_ID,
                     fallback_model=fallback_model,
                     providers=providers,
+                    call_context=nested,
                 )
             except Exception as exc:
                 return {
@@ -160,6 +212,7 @@ def build_session_skill_tools(
                     "skill_id": _skill_id,
                     "skill_name": _name,
                     "config_hash": _hash,
+                    "depth": nested.depth,
                 }
             verify_failures: list[str] = []
             for entry in result.trace.entries:
@@ -172,6 +225,7 @@ def build_session_skill_tools(
                 "skill_id": _skill_id,
                 "skill_name": _name,
                 "config_hash": _hash,
+                "depth": nested.depth,
                 "verify_failures": verify_failures,
                 "text": result.result_text,
             }

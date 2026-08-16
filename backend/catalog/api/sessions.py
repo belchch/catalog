@@ -56,7 +56,7 @@ from catalog.skills.artifact_tools import (
     validate_pipeline_steps,
 )
 from catalog.skills.config import SKILL_KINDS, compute_tags, pipeline_step_to_dict
-from catalog.skills.skill_tools import build_session_skill_tools
+from catalog.skills.skill_tools import SkillCallContext, build_session_skill_tools
 from catalog.skills.script_runner import (
     SCRIPT_CODE_CONTRACT_RU,
     ScriptValidationError,
@@ -717,6 +717,8 @@ def _ws_session_tools(
     provider: LLMProvider | None = None,
     fallback_model: str = "",
     providers: dict[str, LLMProvider] | None = None,
+    call_context: SkillCallContext | None = None,
+    max_skill_depth: int = 2,
 ) -> ToolRegistry:
     tools: ToolRegistry = build_document_tools(db, workspace, session_id)
 
@@ -742,6 +744,8 @@ def _ws_session_tools(
         provider=provider,
         fallback_model=fallback_model,
         providers=providers,
+        call_context=call_context or SkillCallContext(),
+        max_skill_depth=max_skill_depth,
     )
     for name in skill_tools.names():
         entry = skill_tools.get(name)
@@ -820,6 +824,8 @@ async def session_ws(
                     getattr(state, "active_model", None) or settings.default_model
                 ),
                 providers=getattr(state, "providers", None),
+                call_context=SkillCallContext(),
+                max_skill_depth=settings.max_skill_depth,
             )
 
             if buffered is not None:

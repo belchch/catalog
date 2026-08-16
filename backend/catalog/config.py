@@ -33,6 +33,17 @@ PROMPT_LOG_ENABLED = os.getenv("PROMPT_LOG_ENABLED", "").strip().lower() in _TRU
 PROMPT_LOG_DIR = str(resolve_override("PROMPT_LOG_DIR", _DATA_DIR / "prompt_logs"))
 
 
+def _env_int(name: str, default: int, *, minimum: int = 1) -> int:
+    raw = os.getenv(name, "").strip()
+    if not raw:
+        return default
+    try:
+        value = int(raw)
+    except ValueError:
+        return default
+    return value if value >= minimum else default
+
+
 @dataclass(frozen=True)
 class Settings:
     db_path: str = APP_DB_PATH
@@ -47,6 +58,7 @@ class Settings:
     prompt_log_enabled: bool = PROMPT_LOG_ENABLED
     prompt_log_dir: str = PROMPT_LOG_DIR
     log_level: str = LOG_LEVEL
+    max_skill_depth: int = 2
 
 
 def resolve_provider_keys(
@@ -109,4 +121,5 @@ def get_settings() -> Settings:
         prompt_log_enabled=os.getenv("PROMPT_LOG_ENABLED", "").strip().lower() in _TRUTHY,
         prompt_log_dir=str(prompt_log_dir),
         log_level=os.getenv("LOG_LEVEL", "INFO").upper(),
+        max_skill_depth=_env_int("APP_MAX_SKILL_DEPTH", 2),
     )
