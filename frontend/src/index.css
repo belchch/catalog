@@ -275,9 +275,7 @@ html, body, #root {
   position: relative;
   min-height: 62px;
   border-bottom: 1px solid var(--header-line);
-  background:
-    linear-gradient(100deg, rgba(139, 92, 246, 0.12), rgba(217, 70, 239, 0.06) 38%, rgba(255, 255, 255, 0) 72%),
-    var(--header-bg);
+  background: var(--header-bg);
 }
 .catalog-header::before {
   content: '';
