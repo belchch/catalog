@@ -50,7 +50,7 @@ from catalog.llm.factory import provider_for_skill
 from catalog.skills.config import PipelineStep, SkillConfig, ensure_read_document_tool
 from catalog.skills.repo_run import claim_run, create_run, finish_run, get_run
 from catalog.skills.script_runner import ScriptRuntimeError, run_script_async
-from catalog.skills.verify import run_verify
+from catalog.skills.verify import run_verify_async
 from catalog.storage.db import Database
 from catalog.storage.repo_document import create_document, get_document
 from catalog.storage.repo_session_document import attach_documents
@@ -375,7 +375,13 @@ async def _apply_core(
             )
             last_text = text
 
-            result = run_verify(text or "", skill.verify_checks)
+            result = await run_verify_async(
+                text or "",
+                skill.verify_checks,
+                db=db,
+                provider=provider,
+                model=skill.model,
+            )
             verify_event = VerifyEvent(iteration=1, result=result)
             yield verify_event
             log_agent_event(verify_event)
@@ -504,7 +510,13 @@ async def _apply_core(
                         f"unknown pipeline step type: {step.type!r}"
                     )
             final_text = last_text or ""
-            result = run_verify(final_text, skill.verify_checks)
+            result = await run_verify_async(
+                final_text,
+                skill.verify_checks,
+                db=db,
+                provider=provider,
+                model=skill.model,
+            )
             verify_event = VerifyEvent(iteration=1, result=result)
             yield verify_event
             log_agent_event(verify_event)
@@ -590,7 +602,13 @@ async def _apply_core(
                 last_text = text
                 last_capped = capped
 
-                result = run_verify(text or "", skill.verify_checks)
+                result = await run_verify_async(
+                    text or "",
+                    skill.verify_checks,
+                    db=db,
+                    provider=provider,
+                    model=skill.model,
+                )
                 verify_event = VerifyEvent(iteration=r + 1, result=result)
                 yield verify_event
                 log_agent_event(verify_event)

@@ -378,3 +378,47 @@ class SkillTrackSelectRequest(BaseModel):
 class SkillTrackSelected(BaseModel):
     session_id: str
     content: str
+
+
+class CustomCheckOut(BaseModel):
+    id: str
+    name: str
+    prompt: str
+    hidden: bool
+    created_at: str
+
+
+class CustomCheckCreate(BaseModel):
+    name: str
+    prompt: str
+
+    @field_validator("name", "prompt")
+    @classmethod
+    def _non_empty_check_field(cls, value: str) -> str:
+        stripped = value.strip()
+        if not stripped:
+            raise ValueError("must be non-empty")
+        return stripped
+
+
+class CustomCheckPreviewRequest(BaseModel):
+    prompt: str
+    sample: str
+
+    @field_validator("prompt")
+    @classmethod
+    def _non_empty_preview_prompt(cls, value: str) -> str:
+        stripped = value.strip()
+        if not stripped:
+            raise ValueError("prompt must be non-empty")
+        return stripped
+
+
+class CustomCheckPreviewOut(BaseModel):
+    passed: bool
+    failures: list[str] = Field(default_factory=list)
+
+
+class VerifyChecksCatalogOut(BaseModel):
+    builtin: list[str]
+    labels: dict[str, str]

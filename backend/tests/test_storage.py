@@ -53,6 +53,7 @@ def test_schema_creates_all_tables(db: Database) -> None:
         "skill",
         "skill_run",
         "session_artifact",
+        "custom_check",
     } <= _table_names(db)
 
 
@@ -67,6 +68,7 @@ def test_init_schema_is_idempotent(db: Database) -> None:
         "skill",
         "skill_run",
         "session_artifact",
+        "custom_check",
     } <= _table_names(db)
 
 

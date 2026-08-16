@@ -104,6 +104,14 @@ CREATE TABLE IF NOT EXISTS session_artifact(
   PRIMARY KEY (session_id, type),
   FOREIGN KEY (session_id) REFERENCES session(id)
 );
+CREATE TABLE IF NOT EXISTS custom_check(
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  prompt TEXT NOT NULL,
+  hidden INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
 """
 
 SCHEMA_SQL = WORKSPACE_SCHEMA
