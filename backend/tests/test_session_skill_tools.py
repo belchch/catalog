@@ -1458,9 +1458,9 @@ def test_nested_runner_stops_between_iterations_on_deadline(
 
     provider = _ExpireAfterFirst()
 
-    def _run() -> None:
+    def _run():
         with nested_skill_hold(hold, budget):
-            asyncio.run(
+            return asyncio.run(
                 apply_skill_collect(
                     provider=provider,
                     db=db,
@@ -1474,12 +1474,158 @@ def test_nested_runner_stops_between_iterations_on_deadline(
             )
 
     try:
-        _run()
+        result = _run()
     finally:
         budget.release(hold)
     assert provider.step == 1
     assert hold.llm_used == 1
     assert budget.deadline_hit is True
+    assert result.status == "failed"
+    assert not any(entry.kind == "verify" for entry in result.trace.entries)
+
+
+def test_apply_deadline_skips_custom_judge_and_retries(
+    db: Database, client
+) -> None:
+    workspace = Path(client.app.state.workspace_manager.root)
+    doc_id = ingest_file(db, workspace, filename="in.md", content=b"hello").id
+    row = create_custom_check(db, name="Has Hello", prompt="contains hello")
+    skill_id = _agent_skill(
+        db,
+        max_retries=2,
+        verify_checks=[VerifyCheck(check=f"custom:{row.id}")],
+    )
+    record = get_skill(db, skill_id)
+    assert record is not None
+    budget = SkillBudget(
+        llm_calls_left=60,
+        nested_runs_left=20,
+        deadline_monotonic=time.monotonic() + 1000,
+    )
+    hold = budget.reserve(*estimate_skill_budget(record.config))
+    assert hold is not None
+
+    class _ExpireAfterFirst(_JudgeProvider):
+        def __init__(self) -> None:
+            super().__init__(["SHOULD NOT JUDGE"])
+            self.step = 0
+
+        async def complete(self, model, messages, tools=None, temperature=0.0, **kwargs):
+            self.requests.append({"model": model})
+            self.step += 1
+            budget.deadline_monotonic = time.monotonic() - 1
+            return CompletionResult(
+                content=None,
+                tool_calls=[
+                    ToolCall(
+                        id="c1",
+                        name="read_document",
+                        arguments={"doc_id": doc_id},
+                    )
+                ],
+                finish_reason="tool_calls",
+            )
+
+    provider = _ExpireAfterFirst()
+    try:
+        with nested_skill_hold(hold, budget):
+            result = asyncio.run(
+                apply_skill_collect(
+                    provider=provider,
+                    db=db,
+                    workspace_dir=str(workspace),
+                    skill=record.config,
+                    skill_id=skill_id,
+                    input_doc_ids=[doc_id],
+                    base_tools=build_document_tools(db, workspace),
+                    persist=False,
+                    fallback_model="workspace/model",
+                )
+            )
+    finally:
+        budget.release(hold)
+    assert provider.step == 1
+    assert hold.llm_used == 1
+    assert result.status == "failed"
+    assert not any(entry.kind == "verify" for entry in result.trace.entries)
+    assert any(entry.kind == "deadline" for entry in result.trace.entries)
+
+
+def test_pipeline_deadline_skips_later_steps_and_verify(
+    db: Database, client
+) -> None:
+    workspace = Path(client.app.state.workspace_manager.root)
+    doc_id = ingest_file(db, workspace, filename="in.md", content=b"hello").id
+    row = create_custom_check(db, name="Has Hello", prompt="contains hello")
+    skill_id = _pipeline_skill(
+        db,
+        steps=[
+            PipelineStep(
+                id="one",
+                type="llm",
+                input="documents",
+                system_prompt="first",
+                allowed_tools=["read_document"],
+            ),
+            PipelineStep(
+                id="two",
+                type="llm",
+                input="previous",
+                system_prompt="second",
+                allowed_tools=["read_document"],
+            ),
+        ],
+        verify_checks=[VerifyCheck(check=f"custom:{row.id}")],
+    )
+    record = get_skill(db, skill_id)
+    assert record is not None
+    budget = SkillBudget(
+        llm_calls_left=60,
+        nested_runs_left=20,
+        deadline_monotonic=time.monotonic() + 1000,
+    )
+    hold = budget.reserve(*estimate_skill_budget(record.config))
+    assert hold is not None
+
+    class _ExpireOnFirst(_JudgeProvider):
+        def __init__(self) -> None:
+            super().__init__(["SHOULD NOT JUDGE"])
+            self.step = 0
+
+        async def complete(self, model, messages, tools=None, temperature=0.0, **kwargs):
+            self.requests.append({"model": model})
+            self.step += 1
+            budget.deadline_monotonic = time.monotonic() - 1
+            return CompletionResult(
+                content="step one",
+                tool_calls=[],
+                finish_reason="stop",
+            )
+
+    provider = _ExpireOnFirst()
+    try:
+        with nested_skill_hold(hold, budget):
+            result = asyncio.run(
+                apply_skill_collect(
+                    provider=provider,
+                    db=db,
+                    workspace_dir=str(workspace),
+                    skill=record.config,
+                    skill_id=skill_id,
+                    input_doc_ids=[doc_id],
+                    base_tools=build_document_tools(db, workspace),
+                    persist=False,
+                    fallback_model="workspace/model",
+                )
+            )
+    finally:
+        budget.release(hold)
+    assert provider.step == 1
+    assert result.status == "failed"
+    assert result.result_text == "step one"
+    assert not any(entry.kind == "verify" for entry in result.trace.entries)
+    assert any(entry.kind == "deadline" for entry in result.trace.entries)
+    assert not any(entry.data.get("step_id") == "two" for entry in result.trace.entries)
 
 
 def test_ws_deadline_uses_session_llm_timeout(

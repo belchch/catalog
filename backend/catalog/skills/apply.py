@@ -48,6 +48,7 @@ from catalog.documents.obsidian import (
 )
 from catalog.llm.base import LLMProvider, Message
 from catalog.llm.factory import provider_for_skill
+from catalog.skills.budget import nested_deadline_exceeded
 from catalog.skills.config import PipelineStep, SkillConfig, ensure_read_document_tool
 from catalog.skills.repo_run import claim_run, create_run, finish_run, get_run
 from catalog.skills.script_runner import ScriptRuntimeError, run_script_async
@@ -310,6 +311,7 @@ async def _apply_core(
     last_text: str | None = None
     last_capped = False
     passed = False
+    deadline_stopped = False
     output_doc_id: str | None = None
     verify_model = skill.model or fallback_model
     verify_provider = provider_for_skill(providers, provider, skill.provider)
@@ -402,6 +404,17 @@ async def _apply_core(
         elif skill.kind == "pipeline":
             current: PipelineValue | None = None
             for index, step in enumerate(skill.steps):
+                if nested_deadline_exceeded():
+                    deadline_stopped = True
+                    last_capped = True
+                    trace.entries.append(
+                        TraceEntry(
+                            "deadline",
+                            index + 1,
+                            {"error": "deadline exceeded"},
+                        )
+                    )
+                    break
                 step_input = _pipeline_step_input(step, current, doc_texts)
                 from_documents = step.input == "documents"
                 if step.type == "script":
@@ -502,35 +515,41 @@ async def _apply_core(
                         if isinstance(event, FinishEvent):
                             text = event.text
                             capped = event.capped
+                            if event.finish_reason == "deadline":
+                                deadline_stopped = True
                     for entry in trace.entries[before:]:
                         entry.data["step_id"] = step.id
                     current = text or ""
                     last_text = current
+                    if deadline_stopped:
+                        last_capped = True
+                        break
                     if index == len(skill.steps) - 1:
                         last_capped = capped
                 else:
                     raise ValueError(
                         f"unknown pipeline step type: {step.type!r}"
                     )
-            final_text = last_text or ""
-            result = await run_verify_async(
-                final_text,
-                skill.verify_checks,
-                db=db,
-                provider=verify_provider,
-                model=verify_model,
-            )
-            verify_event = VerifyEvent(iteration=1, result=result)
-            yield verify_event
-            log_agent_event(verify_event)
-            trace.entries.append(
-                TraceEntry(
-                    kind="verify",
-                    iteration=1,
-                    data=result.as_payload(),
+            if not deadline_stopped:
+                final_text = last_text or ""
+                result = await run_verify_async(
+                    final_text,
+                    skill.verify_checks,
+                    db=db,
+                    provider=verify_provider,
+                    model=verify_model,
                 )
-            )
-            passed = result.passed
+                verify_event = VerifyEvent(iteration=1, result=result)
+                yield verify_event
+                log_agent_event(verify_event)
+                trace.entries.append(
+                    TraceEntry(
+                        kind="verify",
+                        iteration=1,
+                        data=result.as_payload(),
+                    )
+                )
+                passed = result.passed
         else:
             # ---- Agent path (ADR-0001/0002) ----
             # Build the start message listing every input document (CATALOG-4).
@@ -609,9 +628,13 @@ async def _apply_core(
                     if isinstance(event, FinishEvent):
                         text = event.text
                         capped = event.capped
+                        if event.finish_reason == "deadline":
+                            deadline_stopped = True
 
                 last_text = text
                 last_capped = capped
+                if deadline_stopped:
+                    break
 
                 result = await run_verify_async(
                     text or "",
@@ -720,9 +743,17 @@ async def _apply_core(
         )
 
         # 7. Emit finish.
+        if deadline_stopped:
+            apply_reason = "deadline"
+        elif passed:
+            apply_reason = "stop"
+        elif last_capped:
+            apply_reason = "capped"
+        else:
+            apply_reason = "verify_failed"
         finish_apply = FinishEvent(
             text=last_text,
-            finish_reason="stop" if passed else ("capped" if last_capped else "verify_failed"),
+            finish_reason=apply_reason,
             capped=(not passed) and last_capped,
             usage={},
         )
