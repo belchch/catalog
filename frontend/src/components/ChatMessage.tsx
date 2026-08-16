@@ -1,6 +1,7 @@
 import type { PlannerMessage } from '../hooks/usePlannerSession.ts'
 import { MarkdownView } from './MarkdownView.tsx'
 import { MessageCommands } from './MessageCommands.tsx'
+import { TraceRunNode } from './TraceSteps.tsx'
 
 interface ChatMessageProps {
   message: PlannerMessage
@@ -29,6 +30,20 @@ export function ChatMessage({ message, onRepeat, streaming, closed }: ChatMessag
     )
   }
   if (message.role === 'tool') {
+    if (message.childRunId) {
+      return (
+        <div className="catalog-message catalog-message--tool my-2">
+          <div className="max-w-[88%]">
+            <TraceRunNode
+              runId={message.childRunId}
+              toolName={message.toolName ?? 'skill'}
+              input={message.input}
+              ok={message.ok}
+            />
+          </div>
+        </div>
+      )
+    }
     return (
       <div className="catalog-message catalog-message--tool my-2 text-xs text-ink-faint">
         <span className="font-mono">ℹ {message.content}</span>

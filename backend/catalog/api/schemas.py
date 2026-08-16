@@ -116,6 +116,7 @@ class RunOut(BaseModel):
     trace: list | None = None
     # Raw agent/script output, kept even when persist=False (CATALOG-18).
     result_text: str | None = None
+    parent_run_id: str | None = None
 
 
 class BuildSkillRequest(BaseModel):
@@ -129,6 +130,23 @@ class CommitOut(BaseModel):
 
 class SessionCreateRequest(BaseModel):
     doc_ids: list[str] = Field(default_factory=list)
+
+
+class SessionToolsAttachRequest(BaseModel):
+    skill_ids: list[str] = Field(min_length=1)
+
+    @field_validator("skill_ids")
+    @classmethod
+    def _non_empty_skill_ids(cls, value: list[str]) -> list[str]:
+        cleaned = [str(item).strip() for item in value if str(item).strip()]
+        if not cleaned:
+            raise ValueError("skill_ids must be a non-empty list")
+        return cleaned
+
+
+class SessionToolsAttachResult(BaseModel):
+    skipped_skill_ids: list[str] = Field(default_factory=list)
+    skills: list[SkillOut] = Field(default_factory=list)
 
 
 class SessionCreated(BaseModel):
@@ -360,3 +378,47 @@ class SkillTrackSelectRequest(BaseModel):
 class SkillTrackSelected(BaseModel):
     session_id: str
     content: str
+
+
+class CustomCheckOut(BaseModel):
+    id: str
+    name: str
+    prompt: str
+    hidden: bool
+    created_at: str
+
+
+class CustomCheckCreate(BaseModel):
+    name: str
+    prompt: str
+
+    @field_validator("name", "prompt")
+    @classmethod
+    def _non_empty_check_field(cls, value: str) -> str:
+        stripped = value.strip()
+        if not stripped:
+            raise ValueError("must be non-empty")
+        return stripped
+
+
+class CustomCheckPreviewRequest(BaseModel):
+    prompt: str
+    sample: str
+
+    @field_validator("prompt")
+    @classmethod
+    def _non_empty_preview_prompt(cls, value: str) -> str:
+        stripped = value.strip()
+        if not stripped:
+            raise ValueError("prompt must be non-empty")
+        return stripped
+
+
+class CustomCheckPreviewOut(BaseModel):
+    passed: bool
+    failures: list[str] = Field(default_factory=list)
+
+
+class VerifyChecksCatalogOut(BaseModel):
+    builtin: list[str]
+    labels: dict[str, str]

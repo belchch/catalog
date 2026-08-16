@@ -7,6 +7,7 @@ import pytest
 
 from catalog.llm.base import CompletionResult, ToolCall
 from catalog.skills.artifact_tools import build_artifact_tools
+from catalog.skills.verify import registered_checks, verify_checks_params_hint
 from catalog.skills.config import SkillConfig, VerifyCheck
 from catalog.skills.repo_skill import create_skill, get_skill
 from catalog.storage.db import Database
@@ -539,6 +540,79 @@ def test_build_from_edit_session_via_artifacts(client, provider, db) -> None:
     assert skill.status == "draft"
     assert skill.config.system_prompt == "Updated prompt."
     assert provider.requests == []
+
+
+def test_set_skill_meta_rejects_min_length_without_min(mem_db: Database) -> None:
+    session_id = create_session(mem_db)
+    tools = build_artifact_tools(
+        mem_db, session_id, available_tools=["read_document"]
+    )
+    spec, set_meta = tools.get("set_skill_meta")
+    check_schema = spec.parameters["properties"]["verify_checks"]["items"][
+        "properties"
+    ]["check"]
+    assert check_schema.get("enum") == registered_checks()
+    assert verify_checks_params_hint() in spec.description
+
+    async def _run():
+        return await set_meta(
+            name="Len",
+            description="x",
+            kind="agent",
+            allowed_tools=["read_document"],
+            verify_checks=[{"check": "min_length"}],
+        )
+
+    result = asyncio.run(_run())
+    assert result["ok"] is False
+    assert "min" in (result.get("error") or "")
+    row = get_artifact(mem_db, session_id, "meta")
+    assert row is not None
+    assert row.is_valid is False
+
+
+def test_set_skill_meta_accepts_min_length_with_min(mem_db: Database) -> None:
+    session_id = create_session(mem_db)
+    tools = build_artifact_tools(
+        mem_db, session_id, available_tools=["read_document"]
+    )
+    _, set_meta = tools.get("set_skill_meta")
+
+    async def _run():
+        return await set_meta(
+            name="Len",
+            description="x",
+            kind="agent",
+            allowed_tools=["read_document"],
+            verify_checks=[{"check": "min_length", "params": {"min": 20}}],
+        )
+
+    result = asyncio.run(_run())
+    assert result["ok"] is True
+    row = get_artifact(mem_db, session_id, "meta")
+    assert row is not None
+    assert row.is_valid is True
+
+
+def test_set_skill_meta_rejects_unknown_verify_check(mem_db: Database) -> None:
+    session_id = create_session(mem_db)
+    tools = build_artifact_tools(
+        mem_db, session_id, available_tools=["read_document"]
+    )
+    _, set_meta = tools.get("set_skill_meta")
+
+    async def _run():
+        return await set_meta(
+            name="Len",
+            description="x",
+            kind="agent",
+            allowed_tools=["read_document"],
+            verify_checks=[{"check": "not_a_real_check"}],
+        )
+
+    result = asyncio.run(_run())
+    assert result["ok"] is False
+    assert "unknown verify check" in (result.get("error") or "")
 
 
 def test_set_skill_meta_accepts_pipeline(mem_db: Database) -> None:

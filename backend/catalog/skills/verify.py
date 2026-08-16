@@ -42,21 +42,219 @@ def registered_checks() -> list[str]:
     return list(_REGISTRY.keys())
 
 
-def run_verify(text: str, checks: list[VerifyCheck]) -> VerifyResult:
-    """Run all ``checks`` over ``text``; fail-closed on unknown ids.
+_REQUIRED_PARAMS: dict[str, tuple[str, ...]] = {
+    "min_length": ("min",),
+    "max_length": ("max",),
+    "regex_matches": ("pattern",),
+    "has_section": ("heading",),
+    "has_field": ("key",),
+}
 
-    ``checks`` items are :class:`~catalog.skills.config.VerifyCheck` objects
-    exposing ``.check`` and ``.params``.
-    """
+
+def verify_checks_params_hint() -> str:
+    parts = [
+        f"{check_id} requires {', '.join(keys)}"
+        for check_id, keys in _REQUIRED_PARAMS.items()
+    ]
+    return "Params: " + "; ".join(parts) + "."
+
+
+def is_custom_check_id(check_id: str | None) -> bool:
+    return bool(check_id) and (
+        check_id == "custom" or check_id.startswith("custom:")
+    )
+
+
+def custom_check_ref_id(check_id: str, params: dict | None = None) -> str | None:
+    if check_id.startswith("custom:"):
+        cid = check_id.split(":", 1)[1].strip()
+        return cid or None
+    if check_id == "custom":
+        raw = params.get("id") if isinstance(params, dict) else None
+        if raw is None or raw == "":
+            return None
+        cid = str(raw).strip()
+        return cid or None
+    return None
+
+
+def builtin_check_labels() -> dict[str, str]:
+    return {
+        "non_empty": "Не пустой",
+        "min_length": "Минимальная длина",
+        "max_length": "Максимальная длина",
+        "regex_matches": "Совпадение с regex",
+        "no_leftover_placeholders": "Без плейсхолдеров",
+        "markdown_well_formed": "Корректный markdown",
+        "has_section": "Есть раздел",
+        "has_field": "Есть поле",
+        "table_parses": "Таблица парсится",
+    }
+
+
+def validate_verify_check(
+    check_id: str | None,
+    params: dict | None = None,
+    *,
+    available_checks: list[str] | None = None,
+) -> str | None:
+    payload = params if isinstance(params, dict) else {}
+    if is_custom_check_id(check_id):
+        if custom_check_ref_id(check_id or "", payload) is None:
+            return "custom check requires id"
+        return None
+    known = available_checks if available_checks is not None else registered_checks()
+    if not check_id or check_id not in known:
+        return f"unknown verify check: {check_id!r}"
+    required = _REQUIRED_PARAMS.get(check_id, ())
+    for key in required:
+        value = payload.get(key)
+        if value is None or value == "":
+            return f"{check_id} requires param {key!r}"
+    return None
+
+
+def validate_verify_checks(
+    checks: list,
+    *,
+    available_checks: list[str] | None = None,
+) -> list[str]:
+    errors: list[str] = []
+    for vc in checks:
+        if isinstance(vc, dict):
+            check_id = vc.get("check")
+            raw_params = vc.get("params")
+        else:
+            check_id = getattr(vc, "check", None)
+            raw_params = getattr(vc, "params", None)
+        params = raw_params if isinstance(raw_params, dict) else {}
+        error = validate_verify_check(
+            check_id, params, available_checks=available_checks
+        )
+        if error:
+            errors.append(error)
+    return errors
+
+
+def run_verify(text: str, checks: list[VerifyCheck]) -> VerifyResult:
     failures: list[str] = []
     for c in checks:
+        if is_custom_check_id(c.check):
+            return VerifyResult(
+                passed=False,
+                failures=[f"custom check requires async verify: {c.check}"],
+            )
         fn = _REGISTRY.get(c.check)
         if fn is None:
-            # Fail-closed: an unknown check id must never pass.
             return VerifyResult(passed=False, failures=[f"unknown check: {c.check}"])
         reason = fn(text, c.params)
         if reason is not None:
             failures.append(f"{c.check}: {reason}")
+    return VerifyResult(passed=not failures, failures=failures)
+
+
+def _judge_user_message(criterion: str, text: str) -> str:
+    return (
+        "Ты проверяешь результат работы скилла по одному критерию.\n"
+        "Критерий (утверждение, которое должно быть верно):\n"
+        f"{criterion}\n\n"
+        "Результат для проверки:\n"
+        f"{text}\n\n"
+        "Ответь строго одной строкой: PASS или FAIL: <краткая причина>."
+    )
+
+
+def _parse_judge_answer(answer: str, label: str) -> str | None:
+    stripped = answer.strip()
+    upper = stripped.upper()
+    if upper.startswith("PASS"):
+        return None
+    if upper.startswith("FAIL"):
+        reason = stripped.split(":", 1)[1].strip() if ":" in stripped else stripped
+        return f"custom:{label}: {reason or 'failed'}"
+    preview = stripped[:120] if stripped else "(empty)"
+    return f"custom:{label}: unexpected judge reply: {preview}"
+
+
+async def run_custom_judge(
+    text: str,
+    criterion: str,
+    *,
+    provider,
+    model: str,
+    label: str = "preview",
+) -> str | None:
+    from catalog.llm.base import Message
+
+    if not model:
+        return f"custom:{label}: missing model"
+    try:
+        resp = await provider.complete(
+            model,
+            [Message(role="user", content=_judge_user_message(criterion, text))],
+            None,
+            0.0,
+        )
+        answer = resp.content or ""
+    except Exception as exc:
+        return f"custom:{label}: judge error: {exc}"
+    return _parse_judge_answer(answer, label)
+
+
+async def run_verify_async(
+    text: str,
+    checks: list[VerifyCheck],
+    *,
+    db=None,
+    provider=None,
+    model: str = "",
+) -> VerifyResult:
+    det = [c for c in checks if not is_custom_check_id(c.check)]
+    custom = [c for c in checks if is_custom_check_id(c.check)]
+    resolve_failures: list[str] = []
+    resolved: list[object] = []
+    if custom:
+        from catalog.storage.repo_custom_check import get_custom_check
+
+        if db is None:
+            resolve_failures.append("custom check requires workspace db")
+        else:
+            for c in custom:
+                cid = custom_check_ref_id(c.check, c.params)
+                if not cid:
+                    resolve_failures.append("custom: missing check id")
+                    continue
+                row = get_custom_check(db, cid)
+                if row is None:
+                    resolve_failures.append(f"unknown custom check: {cid!r}")
+                    continue
+                if row.hidden:
+                    resolve_failures.append(f"hidden custom check: {cid!r}")
+                    continue
+                resolved.append(row)
+    base = run_verify(text, det)
+    if not base.passed or resolve_failures:
+        return VerifyResult(
+            passed=False, failures=base.failures + resolve_failures
+        )
+    if not resolved:
+        return base
+    if provider is None:
+        return VerifyResult(
+            passed=False,
+            failures=["custom check requires LLM provider"],
+        )
+    failures: list[str] = []
+    for row in resolved:
+        reason = await run_custom_judge(
+            text,
+            row.prompt,
+            provider=provider,
+            model=model,
+            label=row.name,
+        )
+        if reason is not None:
+            failures.append(reason)
     return VerifyResult(passed=not failures, failures=failures)
 
 

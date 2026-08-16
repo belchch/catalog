@@ -38,12 +38,15 @@ from catalog.api.schemas import (
     SessionCreated,
     SessionCreateRequest,
     SessionOut,
+    SessionToolsAttachRequest,
+    SessionToolsAttachResult,
     SessionUpdate,
     SkillMetaPatchRequest,
+    SkillOut,
 )
 from catalog.config import Settings
 from catalog.documents.tools import build_document_tools
-from catalog.llm.base import Message
+from catalog.llm.base import LLMProvider, Message
 from catalog.llm.log_context import prompt_log_context
 from catalog.llm.timeout import DEFAULT_LLM_TIMEOUT_SECONDS, llm_timeout_context
 from catalog.skills.artifact_tools import (
@@ -52,13 +55,14 @@ from catalog.skills.artifact_tools import (
     parse_steps_content,
     validate_pipeline_steps,
 )
-from catalog.skills.config import SKILL_KINDS, pipeline_step_to_dict
+from catalog.skills.config import SKILL_KINDS, compute_tags, pipeline_step_to_dict
+from catalog.skills.skill_tools import build_session_skill_tools
 from catalog.skills.script_runner import (
     SCRIPT_CODE_CONTRACT_RU,
     ScriptValidationError,
     validate_script,
 )
-from catalog.skills.verify import registered_checks
+from catalog.skills.verify import validate_verify_checks
 from catalog.storage.db import Database
 from catalog.storage.repo_message import add_message, list_messages
 from catalog.storage.repo_session import (
@@ -78,6 +82,11 @@ from catalog.storage.repo_session_document import (
     detach_documents,
     list_session_documents,
 )
+from catalog.storage.repo_session_skill import (
+    attach_skills,
+    detach_skills,
+    list_session_skills,
+)
 
 
 router = APIRouter()
@@ -89,6 +98,9 @@ PLANNER_SYSTEM_PROMPT = (
     "доступные документы. Тебе доступны только документы, явно добавленные "
     "пользователем в эту сессию. Если нужного документа нет в list_documents, "
     "попроси пользователя добавить его — глобальное хранилище тебе недоступно. "
+    "Если в сессии прикреплены скиллы-инструменты (имена skill_*), вызывай их "
+    "для заранее определённых операций над текстом — они заморожены и проходят "
+    "свои verify_checks. "
     "Задавай уточняющие вопросы и формулируй чёткое задание для скилла.\n\n"
     "Когда задача прояснилась — определи kind (agent, script или pipeline) и "
     "материализуй черновик инструментами: set_skill_meta, затем "
@@ -329,6 +341,61 @@ async def detach_session_document_endpoint(
     return Response(status_code=204)
 
 
+def _session_skill_out(row) -> SkillOut:
+    return SkillOut(
+        id=row.id,
+        name=row.name,
+        description=row.description,
+        status=row.status,
+        created_at=row.created_at,
+        kind=row.config.kind,
+        tags=compute_tags(row.config),
+        input_arity=row.config.input_arity,
+        provider=row.config.provider or None,
+        model=row.config.model or None,
+        reasoning=row.config.reasoning or None,
+    )
+
+
+@router.get("/sessions/{session_id}/tools", response_model=list[SkillOut])
+async def list_session_tools_endpoint(
+    session_id: str,
+    db: Database = Depends(get_workspace_db),
+) -> list[SkillOut]:
+    if get_session(db, session_id) is None:
+        raise HTTPException(status_code=404, detail="session not found")
+    return [_session_skill_out(s) for s in list_session_skills(db, session_id)]
+
+
+@router.post("/sessions/{session_id}/tools", response_model=SessionToolsAttachResult)
+async def attach_session_tools_endpoint(
+    session_id: str,
+    body: SessionToolsAttachRequest,
+    db: Database = Depends(get_workspace_db),
+) -> SessionToolsAttachResult:
+    if get_session(db, session_id) is None:
+        raise HTTPException(status_code=404, detail="session not found")
+    skipped = attach_skills(db, session_id, body.skill_ids)
+    return SessionToolsAttachResult(
+        skipped_skill_ids=skipped,
+        skills=[_session_skill_out(s) for s in list_session_skills(db, session_id)],
+    )
+
+
+@router.delete("/sessions/{session_id}/tools/{skill_id}", status_code=204)
+async def detach_session_tool_endpoint(
+    session_id: str,
+    skill_id: str,
+    db: Database = Depends(get_workspace_db),
+) -> Response:
+    if get_session(db, session_id) is None:
+        raise HTTPException(status_code=404, detail="session not found")
+    removed = detach_skills(db, session_id, [skill_id])
+    if removed == 0:
+        raise HTTPException(status_code=404, detail="skill not attached")
+    return Response(status_code=204)
+
+
 @router.delete("/sessions/{session_id}", status_code=204)
 async def delete_session_endpoint(
     session_id: str,
@@ -447,11 +514,7 @@ async def patch_session_artifact_endpoint(
                 for tool_name in allowed:
                     if tool_name not in available:
                         errors.append(f"unknown tool: {tool_name!r}")
-            available_checks = set(registered_checks())
-            for vc in checks:
-                check_id = vc.get("check") if isinstance(vc, dict) else None
-                if not check_id or check_id not in available_checks:
-                    errors.append(f"unknown verify check: {check_id!r}")
+            errors.extend(validate_verify_checks(checks))
         payload["allowed_tools"] = allowed if kind == "agent" else []
         payload["verify_checks"] = checks
         row = upsert_artifact(
@@ -531,11 +594,7 @@ async def patch_skill_meta_endpoint(
         for name in allowed:
             if name not in available:
                 errors.append(f"unknown tool: {name!r}")
-    available_checks = set(registered_checks())
-    for vc in checks:
-        check_id = vc.get("check") if isinstance(vc, dict) else None
-        if not check_id or check_id not in available_checks:
-            errors.append(f"unknown verify check: {check_id!r}")
+    errors.extend(validate_verify_checks(checks))
     payload = {
         "name": req.name,
         "description": req.description,
@@ -650,7 +709,14 @@ async def _run_planner_turn(
 
 
 def _ws_session_tools(
-    db: Database, workspace: str, session_id: str, base_tools: ToolRegistry, websocket: WebSocket
+    db: Database,
+    workspace: str,
+    session_id: str,
+    base_tools: ToolRegistry,
+    websocket: WebSocket,
+    provider: LLMProvider | None = None,
+    fallback_model: str = "",
+    providers: dict[str, LLMProvider] | None = None,
 ) -> ToolRegistry:
     tools: ToolRegistry = build_document_tools(db, workspace, session_id)
 
@@ -665,6 +731,20 @@ def _ws_session_tools(
     )
     for name in artifact_tools.names():
         entry = artifact_tools.get(name)
+        if entry is not None:
+            tools.register(entry[0], entry[1])
+    skill_tools = build_session_skill_tools(
+        db,
+        session_id,
+        workspace_dir=workspace,
+        base_tools=base_tools,
+        reserved=set(tools.names()),
+        provider=provider,
+        fallback_model=fallback_model,
+        providers=providers,
+    )
+    for name in skill_tools.names():
+        entry = skill_tools.get(name)
         if entry is not None:
             tools.register(entry[0], entry[1])
     return tools
@@ -729,7 +809,18 @@ async def session_ws(
                 await websocket.send_json({"type": "error", "message": "workspace not open"})
                 await websocket.close()
                 return
-            tools = _ws_session_tools(db, workspace, session_id, base_tools, websocket)
+            tools = _ws_session_tools(
+                db,
+                workspace,
+                session_id,
+                base_tools,
+                websocket,
+                provider=state.provider,
+                fallback_model=(
+                    getattr(state, "active_model", None) or settings.default_model
+                ),
+                providers=getattr(state, "providers", None),
+            )
 
             if buffered is not None:
                 raw = buffered

@@ -125,6 +125,7 @@ async def get_run_endpoint(run_id: str, db: Database = Depends(get_workspace_db)
         status=row["status"],
         trace=trace,
         result_text=row["result_text"],
+        parent_run_id=row["parent_run_id"],
     )
 
 
@@ -286,6 +287,10 @@ async def run_stream_ws(websocket: WebSocket, run_id: str) -> None:
                     persist=run["persist"],
                     user_prompt=run.get("user_prompt"),
                     providers=providers,
+                    fallback_model=(
+                        getattr(websocket.app.state, "active_model", None)
+                        or getattr(websocket.app.state.settings, "default_model", "")
+                    ),
                 )
             )
             receive_task = asyncio.create_task(websocket.receive_text())
@@ -361,6 +366,7 @@ async def _stream_apply(
     persist: bool = True,
     user_prompt: str | None = None,
     providers: dict[str, LLMProvider] | None = None,
+    fallback_model: str = "",
 ) -> None:
     """Drive ``apply_skill`` and forward every event frame to the socket."""
     async for event in apply_skill(
@@ -377,6 +383,7 @@ async def _stream_apply(
         persist=persist,
         user_prompt=user_prompt,
         providers=providers,
+        fallback_model=fallback_model,
     ):
         frame = agent_event_to_frame(event)
         if frame is not None:

@@ -1,28 +1,21 @@
 import { cleanup, fireEvent, render, screen } from '@testing-library/react'
-import type { ComponentProps } from 'react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { DocumentOut } from '../api.ts'
 import type { PlannerMessage } from '../hooks/usePlannerSession.ts'
 import { Chat } from './Chat.tsx'
 
-const DOC_A: DocumentOut = {
-  id: 'doc-a',
-  title: 'Устав',
-  kind: 'file',
-  created_at: '2026-01-01T00:00:00Z',
+afterEach(cleanup)
+
+function doc(id: string, title: string, kind = 'docx'): DocumentOut {
+  return { id, title, kind, created_at: '2026-01-01T00:00:00Z' }
 }
 
-const DOC_B: DocumentOut = {
-  id: 'doc-b',
-  title: 'ТЗ',
-  kind: 'file',
-  created_at: '2026-01-01T00:00:00Z',
-}
+const SPEC = doc('d1', 'Spec.docx')
 
-function renderChat(
-  overrides: Partial<ComponentProps<typeof Chat>> = {},
-) {
-  const onSend = vi.fn()
+function renderChat(overrides: Partial<Parameters<typeof Chat>[0]> = {}) {
+  const onSend = vi.fn<(text: string, docIds?: string[], docs?: DocumentOut[]) => void>()
+  const onRemoveDocument = vi.fn<(docId: string) => void>()
+  const onOpenTools = vi.fn<() => void>()
   render(
     <Chat
       messages={[]}
@@ -32,124 +25,156 @@ function renderChat(
       reconnecting={false}
       error={null}
       suggestions={[]}
-      documents={[DOC_A, DOC_B]}
+      documents={[SPEC]}
       sessionDocuments={[]}
-      sessionId={null}
+      sessionId="s1"
+      onSend={onSend}
       onCancel={() => {}}
       onReconnect={() => {}}
+      onRemoveDocument={onRemoveDocument}
       onCreateSkill={() => {}}
       buildingSkill={false}
       proposingTracks={false}
       editingSkillName={null}
       buildError={null}
       buildErrorIsTimeout={false}
-      sessionTimeoutSeconds={120}
+      sessionTimeoutSeconds={60}
       onOpenTimeoutModal={() => {}}
       onDismissBuildError={() => {}}
+      onOpenTools={onOpenTools}
       {...overrides}
-      onSend={onSend}
     />,
   )
-  return { onSend }
+  return { onSend, onRemoveDocument, onOpenTools }
 }
 
-function selectDocuments(...titles: string[]) {
-  fireEvent.click(
-    screen.getByRole('combobox', { name: 'Добавить документы в сессию' }),
-  )
-  for (const title of titles) {
-    const option = screen.getByRole('option', { name: title })
-    const checkbox = option.querySelector('input[type="checkbox"]')
-    if (!(checkbox instanceof HTMLInputElement)) {
-      throw new Error(`no checkbox for ${title}`)
-    }
-    fireEvent.click(checkbox)
-  }
+function selectDoc(title: string) {
+  fireEvent.click(screen.getByRole('combobox', { name: 'Добавить документ' }))
+  fireEvent.click(screen.getByRole('checkbox', { name: title }))
 }
 
-afterEach(cleanup)
-
-describe('Chat suggestion send', () => {
-  it('sends selected documents with a starter suggestion, then none after clear', () => {
+describe('Chat composer', () => {
+  it('sends selected docs with a suggestion and clears them for the next click', () => {
     const { onSend } = renderChat()
-    selectDocuments('Устав', 'ТЗ')
+    selectDoc('Spec.docx')
+    expect(screen.getByText('DOCX · к отправке')).toBeTruthy()
 
-    fireEvent.click(
-      screen.getByRole('button', { name: 'Изучи доступные документы' }),
-    )
-
+    const chip = screen.getByRole('button', { name: 'Изучи доступные документы' })
+    fireEvent.click(chip)
     expect(onSend).toHaveBeenCalledTimes(1)
-    expect(onSend).toHaveBeenCalledWith(
-      'Изучи доступные документы',
-      ['doc-a', 'doc-b'],
-      [DOC_A, DOC_B],
-    )
+    expect(onSend).toHaveBeenCalledWith('Изучи доступные документы', ['d1'], [SPEC])
+    expect(screen.queryByText('DOCX · к отправке')).toBeNull()
 
-    fireEvent.click(
-      screen.getByRole('button', { name: 'Изучи доступные документы' }),
-    )
-
+    fireEvent.click(chip)
     expect(onSend).toHaveBeenCalledTimes(2)
-    expect(onSend).toHaveBeenNthCalledWith(
-      2,
-      'Изучи доступные документы',
-      undefined,
-      undefined,
-    )
+    expect(onSend.mock.calls[1][0]).toBe('Изучи доступные документы')
+    expect(onSend.mock.calls[1][1]).toBeUndefined()
+    expect(onSend.mock.calls[1][2]).toBeUndefined()
+  })
+
+  it('repeats a user message without composer docs and keeps the selection', () => {
+    const messages: PlannerMessage[] = [{ role: 'user', content: 'hello' }]
+    const { onSend } = renderChat({ messages, suggestions: ['ещё раз'] })
+    selectDoc('Spec.docx')
+    expect(screen.getByText('DOCX · к отправке')).toBeTruthy()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Переотправить это сообщение' }))
+    expect(onSend).toHaveBeenCalledTimes(1)
+    expect(onSend).toHaveBeenCalledWith('hello')
+    expect(onSend.mock.calls[0]).toHaveLength(1)
+    expect(screen.getByText('DOCX · к отправке')).toBeTruthy()
   })
 
   it('sends the suggestion text and drops a typed draft', () => {
     const { onSend } = renderChat()
-    fireEvent.change(screen.getByPlaceholderText('Сообщение планировщику…'), {
-      target: { value: 'черновик' },
-    })
+    const textarea = screen.getByPlaceholderText('Сообщение планировщику…')
+    fireEvent.change(textarea, { target: { value: 'черновик' } })
 
-    fireEvent.click(
-      screen.getByRole('button', { name: 'Опиши задачу для скилла' }),
-    )
+    fireEvent.click(screen.getByRole('button', { name: 'Опиши задачу для скилла' }))
 
-    expect(onSend).toHaveBeenCalledWith(
-      'Опиши задачу для скилла',
-      undefined,
-      undefined,
-    )
-    expect(
-      (screen.getByPlaceholderText('Сообщение планировщику…') as HTMLTextAreaElement)
-        .value,
-    ).toBe('')
+    expect(onSend).toHaveBeenCalledWith('Опиши задачу для скилла', undefined, undefined)
+    expect((textarea as HTMLTextAreaElement).value).toBe('')
   })
 
-  it('keeps composer documents when repeating a message', () => {
-    const messages: PlannerMessage[] = [
-      { role: 'user', content: 'Старое сообщение' },
-    ]
-    const { onSend } = renderChat({ messages })
-    selectDocuments('Устав')
-
-    expect(screen.getByLabelText('Убрать Устав')).toBeTruthy()
-
-    fireEvent.click(
-      screen.getByRole('button', { name: 'Переотправить это сообщение' }),
-    )
-
-    expect(onSend).toHaveBeenCalledTimes(1)
-    expect(onSend).toHaveBeenCalledWith('Старое сообщение')
-    expect(screen.getByLabelText('Убрать Устав')).toBeTruthy()
-    expect(
-      (screen.getByPlaceholderText('Сообщение планировщику…') as HTMLTextAreaElement)
-        .value,
-    ).toBe('')
-  })
-
-  it('still attaches selected documents on Отправить', () => {
+  it('submits typed text together with selected docs', () => {
     const { onSend } = renderChat()
-    selectDocuments('Устав')
-    fireEvent.change(screen.getByPlaceholderText('Сообщение планировщику…'), {
-      target: { value: 'разбери устав' },
-    })
-
+    selectDoc('Spec.docx')
+    const textarea = screen.getByPlaceholderText('Сообщение планировщику…')
+    fireEvent.change(textarea, { target: { value: 'посмотри spec' } })
     fireEvent.click(screen.getByRole('button', { name: 'Отправить' }))
+    expect(onSend).toHaveBeenCalledWith('посмотри spec', ['d1'], [SPEC])
+    expect(screen.queryByText('Spec.docx')).toBeNull()
+  })
 
-    expect(onSend).toHaveBeenCalledWith('разбери устав', ['doc-a'], [DOC_A])
+  it('shows a document once when it is both selected and already in the session', () => {
+    renderChat({ sessionDocuments: [SPEC] })
+    selectDoc('Spec.docx')
+    const cards = screen.getAllByRole('listitem')
+    expect(cards).toHaveLength(1)
+    expect(screen.getByText('DOCX')).toBeTruthy()
+    expect(screen.queryByText('DOCX · к отправке')).toBeNull()
+  })
+
+  it('exposes the document picker on + and a closed tools trigger', () => {
+    const onOpenTools = vi.fn()
+    renderChat({ onOpenTools, attachedSkillCount: 2 })
+    expect(screen.getByRole('combobox', { name: 'Добавить документ' })).toBeTruthy()
+    expect(screen.queryByText('Документы в сессии')).toBeNull()
+    expect(screen.queryByText('Создать скилл из сессии')).toBeNull()
+    expect(screen.getByText('Чат планировщика')).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Создать скилл' }).hasAttribute('disabled')).toBe(
+      true,
+    )
+
+    const tools = screen.getByRole('button', { name: 'Инструменты, включено 2' })
+    expect(tools.getAttribute('aria-expanded')).toBe('false')
+    expect(tools.getAttribute('aria-haspopup')).toBe('dialog')
+    expect(tools.getAttribute('aria-controls')).toBeTruthy()
+    expect(tools.textContent).toContain('2')
+    expect(screen.queryByRole('dialog', { name: 'Инструменты сессии' })).toBeNull()
+    fireEvent.click(tools)
+    expect(onOpenTools).toHaveBeenCalledTimes(1)
+  })
+
+  it('hides the tools badge when the count is zero', () => {
+    renderChat({ attachedSkillCount: 0 })
+    const tools = screen.getByRole('button', { name: 'Инструменты' })
+    expect(tools.textContent).not.toMatch(/\d/)
+  })
+
+  it('opens the tools popover and closes it on Escape', () => {
+    const onCloseTools = vi.fn()
+    renderChat({
+      toolsOpen: true,
+      onCloseTools,
+      availableSkills: [
+        {
+          id: 'sk1',
+          name: 'Extract',
+          description: 'Тезисы',
+          status: 'committed',
+          created_at: '2026-01-01T00:00:00Z',
+          kind: 'script',
+          tags: ['python'],
+          input_arity: 1,
+          provider: null,
+          model: null,
+          reasoning: null,
+        },
+      ],
+      attachedSkillIds: ['sk1'],
+      attachedSkillCount: 1,
+    })
+    expect(screen.getByRole('dialog', { name: 'Инструменты сессии' })).toBeTruthy()
+    const tools = screen.getByRole('button', { name: 'Инструменты, включено 1' })
+    expect(tools.getAttribute('aria-expanded')).toBe('true')
+    fireEvent.keyDown(document, { key: 'Escape' })
+    expect(onCloseTools).toHaveBeenCalledTimes(1)
+  })
+
+  it('closes the tools popover when generation starts', () => {
+    const onCloseTools = vi.fn()
+    renderChat({ toolsOpen: true, onCloseTools, streaming: true })
+    expect(onCloseTools).toHaveBeenCalled()
   })
 })

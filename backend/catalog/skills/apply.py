@@ -20,6 +20,7 @@ The apply loop (ADR-0001 + ADR-0006 + ADR-0007):
 
 from __future__ import annotations
 
+import hashlib
 import logging
 import time
 import uuid
@@ -49,7 +50,7 @@ from catalog.llm.factory import provider_for_skill
 from catalog.skills.config import PipelineStep, SkillConfig, ensure_read_document_tool
 from catalog.skills.repo_run import claim_run, create_run, finish_run, get_run
 from catalog.skills.script_runner import ScriptRuntimeError, run_script_async
-from catalog.skills.verify import run_verify
+from catalog.skills.verify import run_verify_async
 from catalog.storage.db import Database
 from catalog.storage.repo_document import create_document, get_document
 from catalog.storage.repo_session_document import attach_documents
@@ -155,6 +156,7 @@ class ApplyResult:
     status: str  # "ok" | "failed"
     result_text: str | None
     trace: Trace
+    run_id: str | None = None
 
 
 @dataclass
@@ -164,6 +166,7 @@ class _ApplyOutcome:
     output_doc_id: str | None = None
     status: str = "failed"
     result_text: str | None = None
+    run_id: str | None = None
 
 
 async def _apply_core(
@@ -183,6 +186,9 @@ async def _apply_core(
     persist: bool = True,
     user_prompt: str | None = None,
     providers: dict[str, LLMProvider] | None = None,
+    input_texts: list[str] | None = None,
+    parent_run_id: str | None = None,
+    fallback_model: str = "",
 ) -> AsyncIterator[AgentEvent]:
     """Shared apply loop: streams events, fills ``trace`` and ``outcome``.
 
@@ -205,25 +211,40 @@ async def _apply_core(
     ``input_arity`` rejects a count mismatch (→ ``ValueError``); the agent start
     message lists every input.
 
+    ADR-0019: ``input_texts`` supplies raw text inputs without document rows
+    (nested skill-as-tool). When set, documents are not loaded. First cut:
+    ``kind=script`` only.
+
     CATALOG-56: ``user_prompt`` is an optional runtime clarification appended
     to the agent start user message; script skills ignore it.
     """
-    # 1. Load ALL input documents (fail early if any is missing).
-    if not input_doc_ids:
-        raise ValueError("apply requires at least one input document")
+    texts_mode = input_texts is not None
     docs = []
-    for doc_id in input_doc_ids:
-        d = get_document(db, doc_id)
-        if d is None:
-            raise ValueError(f"input document not found: {doc_id}")
-        docs.append(d)
+    if texts_mode:
+        doc_texts = [t if isinstance(t, str) else str(t) for t in (input_texts or [])]
+        if not doc_texts:
+            raise ValueError("apply requires at least one input text")
+        if skill.kind != "script":
+            raise ValueError("input_texts is only supported for kind=script")
+        if skill.input_arity is not None and len(doc_texts) != skill.input_arity:
+            raise ValueError(
+                f"skill expects {skill.input_arity} input document(s), "
+                f"got {len(doc_texts)}"
+            )
+    else:
+        if not input_doc_ids:
+            raise ValueError("apply requires at least one input document")
+        for doc_id in input_doc_ids:
+            d = get_document(db, doc_id)
+            if d is None:
+                raise ValueError(f"input document not found: {doc_id}")
+            docs.append(d)
 
-    # Arity check (CATALOG-4): a skill may declare how many inputs it expects.
-    if skill.input_arity is not None and len(input_doc_ids) != skill.input_arity:
-        raise ValueError(
-            f"skill expects {skill.input_arity} input document(s), "
-            f"got {len(input_doc_ids)}"
-        )
+        if skill.input_arity is not None and len(input_doc_ids) != skill.input_arity:
+            raise ValueError(
+                f"skill expects {skill.input_arity} input document(s), "
+                f"got {len(input_doc_ids)}"
+            )
 
     runtime_prompt = (user_prompt or "").strip() or None
 
@@ -232,9 +253,10 @@ async def _apply_core(
     else:
         tools = base_tools.filter(skill.allowed_tools)
 
-    doc_texts = [
-        extract_text(str(Path(workspace_dir) / d.path), d.kind) for d in docs
-    ]
+    if not texts_mode:
+        doc_texts = [
+            extract_text(str(Path(workspace_dir) / d.path), d.kind) for d in docs
+        ]
 
     # 3. Create the skill_run row (or reuse a pre-created one).
     if run_id is None:
@@ -242,9 +264,10 @@ async def _apply_core(
             db,
             skill_id=skill_id,
             session_id=session_id,
-            input_doc_ids=input_doc_ids,
+            input_doc_ids=input_doc_ids if not texts_mode else [],
             persist=persist,
             user_prompt=runtime_prompt,
+            parent_run_id=parent_run_id,
         )
         if not claim_run(db, run_id):
             raise RuntimeError(f"failed to claim run {run_id}")
@@ -258,11 +281,26 @@ async def _apply_core(
                     (existing_run.get("user_prompt") or "").strip() or None
                 )
 
+    outcome.run_id = run_id
+    if parent_run_id is not None:
+        pinned = hashlib.sha256(skill.to_json().encode("utf-8")).hexdigest()[:16]
+        trace.entries.append(
+            TraceEntry(
+                kind="skill_pin",
+                iteration=0,
+                data={
+                    "skill_id": skill_id,
+                    "config_hash": pinned,
+                    "parent_run_id": parent_run_id,
+                },
+            )
+        )
+
     logger.info(
         "apply_skill start skill=%s skill_id=%s input_docs=%d run_id=%s",
         skill.name,
         skill_id,
-        len(input_doc_ids),
+        len(doc_texts),
         run_id,
     )
 
@@ -270,6 +308,8 @@ async def _apply_core(
     last_capped = False
     passed = False
     output_doc_id: str | None = None
+    verify_model = skill.model or fallback_model
+    verify_provider = provider_for_skill(providers, provider, skill.provider)
     # ``done`` guards finish_run so it runs exactly once across the normal
     # path, the exception path, and the finally safety net.
     done = False
@@ -338,10 +378,26 @@ async def _apply_core(
             )
             last_text = text
 
-            result = run_verify(text or "", skill.verify_checks)
+            result = await run_verify_async(
+                text or "",
+                skill.verify_checks,
+                db=db,
+                provider=verify_provider,
+                model=verify_model,
+            )
             verify_event = VerifyEvent(iteration=1, result=result)
             yield verify_event
             log_agent_event(verify_event)
+            trace.entries.append(
+                TraceEntry(
+                    kind="verify",
+                    iteration=1,
+                    data={
+                        "passed": result.passed,
+                        "failures": list(result.failures),
+                    },
+                )
+            )
             passed = result.passed
         elif skill.kind == "pipeline":
             current: PipelineValue | None = None
@@ -457,10 +513,26 @@ async def _apply_core(
                         f"unknown pipeline step type: {step.type!r}"
                     )
             final_text = last_text or ""
-            result = run_verify(final_text, skill.verify_checks)
+            result = await run_verify_async(
+                final_text,
+                skill.verify_checks,
+                db=db,
+                provider=verify_provider,
+                model=verify_model,
+            )
             verify_event = VerifyEvent(iteration=1, result=result)
             yield verify_event
             log_agent_event(verify_event)
+            trace.entries.append(
+                TraceEntry(
+                    kind="verify",
+                    iteration=1,
+                    data={
+                        "passed": result.passed,
+                        "failures": list(result.failures),
+                    },
+                )
+            )
             passed = result.passed
         else:
             # ---- Agent path (ADR-0001/0002) ----
@@ -533,10 +605,26 @@ async def _apply_core(
                 last_text = text
                 last_capped = capped
 
-                result = run_verify(text or "", skill.verify_checks)
+                result = await run_verify_async(
+                    text or "",
+                    skill.verify_checks,
+                    db=db,
+                    provider=verify_provider,
+                    model=verify_model,
+                )
                 verify_event = VerifyEvent(iteration=r + 1, result=result)
                 yield verify_event
                 log_agent_event(verify_event)
+                trace.entries.append(
+                    TraceEntry(
+                        kind="verify",
+                        iteration=r + 1,
+                        data={
+                            "passed": result.passed,
+                            "failures": list(result.failures),
+                        },
+                    )
+                )
 
                 if result.passed:
                     passed = True
@@ -565,7 +653,7 @@ async def _apply_core(
         # 5. Persist result on success (CATALOG-18: only in "persist" mode —
         # "preview" mode leaves the result on screen, materialized later via
         # POST /runs/{id}/save if the user chooses to).
-        if passed and persist:
+        if passed and persist and docs:
             if len(docs) == 1:
                 result_title = f"{skill.name} — {docs[0].title}"
             else:
@@ -708,6 +796,9 @@ async def apply_skill(
     persist: bool = True,
     user_prompt: str | None = None,
     providers: dict[str, LLMProvider] | None = None,
+    input_texts: list[str] | None = None,
+    parent_run_id: str | None = None,
+    fallback_model: str = "",
 ) -> AsyncIterator[AgentEvent]:
     """Run a skill over one or more documents, streaming :data:`AgentEvent` items.
 
@@ -749,6 +840,9 @@ async def apply_skill(
         persist=persist,
         user_prompt=user_prompt,
         providers=providers,
+        input_texts=input_texts,
+        parent_run_id=parent_run_id,
+        fallback_model=fallback_model,
     ):
         yield event
 
@@ -768,6 +862,9 @@ async def apply_skill_collect(
     persist: bool = True,
     user_prompt: str | None = None,
     providers: dict[str, LLMProvider] | None = None,
+    input_texts: list[str] | None = None,
+    parent_run_id: str | None = None,
+    fallback_model: str = "",
 ) -> ApplyResult:
     """Drain :func:`apply_skill` and return the final :class:`ApplyResult`."""
     trace = Trace()
@@ -788,6 +885,9 @@ async def apply_skill_collect(
         persist=persist,
         user_prompt=user_prompt,
         providers=providers,
+        input_texts=input_texts,
+        parent_run_id=parent_run_id,
+        fallback_model=fallback_model,
     ):
         pass
     return ApplyResult(
@@ -795,4 +895,5 @@ async def apply_skill_collect(
         status=outcome.status,
         result_text=outcome.result_text,
         trace=trace,
+        run_id=outcome.run_id,
     )

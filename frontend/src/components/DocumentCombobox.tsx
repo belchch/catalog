@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, useState } from 'react'
+import { useEffect, useId, useRef, useState, type ReactNode } from 'react'
 import type { DocumentOut } from '../api.ts'
 
 type DocumentComboboxProps = {
@@ -7,6 +7,8 @@ type DocumentComboboxProps = {
   placeholder: string
   disabled?: boolean
   triggerClassName?: string
+  triggerContent?: ReactNode
+  listClassName?: string
   placement?: 'bottom' | 'top'
 } & (
   | {
@@ -29,6 +31,8 @@ export function DocumentCombobox(props: DocumentComboboxProps) {
     multiple = false,
     disabled = false,
     triggerClassName,
+    triggerContent,
+    listClassName,
     placement = 'bottom',
   } = props
   const [open, setOpen] = useState(false)
@@ -120,10 +124,14 @@ export function DocumentCombobox(props: DocumentComboboxProps) {
           close()
         }}
       >
-        <span className={`truncate ${selectedIds.length === 0 ? 'text-ink-faint' : ''}`}>
-          {triggerLabel}
-        </span>
-        <span className="ml-1 text-ink-faint">▾</span>
+        {triggerContent ?? (
+          <>
+            <span className={`truncate ${selectedIds.length === 0 ? 'text-ink-faint' : ''}`}>
+              {triggerLabel}
+            </span>
+            <span className="ml-1 text-ink-faint">▾</span>
+          </>
+        )}
       </button>
       {open && (
         <div
@@ -131,7 +139,9 @@ export function DocumentCombobox(props: DocumentComboboxProps) {
           role="listbox"
           aria-multiselectable={multiple || undefined}
           className={
-            'absolute z-10 max-h-48 w-full overflow-y-auto rounded border border-line bg-surface shadow-card ' +
+            'absolute z-10 max-h-48 overflow-y-auto rounded border border-line bg-surface shadow-card ' +
+            (listClassName ?? 'w-full') +
+            ' ' +
             (placement === 'top' ? 'bottom-full mb-1' : 'mt-1')
           }
           onKeyDown={(e) => {

@@ -19,7 +19,11 @@ from catalog.skills.script_runner import (
     ScriptValidationError,
     validate_script,
 )
-from catalog.skills.verify import registered_checks
+from catalog.skills.verify import (
+    registered_checks,
+    validate_verify_checks,
+    verify_checks_params_hint,
+)
 from catalog.storage.db import Database
 from catalog.storage.repo_session_artifact import (
     get_artifact,
@@ -66,10 +70,9 @@ def _validate_meta_fields(
         for name in allowed_tools:
             if name not in available_tools:
                 errors.append(f"unknown tool: {name!r}")
-    for vc in verify_checks:
-        check_id = vc.get("check") if isinstance(vc, dict) else None
-        if not check_id or check_id not in available_checks:
-            errors.append(f"unknown verify check: {check_id!r}")
+    errors.extend(
+        validate_verify_checks(verify_checks, available_checks=available_checks)
+    )
     return errors
 
 
@@ -311,7 +314,8 @@ def build_artifact_tools(
                 "Set skill metadata for this session: name, description, kind "
                 "(agent|script|pipeline), optional input_arity, allowed_tools, "
                 "verify_checks. For pipeline, allowed_tools belong on steps, "
-                "not here. Call when kind/name are clear."
+                "not here. Call when kind/name are clear. "
+                + verify_checks_params_hint()
             ),
             parameters={
                 "type": "object",
@@ -332,7 +336,10 @@ def build_artifact_tools(
                         "items": {
                             "type": "object",
                             "properties": {
-                                "check": {"type": "string"},
+                                "check": {
+                                    "type": "string",
+                                    "enum": available_checks,
+                                },
                                 "params": {"type": "object"},
                             },
                             "required": ["check"],

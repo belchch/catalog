@@ -12,6 +12,8 @@ interface SkillsPanelProps {
   onEdit: (skillId: string, name: string) => void
   onDelete: (skillId: string) => void
   onRename: (skillId: string, name: string) => Promise<void>
+  focusSkillId?: string | null
+  onFocusHandled?: () => void
 }
 
 type InputArity = 1 | 2 | null
@@ -154,6 +156,8 @@ export function SkillsPanel({
   onEdit,
   onDelete,
   onRename,
+  focusSkillId,
+  onFocusHandled,
 }: SkillsPanelProps) {
   const [target, setTarget] = useState<Record<string, SkillTarget>>({})
   const [prompts, setPrompts] = useState<Record<string, string>>({})
@@ -201,6 +205,26 @@ export function SkillsPanel({
     setDescExpanded(false)
     setConfirmOpen(false)
   }, [selectedId])
+
+  useEffect(() => {
+    if (focusSkillId == null) return
+    const skill = skills.skills.find((s) => s.id === focusSkillId)
+    if (skill == null) {
+      onFocusHandled?.()
+      return
+    }
+    setQuery((q) => (skillMatchesQuery(skill, q) ? q : ''))
+    setSelectedId(focusSkillId)
+    setConfirmOpen(false)
+    setRenameId(null)
+    setRenameValue('')
+    setRenameSaving(false)
+    const id = focusSkillId
+    requestAnimationFrame(() => {
+      optionRefs.current[id]?.scrollIntoView({ block: 'nearest' })
+    })
+    onFocusHandled?.()
+  }, [focusSkillId, skills.skills, onFocusHandled])
 
   useEffect(() => {
     if (renameId != null || !focusRenameTriggerRef.current) return

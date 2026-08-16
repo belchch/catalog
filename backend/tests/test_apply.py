@@ -38,6 +38,7 @@ from catalog.skills.config import (
 from catalog.skills.repo_run import get_run
 from catalog.skills.repo_skill import create_skill, get_skill
 from catalog.storage.db import Database
+from catalog.storage.repo_custom_check import create_custom_check
 from catalog.storage.repo_session import create_session
 from catalog.storage.repo_session_document import list_session_documents
 
@@ -131,6 +132,24 @@ def _ingest_input(db: Database, workspace: Path) -> str:
     return row.id
 
 
+def _saved_trace(db: Database, skill_id: str) -> list[dict]:
+    import json as _json
+
+    with db.connect() as conn:
+        row = conn.execute(
+            "SELECT trace_json FROM skill_run WHERE skill_id = ?",
+            (skill_id,),
+        ).fetchone()
+    assert row is not None
+    return _json.loads(row["trace_json"] or "[]")
+
+
+def _verify_entries(trace: list[dict] | Any) -> list:
+    if isinstance(trace, list):
+        return [e for e in trace if e.get("kind") == "verify"]
+    return [e for e in trace.entries if e.kind == "verify"]
+
+
 # --------------------------------------------------------------------------- #
 # Tests
 # --------------------------------------------------------------------------- #
@@ -185,6 +204,11 @@ def test_apply_success_first_try(db: Database, workspace: Path) -> None:
     assert row is not None
     assert row["status"] == "ok"
     assert row["output_doc_id"] == result.output_doc_id
+
+    verify_entries = _verify_entries(result.trace)
+    assert len(verify_entries) == 1
+    assert verify_entries[0].data["passed"] is True
+    assert verify_entries[0].data["failures"] == []
 
 
 def test_apply_persist_attaches_output_to_session(
@@ -256,6 +280,15 @@ def test_apply_retry_then_success(db: Database, workspace: Path) -> None:
     llm_entries = [e for e in result.trace.entries if e.kind == "llm"]
     assert len(llm_entries) >= 2
 
+    verify_entries = _verify_entries(result.trace)
+    assert len(verify_entries) == 2
+    assert verify_entries[0].iteration == 1
+    assert verify_entries[0].data["passed"] is False
+    assert verify_entries[0].data["failures"]
+    assert verify_entries[1].iteration == 2
+    assert verify_entries[1].data["passed"] is True
+    assert verify_entries[1].data["failures"] == []
+
 
 def test_apply_verify_never_passes(db: Database, workspace: Path) -> None:
     skill = _make_skill(
@@ -308,6 +341,16 @@ def test_apply_verify_never_passes(db: Database, workspace: Path) -> None:
     assert row["status"] == "failed"
     assert row["output_doc_id"] is None
     assert row["trace_json"] is not None
+
+    saved = _saved_trace(db, skill_id)
+    verify_entries = _verify_entries(saved)
+    assert len(verify_entries) == 3
+    for i, entry in enumerate(verify_entries, start=1):
+        assert entry["kind"] == "verify"
+        assert entry["iteration"] == i
+        assert entry["data"]["passed"] is False
+        assert entry["data"]["failures"]
+        assert any("has_section" in f for f in entry["data"]["failures"])
 
 
 def test_apply_filters_tools(db: Database, workspace: Path) -> None:
@@ -554,6 +597,234 @@ def test_apply_script_skill(db: Database, workspace: Path) -> None:
     script_entries = [e for e in result.trace.entries if e.kind == "script"]
     assert len(script_entries) == 1
     assert script_entries[0].data["ok"] is True
+
+    verify_entries = _verify_entries(result.trace)
+    assert len(verify_entries) == 1
+    assert verify_entries[0].data["passed"] is True
+    assert verify_entries[0].data["failures"] == []
+
+
+def test_apply_script_verify_failure_saved_in_trace(
+    db: Database, workspace: Path
+) -> None:
+    skill = SkillConfig(
+        name="empty-script",
+        description="returns empty",
+        system_prompt="",
+        allowed_tools=[],
+        model="test/model",
+        verify_checks=[VerifyCheck("non_empty")],
+        kind="script",
+        code="result = ''\n",
+    )
+    skill_id = create_skill(
+        db, name=skill.name, description=skill.description, config=skill
+    )
+    input_doc_id = _ingest_input(db, workspace)
+    provider = ScriptProvider([])
+
+    result = asyncio.run(
+        apply_skill_collect(
+            provider=provider,
+            db=db,
+            workspace_dir=str(workspace),
+            skill=skill,
+            skill_id=skill_id,
+            input_doc_ids=[input_doc_id],
+            base_tools=build_document_tools(db, workspace),
+        )
+    )
+
+    assert result.status == "failed"
+    saved = _saved_trace(db, skill_id)
+    verify_entries = _verify_entries(saved)
+    assert len(verify_entries) == 1
+    assert verify_entries[0]["kind"] == "verify"
+    assert verify_entries[0]["data"]["passed"] is False
+    assert verify_entries[0]["data"]["failures"]
+    assert any("non_empty" in f for f in verify_entries[0]["data"]["failures"])
+
+
+class _JudgeProvider:
+    def __init__(self, answers: list[str]) -> None:
+        self.answers = list(answers)
+        self.requests: list[dict] = []
+
+    async def complete(
+        self,
+        model: str,
+        messages: list[Message],
+        tools=None,
+        temperature: float = 0.0,
+        **kwargs,
+    ) -> CompletionResult:
+        self.requests.append({"model": model, "messages": messages, "tools": tools})
+        if not self.answers:
+            raise AssertionError("judge script exhausted")
+        return CompletionResult(
+            content=self.answers.pop(0),
+            tool_calls=[],
+            finish_reason="stop",
+        )
+
+
+def test_apply_script_custom_verify_falls_back_to_default_model(
+    db: Database, workspace: Path
+) -> None:
+    row = create_custom_check(db, name="Has source", prompt="есть source")
+    skill = SkillConfig(
+        name="echo",
+        description="echo",
+        system_prompt="",
+        allowed_tools=[],
+        model="",
+        verify_checks=[VerifyCheck(check=f"custom:{row.id}")],
+        kind="script",
+        code="result = document\n",
+    )
+    skill_id = create_skill(
+        db, name=skill.name, description=skill.description, config=skill
+    )
+    input_doc_id = _ingest_input(db, workspace)
+    provider = _JudgeProvider(["PASS"])
+
+    result = asyncio.run(
+        apply_skill_collect(
+            provider=provider,
+            db=db,
+            workspace_dir=str(workspace),
+            skill=skill,
+            skill_id=skill_id,
+            input_doc_ids=[input_doc_id],
+            base_tools=build_document_tools(db, workspace),
+            persist=False,
+            fallback_model="workspace/model",
+        )
+    )
+
+    assert result.status == "ok"
+    assert len(provider.requests) == 1
+    assert provider.requests[0]["model"] == "workspace/model"
+
+
+def test_apply_script_custom_verify_empty_model_without_fallback_fails(
+    db: Database, workspace: Path
+) -> None:
+    row = create_custom_check(db, name="Has source", prompt="есть source")
+    skill = SkillConfig(
+        name="echo",
+        description="echo",
+        system_prompt="",
+        allowed_tools=[],
+        model="",
+        verify_checks=[VerifyCheck(check=f"custom:{row.id}")],
+        kind="script",
+        code="result = document\n",
+    )
+    skill_id = create_skill(
+        db, name=skill.name, description=skill.description, config=skill
+    )
+    input_doc_id = _ingest_input(db, workspace)
+    provider = _JudgeProvider(["PASS"])
+
+    result = asyncio.run(
+        apply_skill_collect(
+            provider=provider,
+            db=db,
+            workspace_dir=str(workspace),
+            skill=skill,
+            skill_id=skill_id,
+            input_doc_ids=[input_doc_id],
+            base_tools=build_document_tools(db, workspace),
+            persist=False,
+        )
+    )
+
+    assert result.status == "failed"
+    verify_entries = _verify_entries(result.trace)
+    assert verify_entries
+    assert any("missing model" in f for f in verify_entries[0].data["failures"])
+    assert provider.requests == []
+
+
+def test_apply_script_custom_verify_uses_pinned_provider(
+    db: Database, workspace: Path
+) -> None:
+    row = create_custom_check(db, name="Has source", prompt="есть source")
+    skill = SkillConfig(
+        name="echo",
+        description="echo",
+        system_prompt="",
+        allowed_tools=[],
+        model="",
+        provider="zai",
+        verify_checks=[VerifyCheck(check=f"custom:{row.id}")],
+        kind="script",
+        code="result = document\n",
+    )
+    skill_id = create_skill(
+        db, name=skill.name, description=skill.description, config=skill
+    )
+    input_doc_id = _ingest_input(db, workspace)
+    workspace_provider = _JudgeProvider(["SHOULD NOT RUN"])
+    pinned = _JudgeProvider(["PASS"])
+
+    result = asyncio.run(
+        apply_skill_collect(
+            provider=workspace_provider,
+            db=db,
+            workspace_dir=str(workspace),
+            skill=skill,
+            skill_id=skill_id,
+            input_doc_ids=[input_doc_id],
+            base_tools=build_document_tools(db, workspace),
+            persist=False,
+            fallback_model="workspace/model",
+            providers={"openrouter": workspace_provider, "zai": pinned},
+        )
+    )
+
+    assert result.status == "ok"
+    assert pinned.requests
+    assert workspace_provider.requests == []
+
+
+def test_apply_script_custom_verify_prefers_skill_model(
+    db: Database, workspace: Path
+) -> None:
+    row = create_custom_check(db, name="Has source", prompt="есть source")
+    skill = SkillConfig(
+        name="echo",
+        description="echo",
+        system_prompt="",
+        allowed_tools=[],
+        model="skill/model",
+        verify_checks=[VerifyCheck(check=f"custom:{row.id}")],
+        kind="script",
+        code="result = document\n",
+    )
+    skill_id = create_skill(
+        db, name=skill.name, description=skill.description, config=skill
+    )
+    input_doc_id = _ingest_input(db, workspace)
+    provider = _JudgeProvider(["PASS"])
+
+    result = asyncio.run(
+        apply_skill_collect(
+            provider=provider,
+            db=db,
+            workspace_dir=str(workspace),
+            skill=skill,
+            skill_id=skill_id,
+            input_doc_ids=[input_doc_id],
+            base_tools=build_document_tools(db, workspace),
+            persist=False,
+            fallback_model="workspace/model",
+        )
+    )
+
+    assert result.status == "ok"
+    assert provider.requests[0]["model"] == "skill/model"
 
 
 def test_apply_agent_user_prompt_in_start_message(
@@ -969,6 +1240,59 @@ def test_apply_pipeline_script_llm_script(db: Database, workspace: Path) -> None
         if e.data.get("step_id")
     }
     assert step_ids == {"upper", "note", "suffix"}
+
+    verify_entries = _verify_entries(result.trace)
+    assert len(verify_entries) == 1
+    assert verify_entries[0].data["passed"] is True
+    assert verify_entries[0].data["failures"] == []
+
+
+def test_apply_pipeline_verify_failure_saved_in_trace(
+    db: Database, workspace: Path
+) -> None:
+    skill = SkillConfig(
+        name="pipe-verify-fail",
+        description="script then failing verify",
+        system_prompt="",
+        allowed_tools=[],
+        model="test/model",
+        kind="pipeline",
+        verify_checks=[VerifyCheck("has_section", params={"heading": "Missing"})],
+        steps=[
+            PipelineStep(
+                id="upper",
+                type="script",
+                input="documents",
+                code="result = document.upper()\n",
+            ),
+        ],
+    )
+    skill_id = create_skill(
+        db, name=skill.name, description=skill.description, config=skill
+    )
+    input_doc_id = _ingest_input(db, workspace)
+    provider = ScriptProvider([])
+
+    result = asyncio.run(
+        apply_skill_collect(
+            provider=provider,
+            db=db,
+            workspace_dir=str(workspace),
+            skill=skill,
+            skill_id=skill_id,
+            input_doc_ids=[input_doc_id],
+            base_tools=build_document_tools(db, workspace),
+        )
+    )
+
+    assert result.status == "failed"
+    saved = _saved_trace(db, skill_id)
+    verify_entries = _verify_entries(saved)
+    assert len(verify_entries) == 1
+    assert verify_entries[0]["kind"] == "verify"
+    assert verify_entries[0]["data"]["passed"] is False
+    assert verify_entries[0]["data"]["failures"]
+    assert any("has_section" in f for f in verify_entries[0]["data"]["failures"])
 
 
 def test_apply_pipeline_user_prompt_in_llm_step(

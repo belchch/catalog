@@ -135,6 +135,7 @@ def delete_session(db: Database, session_id: str) -> bool:
             return False
         conn.execute("DELETE FROM session_artifact WHERE session_id = ?", (session_id,))
         conn.execute("DELETE FROM session_document WHERE session_id = ?", (session_id,))
+        conn.execute("DELETE FROM session_skill WHERE session_id = ?", (session_id,))
         conn.execute("DELETE FROM message WHERE session_id = ?", (session_id,))
         conn.execute("DELETE FROM session WHERE id = ?", (session_id,))
     return True

@@ -1,7 +1,25 @@
 from __future__ import annotations
 
-from catalog.skills.config import VerifyCheck
-from catalog.skills.verify import VerifyResult, run_verify
+import asyncio
+
+from catalog.api.skills import _validate_config
+from catalog.llm.base import CompletionResult, Message
+from catalog.skills.config import SkillConfig, VerifyCheck
+from catalog.skills.verify import (
+    VerifyResult,
+    registered_checks,
+    run_custom_judge,
+    run_verify,
+    run_verify_async,
+    validate_verify_check,
+    validate_verify_checks,
+    verify_checks_params_hint,
+)
+from catalog.storage.db import Database
+from catalog.storage.repo_custom_check import (
+    create_custom_check,
+    hide_custom_check,
+)
 
 
 def _vc(check: str, **params: object) -> VerifyCheck:
@@ -248,6 +266,78 @@ def test_unknown_check_fail_closed() -> None:
     assert r.failures == ["unknown check: does_not_exist"]
 
 
+def test_validate_verify_check_min_length_requires_min() -> None:
+    assert validate_verify_check("min_length", {}) == "min_length requires param 'min'"
+    assert validate_verify_check("min_length", {"min": 5}) is None
+
+
+def test_validate_verify_check_max_length_requires_max() -> None:
+    assert validate_verify_check("max_length", {}) == "max_length requires param 'max'"
+    assert validate_verify_check("max_length", {"max": 10}) is None
+
+
+def test_validate_verify_check_unknown() -> None:
+    assert validate_verify_check("does_not_exist", {}) == (
+        "unknown verify check: 'does_not_exist'"
+    )
+
+
+def test_validate_verify_checks_accepts_verify_check_objects() -> None:
+    errors = validate_verify_checks(
+        [
+            VerifyCheck(check="min_length", params={}),
+            VerifyCheck(check="non_empty"),
+        ]
+    )
+    assert errors == ["min_length requires param 'min'"]
+
+
+def test_verify_checks_params_hint_lists_required_keys() -> None:
+    hint = verify_checks_params_hint()
+    assert "min_length requires min" in hint
+    assert "max_length requires max" in hint
+    assert "regex_matches requires pattern" in hint
+    assert "has_section requires heading" in hint
+    assert "has_field requires key" in hint
+
+
+def test_registered_checks_cover_required_param_ids() -> None:
+    known = set(registered_checks())
+    for check_id in (
+        "min_length",
+        "max_length",
+        "regex_matches",
+        "has_section",
+        "has_field",
+    ):
+        assert check_id in known
+
+
+def test_validate_config_rejects_min_length_without_min() -> None:
+    config = SkillConfig(
+        name="Len",
+        description="x",
+        system_prompt="do it",
+        allowed_tools=["read_document"],
+        model="test",
+        verify_checks=[VerifyCheck(check="min_length", params={})],
+    )
+    errors = _validate_config(config, ["read_document"], registered_checks())
+    assert any("min_length requires param 'min'" in e for e in errors)
+
+
+def test_validate_config_accepts_min_length_with_min() -> None:
+    config = SkillConfig(
+        name="Len",
+        description="x",
+        system_prompt="do it",
+        allowed_tools=["read_document"],
+        model="test",
+        verify_checks=[VerifyCheck(check="min_length", params={"min": 8})],
+    )
+    assert _validate_config(config, ["read_document"], registered_checks()) == []
+
+
 # --------------------------------------------------------------------------- #
 # run_verify combining multiple checks
 # --------------------------------------------------------------------------- #
@@ -297,3 +387,173 @@ def test_run_verify_unknown_short_circuits() -> None:
     r = run_verify("", [_vc("non_empty"), _vc("bogus")])
     assert r.passed is False
     assert r.failures == ["unknown check: bogus"]
+
+
+def test_run_verify_sync_fail_closed_on_custom() -> None:
+    r = run_verify("hello", [_vc("custom:abc")])
+    assert r.passed is False
+    assert "custom check requires async verify" in r.failures[0]
+
+
+def test_validate_verify_check_accepts_custom_ref() -> None:
+    assert validate_verify_check("custom:abc123") is None
+    assert validate_verify_check("custom", {"id": "abc123"}) is None
+    assert validate_verify_check("custom", {}) == "custom check requires id"
+    assert validate_verify_check("custom:") == "custom check requires id"
+
+
+def test_registered_checks_exclude_llm_judge() -> None:
+    known = registered_checks()
+    assert "custom" not in known
+    assert all(not item.startswith("custom:") for item in known)
+
+
+def test_validate_config_accepts_custom_check_id() -> None:
+    config = SkillConfig(
+        name="Judge",
+        description="x",
+        system_prompt="do it",
+        allowed_tools=["read_document"],
+        model="test",
+        verify_checks=[VerifyCheck(check="custom:abc123")],
+    )
+    assert _validate_config(config, ["read_document"], registered_checks()) == []
+
+
+class _JudgeProvider:
+    def __init__(self, answers: list[str]) -> None:
+        self.answers = list(answers)
+        self.requests: list[dict] = []
+
+    async def complete(
+        self,
+        model: str,
+        messages: list[Message],
+        tools=None,
+        temperature: float = 0.0,
+        **kwargs,
+    ) -> CompletionResult:
+        self.requests.append(
+            {"model": model, "messages": messages, "tools": tools}
+        )
+        if not self.answers:
+            raise AssertionError("judge script exhausted")
+        return CompletionResult(
+            content=self.answers.pop(0),
+            tool_calls=[],
+            finish_reason="stop",
+        )
+
+
+def _mem_db() -> Database:
+    db = Database(":memory:")
+    db.init_schema()
+    return db
+
+
+def test_run_verify_async_skips_judge_when_deterministic_fails() -> None:
+    db = _mem_db()
+    row = create_custom_check(db, name="Has Python", prompt="есть опыт Python")
+    provider = _JudgeProvider(["PASS"])
+    result = asyncio.run(
+        run_verify_async(
+            "   ",
+            [_vc("non_empty"), _vc(f"custom:{row.id}")],
+            db=db,
+            provider=provider,
+            model="test/model",
+        )
+    )
+    assert result.passed is False
+    assert any("empty" in f for f in result.failures)
+    assert provider.requests == []
+
+
+def test_run_verify_async_hidden_custom_fails_closed() -> None:
+    db = _mem_db()
+    row = create_custom_check(db, name="Has Python", prompt="есть опыт Python")
+    hide_custom_check(db, row.id)
+    provider = _JudgeProvider(["PASS"])
+    result = asyncio.run(
+        run_verify_async(
+            "hello",
+            [_vc(f"custom:{row.id}")],
+            db=db,
+            provider=provider,
+            model="test/model",
+        )
+    )
+    assert result.passed is False
+    assert result.failures == [f"hidden custom check: {row.id!r}"]
+    assert provider.requests == []
+
+
+def test_run_verify_async_unknown_custom_fails_closed() -> None:
+    db = _mem_db()
+    provider = _JudgeProvider(["PASS"])
+    result = asyncio.run(
+        run_verify_async(
+            "hello",
+            [_vc("custom:deadbeef")],
+            db=db,
+            provider=provider,
+            model="test/model",
+        )
+    )
+    assert result.passed is False
+    assert result.failures == ["unknown custom check: 'deadbeef'"]
+    assert provider.requests == []
+
+
+def test_run_verify_async_judge_runs_after_deterministic_pass() -> None:
+    db = _mem_db()
+    row = create_custom_check(db, name="Has Python", prompt="есть опыт Python")
+    provider = _JudgeProvider(["PASS"])
+    result = asyncio.run(
+        run_verify_async(
+            "hello",
+            [_vc("non_empty"), _vc("custom", id=row.id)],
+            db=db,
+            provider=provider,
+            model="test/model",
+        )
+    )
+    assert result.passed is True
+    assert result.failures == []
+    assert len(provider.requests) == 1
+    messages = provider.requests[0]["messages"]
+    assert all(m.role == "user" for m in messages)
+    assert "есть опыт Python" in messages[0].content
+    assert "hello" in messages[0].content
+    assert provider.requests[0]["tools"] is None
+
+
+def test_run_verify_async_judge_fail() -> None:
+    db = _mem_db()
+    row = create_custom_check(db, name="Has Python", prompt="есть опыт Python")
+    provider = _JudgeProvider(["FAIL: нет стека"])
+    result = asyncio.run(
+        run_verify_async(
+            "hello",
+            [_vc(f"custom:{row.id}")],
+            db=db,
+            provider=provider,
+            model="test/model",
+        )
+    )
+    assert result.passed is False
+    assert result.failures == ["custom:Has Python: нет стека"]
+
+
+def test_run_custom_judge_missing_model() -> None:
+    provider = _JudgeProvider(["PASS"])
+    reason = asyncio.run(
+        run_custom_judge(
+            "hello",
+            "есть опыт Python",
+            provider=provider,
+            model="",
+        )
+    )
+    assert reason == "custom:preview: missing model"
+    assert provider.requests == []
