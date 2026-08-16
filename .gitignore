@@ -28,6 +28,11 @@ backend/catalog/_build_sha.py
 # the source tree by default — these rules are a safety net for point
 # overrides such as APP_WORKSPACE/PROMPT_LOG_DIR still pointing in-tree).
 prompt_logs/
+backend/workspace/
+
+# Черновые ревью и заметки, не входящие в публичную документацию
+review/
+review-*.md
 
 # SQLite databases (local dev/test artifacts)
 *.db
