@@ -1,0 +1,82 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="460" viewBox="0 0 1200 460" role="img" aria-labelledby="title desc">
+  <title id="title">Проверка результата</title>
+  <desc id="desc">Результат проходит детерминированные или пользовательские проверки и при ошибке возвращается на повторное выполнение.</desc>
+  <defs>
+    <marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto">
+      <path d="M0 0L10 5L0 10Z" fill="#829ab1"/>
+    </marker>
+    <marker id="arrowRed" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto">
+      <path d="M0 0L10 5L0 10Z" fill="#c53030"/>
+    </marker>
+    <filter id="shadow" x="-10%" y="-20%" width="120%" height="150%">
+      <feDropShadow dx="0" dy="5" stdDeviation="8" flood-color="#102a43" flood-opacity=".08"/>
+    </filter>
+  </defs>
+  <rect width="1200" height="460" rx="28" fill="#f7fafc"/>
+  <text x="60" y="62" fill="#102a43" font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="26" font-weight="650">Проверка выполняется отдельно от основного вызова модели</text>
+  <text x="60" y="92" fill="#627d98" font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="16">Детерминированные правила и LLM-судья остаются разными типами проверок.</text>
+  <g fill="none" stroke="#829ab1" stroke-width="2.5" marker-end="url(#arrow)">
+    <path d="M258 245H327"/>
+    <path d="M522 245H579"/>
+    <path d="M826 245H895"/>
+  </g>
+  <path d="M446 315V375H155V305" fill="none" stroke="#c53030" stroke-width="2.5" marker-end="url(#arrowRed)"/>
+  <g font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" filter="url(#shadow)">
+    <g transform="translate(60 184)">
+      <rect width="198" height="122" rx="20" fill="#ffffff" stroke="#d9e2ec"/>
+      <circle cx="43" cy="42" r="22" fill="#e8f4fc"/>
+      <path d="M37 31L54 42L37 53Z" fill="#1d83c4"/>
+      <text x="22" y="91" fill="#102a43" font-size="18" font-weight="700">Выполнение</text>
+      <text x="22" y="112" fill="#627d98" font-size="13">новая попытка</text>
+    </g>
+    <g transform="translate(327 158)">
+      <rect width="195" height="174" rx="22" fill="#e8f4fc" stroke="#85c8ef" stroke-width="1.5"/>
+      <text x="24" y="39" fill="#102a43" font-size="18" font-weight="700">Verify</text>
+      <text x="24" y="62" fill="#486581" font-size="13">единая точка проверки</text>
+      <rect x="22" y="83" width="151" height="31" rx="9" fill="#ffffff"/>
+      <circle cx="40" cy="98.5" r="7" fill="#2f855a"/>
+      <path d="M37 98L40 101L44 96" fill="none" stroke="#ffffff" stroke-width="1.5" stroke-linecap="round"/>
+      <text x="54" y="103" fill="#243b53" font-size="13">встроенные</text>
+      <rect x="22" y="123" width="151" height="31" rx="9" fill="#ffffff"/>
+      <circle cx="40" cy="138.5" r="7" fill="#805ad5"/>
+      <path d="M37 139H43M40 136V142" stroke="#ffffff" stroke-width="1.5" stroke-linecap="round"/>
+      <text x="54" y="143" fill="#243b53" font-size="13">LLM-судья</text>
+    </g>
+    <g transform="translate(579 130)">
+      <rect width="247" height="230" rx="22" fill="#ffffff" stroke="#d9e2ec"/>
+      <text x="24" y="39" fill="#102a43" font-size="18" font-weight="700">Результаты проверок</text>
+      <g transform="translate(22 62)">
+        <rect width="203" height="35" rx="10" fill="#e6ffed"/>
+        <circle cx="18" cy="17.5" r="8" fill="#2f855a"/>
+        <path d="M14 17L17 20L22 14" fill="none" stroke="#ffffff" stroke-width="1.7" stroke-linecap="round"/>
+        <text x="34" y="22" fill="#276749" font-size="13" font-family="'SFMono-Regular', Consolas, monospace">non_empty</text>
+      </g>
+      <g transform="translate(22 106)">
+        <rect width="203" height="35" rx="10" fill="#e6ffed"/>
+        <circle cx="18" cy="17.5" r="8" fill="#2f855a"/>
+        <path d="M14 17L17 20L22 14" fill="none" stroke="#ffffff" stroke-width="1.7" stroke-linecap="round"/>
+        <text x="34" y="22" fill="#276749" font-size="13" font-family="'SFMono-Regular', Consolas, monospace">has_section</text>
+      </g>
+      <g transform="translate(22 150)">
+        <rect width="203" height="35" rx="10" fill="#f0eaff"/>
+        <circle cx="18" cy="17.5" r="8" fill="#805ad5"/>
+        <text x="18" y="21.5" fill="#ffffff" text-anchor="middle" font-size="10" font-weight="700">AI</text>
+        <text x="34" y="22" fill="#6741b6" font-size="13" font-family="'SFMono-Regular', Consolas, monospace">custom:terms</text>
+      </g>
+      <text x="24" y="211" fill="#627d98" font-size="12">PASS / FAIL и причина остаются в трейсе</text>
+    </g>
+    <g transform="translate(895 184)">
+      <rect width="245" height="122" rx="20" fill="#ffffff" stroke="#9ae6b4" stroke-width="1.5"/>
+      <circle cx="43" cy="42" r="22" fill="#e6ffed"/>
+      <path d="M32 42L39 49L55 33" fill="none" stroke="#2f855a" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+      <text x="22" y="91" fill="#102a43" font-size="18" font-weight="700">Готовый результат</text>
+      <text x="22" y="112" fill="#627d98" font-size="13">проверки пройдены</text>
+    </g>
+  </g>
+  <g font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif">
+    <rect x="265" y="361" width="181" height="30" rx="15" fill="#fff0f0"/>
+    <text x="355.5" y="381" fill="#9b2c2c" text-anchor="middle" font-size="12" font-weight="700">FAIL · причина в контексте</text>
+    <rect x="832" y="229" width="55" height="30" rx="15" fill="#e6ffed"/>
+    <text x="859.5" y="249" fill="#276749" text-anchor="middle" font-size="12" font-weight="700">PASS</text>
+  </g>
+</svg>

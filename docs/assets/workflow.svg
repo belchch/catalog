@@ -1,0 +1,66 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="360" viewBox="0 0 1200 360" role="img" aria-labelledby="title desc">
+  <title id="title">Как работает Catalog</title>
+  <desc id="desc">Документы проходят через обсуждение, черновик, скилл, применение и проверки до готового результата.</desc>
+  <defs>
+    <marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto">
+      <path d="M0 0L10 5L0 10Z" fill="#829ab1"/>
+    </marker>
+    <filter id="shadow" x="-10%" y="-20%" width="120%" height="150%">
+      <feDropShadow dx="0" dy="5" stdDeviation="8" flood-color="#102a43" flood-opacity=".08"/>
+    </filter>
+  </defs>
+  <rect width="1200" height="360" rx="28" fill="#f7fafc"/>
+  <text x="60" y="62" fill="#102a43" font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="26" font-weight="650">От документов к повторяемому процессу</text>
+  <text x="60" y="92" fill="#627d98" font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="16">План уточняется в чате, сохраняется как скилл и применяется к следующим документам.</text>
+  <g fill="none" stroke="#829ab1" stroke-width="2.5" marker-end="url(#arrow)">
+    <path d="M220 214H251"/>
+    <path d="M403 214H434"/>
+    <path d="M586 214H617"/>
+    <path d="M769 214H800"/>
+    <path d="M952 214H983"/>
+  </g>
+  <g filter="url(#shadow)" font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif">
+    <g transform="translate(50 140)">
+      <rect width="170" height="148" rx="20" fill="#ffffff" stroke="#d9e2ec"/>
+      <rect x="22" y="22" width="42" height="48" rx="7" fill="#e3f8f4" stroke="#2cb1bc"/>
+      <path d="M32 37H54M32 46H54M32 55H49" stroke="#147d83" stroke-width="2" stroke-linecap="round"/>
+      <text x="22" y="101" fill="#102a43" font-size="17" font-weight="650">Документы</text>
+      <text x="22" y="125" fill="#627d98" font-size="13">DOCX · PDF · XLSX</text>
+    </g>
+    <g transform="translate(233 140)">
+      <rect width="170" height="148" rx="20" fill="#ffffff" stroke="#d9e2ec"/>
+      <path d="M25 25H61C66 25 70 29 70 34V53C70 58 66 62 61 62H45L34 72V62H25C20 62 16 58 16 53V34C16 29 20 25 25 25Z" fill="#e8f4fc" stroke="#1d83c4" stroke-width="2"/>
+      <circle cx="32" cy="44" r="2.5" fill="#1d83c4"/><circle cx="43" cy="44" r="2.5" fill="#1d83c4"/><circle cx="54" cy="44" r="2.5" fill="#1d83c4"/>
+      <text x="22" y="101" fill="#102a43" font-size="17" font-weight="650">Обсуждение</text>
+      <text x="22" y="125" fill="#627d98" font-size="13">Задача и критерии</text>
+    </g>
+    <g transform="translate(416 140)">
+      <rect width="170" height="148" rx="20" fill="#ffffff" stroke="#d9e2ec"/>
+      <rect x="20" y="24" width="52" height="48" rx="8" fill="#f0eaff" stroke="#805ad5"/>
+      <path d="M31 39H61M31 49H55M31 59H58" stroke="#6741b6" stroke-width="2" stroke-linecap="round"/>
+      <text x="22" y="101" fill="#102a43" font-size="17" font-weight="650">Черновик</text>
+      <text x="22" y="125" fill="#627d98" font-size="13">План и артефакты</text>
+    </g>
+    <g transform="translate(599 140)">
+      <rect width="170" height="148" rx="20" fill="#e8f4fc" stroke="#85c8ef" stroke-width="1.5"/>
+      <rect x="20" y="24" width="52" height="48" rx="10" fill="#1d83c4"/>
+      <path d="M34 48L42 56L59 38" fill="none" stroke="#ffffff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+      <text x="22" y="101" fill="#102a43" font-size="17" font-weight="700">Скилл</text>
+      <text x="22" y="125" fill="#486581" font-size="13">Сохранённый конфиг</text>
+    </g>
+    <g transform="translate(782 140)">
+      <rect width="170" height="148" rx="20" fill="#ffffff" stroke="#d9e2ec"/>
+      <circle cx="45" cy="48" r="25" fill="#e3f8f4" stroke="#2cb1bc"/>
+      <path d="M39 36L58 48L39 60Z" fill="#147d83"/>
+      <text x="22" y="101" fill="#102a43" font-size="17" font-weight="650">Применение</text>
+      <text x="22" y="125" fill="#627d98" font-size="13">Один файл или пачка</text>
+    </g>
+    <g transform="translate(965 140)">
+      <rect width="185" height="148" rx="20" fill="#ffffff" stroke="#9ae6b4" stroke-width="1.5"/>
+      <circle cx="45" cy="48" r="25" fill="#e6ffed"/>
+      <path d="M33 48L41 56L58 38" fill="none" stroke="#2f855a" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"/>
+      <text x="22" y="101" fill="#102a43" font-size="17" font-weight="650">Результат</text>
+      <text x="22" y="125" fill="#627d98" font-size="13">Проверен и сохранён</text>
+    </g>
+  </g>
+</svg>
