@@ -115,6 +115,16 @@ def test_session_skill_tool_runs_script_and_pins(db: Database) -> None:
     assert out["config_hash"] == config_hash(record.config.to_json())
     assert out["run_id"]
     assert out["verify_failures"] == []
+    assert list(out) == [
+        "ok",
+        "status",
+        "run_id",
+        "skill_id",
+        "skill_name",
+        "config_hash",
+        "verify_failures",
+        "text",
+    ]
 
     run = get_run(db, out["run_id"])
     assert run is not None
@@ -131,6 +141,25 @@ def test_session_skill_tool_runs_script_and_pins(db: Database) -> None:
     assert verify
     assert verify[0]["data"]["passed"] is True
     assert list_documents(db) == []
+
+
+def test_get_run_returns_parent_run_id(client, db: Database) -> None:
+    sid = create_session(db)
+    skill_id = _script_skill(db)
+    attach_skills(db, sid, [skill_id])
+    record = get_skill(db, skill_id)
+    assert record is not None
+    name = skill_tool_name(record, used=set())
+    tools = build_session_skill_tools(
+        db, sid, workspace_dir="/tmp", base_tools=ToolRegistry()
+    )
+    _, fn = tools.get(name)
+    assert fn is not None
+    out = asyncio.run(fn(text="hello"))
+    run = client.get(f"/runs/{out['run_id']}").json()
+    assert run["parent_run_id"] == SESSION_TOOL_PARENT_RUN_ID
+    assert run["id"] == out["run_id"]
+    assert run["result_text"] == "HELLO"
 
 
 def test_session_skill_tool_verify_failure(db: Database) -> None:

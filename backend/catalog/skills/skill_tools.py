@@ -164,12 +164,12 @@ def build_session_skill_tools(
             return {
                 "ok": result.status == "ok",
                 "status": result.status,
-                "text": result.result_text,
                 "run_id": result.run_id,
                 "skill_id": _skill_id,
                 "skill_name": _name,
                 "config_hash": _hash,
                 "verify_failures": verify_failures,
+                "text": result.result_text,
             }
 
         reg.register(

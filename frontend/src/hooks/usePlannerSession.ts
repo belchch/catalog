@@ -11,6 +11,7 @@ import {
   type SessionArtifact,
   type SkillMetaPatch,
 } from '../api.ts'
+import { extractChildRunId, extractToolInput } from '../lib/traceSegments.ts'
 import {
   connectPlanner,
   formatToolArgs,
@@ -22,6 +23,9 @@ export interface PlannerMessage {
   role: 'user' | 'assistant' | 'tool'
   content: string
   toolName?: string
+  childRunId?: string
+  input?: string
+  ok?: boolean
 }
 
 export interface UsePlannerSessionResult {
@@ -66,9 +70,13 @@ function mapStoredMessages(raw: MessageOut[]): PlannerMessage[] {
     if (m.role === 'tool') {
       const toolName = m.tool_name ?? undefined
       let content: string
+      let childRunId: string | undefined
+      let ok: boolean | undefined
       if (m.content) {
         try {
-          const parsed = JSON.parse(m.content) as { ok?: boolean }
+          const parsed = JSON.parse(m.content) as { ok?: boolean; result?: unknown }
+          ok = typeof parsed.ok === 'boolean' ? parsed.ok : undefined
+          childRunId = extractChildRunId(toolName ?? '', parsed.result) ?? undefined
           content = `← ${toolName ?? 'tool'}: ${parsed.ok ? 'ok' : 'fail'}`
         } catch {
           content = m.content
@@ -76,7 +84,7 @@ function mapStoredMessages(raw: MessageOut[]): PlannerMessage[] {
       } else {
         content = `← ${toolName ?? 'tool'}: fail`
       }
-      out.push({ role: 'tool', toolName, content })
+      out.push({ role: 'tool', toolName, content, childRunId, ok })
     }
   }
   return out
@@ -168,20 +176,52 @@ export function usePlannerSession(
             role: 'tool',
             toolName: e.name,
             content: `→ ${e.name}(${formatToolArgs(e.arguments)})`,
+            input: e.name.startsWith('skill_')
+              ? extractToolInput(e.arguments) || undefined
+              : undefined,
           },
         ])
         break
-      case 'tool_result':
+      case 'tool_result': {
         skipHydrateRef.current = true
-        setMessages((prev) => [
-          ...prev,
-          {
-            role: 'tool',
-            toolName: e.name,
-            content: `← ${e.name}: ${e.ok ? 'ok' : 'fail'}`,
-          },
-        ])
+        const childRunId = extractChildRunId(e.name, e.result)
+        setMessages((prev) => {
+          if (!childRunId) {
+            return [
+              ...prev,
+              {
+                role: 'tool',
+                toolName: e.name,
+                content: `← ${e.name}: ${e.ok ? 'ok' : 'fail'}`,
+              },
+            ]
+          }
+          for (let i = prev.length - 1; i >= 0; i--) {
+            const m = prev[i]
+            if (
+              m.role === 'tool' &&
+              m.toolName === e.name &&
+              !m.childRunId &&
+              m.content.startsWith('→')
+            ) {
+              const next = prev.slice()
+              next[i] = { ...m, childRunId, ok: e.ok }
+              return next
+            }
+          }
+          return [
+            ...prev,
+            {
+              role: 'tool',
+              toolName: e.name,
+              content: `← ${e.name}: ${e.ok ? 'ok' : 'fail'}`,
+              childRunId,
+              ok: e.ok,
+            },
+          ]
+        })
         break
+      }
       case 'finish': {
         assistantBufferRef.current = ''
         streamingRef.current = false

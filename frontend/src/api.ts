@@ -34,6 +34,7 @@ export interface RunOut {
   trace: unknown[] | null
   // Raw agent/script output, kept even when persist=false (CATALOG-18).
   result_text: string | null
+  parent_run_id: string | null
 }
 
 /** Output mode for applying a skill (CATALOG-18): "в док" vs "на экран". */

@@ -125,6 +125,7 @@ async def get_run_endpoint(run_id: str, db: Database = Depends(get_workspace_db)
         status=row["status"],
         trace=trace,
         result_text=row["result_text"],
+        parent_run_id=row["parent_run_id"],
     )
 
 

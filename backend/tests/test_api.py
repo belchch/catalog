@@ -1725,6 +1725,7 @@ def test_apply_skill_run(client, provider, db) -> None:
     run = client.get(f"/runs/{run_id}").json()
     assert run["status"] == "ok"
     assert run["output_doc_id"] == finish["output_doc_id"]
+    assert run["parent_run_id"] is None
     assert run["trace"] is not None
     saved_verify = [e for e in run["trace"] if e.get("kind") == "verify"]
     assert saved_verify

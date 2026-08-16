@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { extractChildRunId, extractToolInput } from '../lib/traceSegments.ts'
 import {
   connectRun,
   formatToolArgs,
@@ -37,6 +38,9 @@ export interface RunStep {
   duration?: number
   error?: string
   stepId?: string
+  toolName?: string
+  childRunId?: string
+  input?: string
 }
 
 export interface UseRunStreamResult {
@@ -107,6 +111,8 @@ export function useRunStream(runId: string | null): UseRunStreamResult {
             id: uniqueId('call'),
             kind: 'tool_call',
             text: `→ ${e.name}(${formatToolArgs(e.arguments)})`,
+            toolName: e.name,
+            input: extractToolInput(e.arguments) || undefined,
             stepId: e.step_id,
           },
         ])
@@ -122,6 +128,8 @@ export function useRunStream(runId: string | null): UseRunStreamResult {
             text: `← ${e.name}`,
             ok: e.ok,
             result: formatToolResult(e.result),
+            toolName: e.name,
+            childRunId: extractChildRunId(e.name, e.result) ?? undefined,
             stepId: e.step_id,
           },
         ])
