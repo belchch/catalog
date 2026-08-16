@@ -275,7 +275,9 @@ html, body, #root {
   position: relative;
   min-height: 62px;
   border-bottom: 1px solid var(--header-line);
-  background: var(--header-bg);
+  background:
+    linear-gradient(100deg, rgba(139, 92, 246, 0.12), rgba(217, 70, 239, 0.06) 38%, rgba(255, 255, 255, 0) 72%),
+    var(--header-bg);
 }
 .catalog-header::before {
   content: '';
@@ -343,10 +345,10 @@ html, body, #root {
 .catalog-new-chat {
   display: flex; flex: none; align-items: center; gap: 10px; width: calc(100% - 16px);
   margin: 0 8px 16px; padding: 8px 11px; border-radius: 9px;
-  color: var(--ink); font-size: 15px; text-align: left;
+  color: var(--gold-ink); font-size: 15px; font-weight: 500; text-align: left;
 }
 .catalog-new-chat:hover { background: var(--sidebar-brand-hover); }
-.catalog-new-chat > span:first-child { color: var(--gold-grad-a); }
+.catalog-new-chat__icon { flex: none; color: var(--gold-grad-a); }
 .catalog-sidebar__sections {
   display: flex; flex: 1; flex-direction: column; gap: 10px;
   min-height: 0; overflow-y: auto; overscroll-behavior: contain;

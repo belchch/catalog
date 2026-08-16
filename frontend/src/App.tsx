@@ -29,7 +29,7 @@ import { Chat } from './components/Chat.tsx'
 import { CollapsibleSection } from './components/CollapsibleSection.tsx'
 import { DocumentList } from './components/DocumentList.tsx'
 import { ModelSelector } from './components/ModelSelector.tsx'
-import { FolderIcon, PlusIcon, SettingsIcon } from './components/icons.tsx'
+import { FolderIcon, PlusIcon, SettingsIcon, SparklesIcon } from './components/icons.tsx'
 import { SettingsPanel } from './components/SettingsPanel.tsx'
 import { RescanReportModal } from './components/RescanReportModal.tsx'
 import { RunView } from './components/RunView.tsx'
@@ -796,7 +796,7 @@ export default function App() {
             onClick={handleNewChat}
             disabled={!hasWorkspace || sessions.loading}
           >
-            <span aria-hidden="true">✎</span>
+            <SparklesIcon className="catalog-new-chat__icon size-[18px]" />
             Новый чат
           </button>
           <div className="catalog-sidebar__sections">
