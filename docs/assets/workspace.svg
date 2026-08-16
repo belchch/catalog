@@ -1,0 +1,86 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="480" viewBox="0 0 1200 480" role="img" aria-labelledby="title desc">
+  <title id="title">Данные в рабочей папке</title>
+  <desc id="desc">Исходные документы, результаты и индекс находятся в папке пользователя; результаты открываются в Obsidian.</desc>
+  <defs>
+    <marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto">
+      <path d="M0 0L10 5L0 10Z" fill="#829ab1"/>
+    </marker>
+    <filter id="shadow" x="-10%" y="-20%" width="120%" height="150%">
+      <feDropShadow dx="0" dy="5" stdDeviation="8" flood-color="#102a43" flood-opacity=".08"/>
+    </filter>
+  </defs>
+  <rect width="1200" height="480" rx="28" fill="#f7fafc"/>
+  <text x="60" y="62" fill="#102a43" font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="26" font-weight="650">Воркспейс — обычная папка пользователя</text>
+  <text x="60" y="92" fill="#627d98" font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="16">Файлы остаются читаемыми без Catalog, а SQLite используется как пересоздаваемый индекс.</text>
+  <g fill="none" stroke="#829ab1" stroke-width="2.5" marker-end="url(#arrow)">
+    <path d="M760 241H850"/>
+    <path d="M760 341C830 341 806 399 850 399"/>
+  </g>
+  <g font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" filter="url(#shadow)">
+    <g transform="translate(60 135)">
+      <path d="M0 38C0 25 10 15 23 15H216L249 48H677C690 48 700 58 700 71V291C700 304 690 314 677 314H23C10 314 0 304 0 291Z" fill="#ffffff" stroke="#b6d9f2" stroke-width="1.5"/>
+      <text x="26" y="48" fill="#1d83c4" font-size="16" font-weight="700">ПАПКА ПРОЕКТА</text>
+      <g transform="translate(28 86)">
+        <rect width="198" height="184" rx="18" fill="#f0f4f8" stroke="#d9e2ec"/>
+        <text x="18" y="31" fill="#102a43" font-size="16" font-weight="700">Исходные документы</text>
+        <g transform="translate(18 51)">
+          <rect width="162" height="31" rx="8" fill="#ffffff"/>
+          <rect x="10" y="8" width="16" height="16" rx="4" fill="#2b6cb0"/>
+          <text x="36" y="21" fill="#486581" font-size="12">Техническое задание.docx</text>
+        </g>
+        <g transform="translate(18 92)">
+          <rect width="162" height="31" rx="8" fill="#ffffff"/>
+          <rect x="10" y="8" width="16" height="16" rx="4" fill="#d64545"/>
+          <text x="36" y="21" fill="#486581" font-size="12">Регламент.pdf</text>
+        </g>
+        <g transform="translate(18 133)">
+          <rect width="162" height="31" rx="8" fill="#ffffff"/>
+          <rect x="10" y="8" width="16" height="16" rx="4" fill="#2f855a"/>
+          <text x="36" y="21" fill="#486581" font-size="12">Реестр.xlsx</text>
+        </g>
+      </g>
+      <g transform="translate(249 86)">
+        <rect width="198" height="184" rx="18" fill="#e8f4fc" stroke="#b6d9f2"/>
+        <text x="18" y="31" fill="#102a43" font-size="16" font-weight="700">results/</text>
+        <g transform="translate(18 51)">
+          <rect width="162" height="50" rx="9" fill="#ffffff" stroke="#d9e2ec"/>
+          <text x="12" y="21" fill="#243b53" font-size="12" font-weight="650">Анализ требований.md</text>
+          <text x="12" y="38" fill="#805ad5" font-size="11">[[Техническое задание]]</text>
+        </g>
+        <g transform="translate(18 111)">
+          <rect width="162" height="50" rx="9" fill="#ffffff" stroke="#d9e2ec"/>
+          <text x="12" y="21" fill="#243b53" font-size="12" font-weight="650">Сводка рисков.md</text>
+          <text x="12" y="38" fill="#805ad5" font-size="11">[[Регламент]]</text>
+        </g>
+      </g>
+      <g transform="translate(470 86)">
+        <rect width="202" height="184" rx="18" fill="#f0f4f8" stroke="#d9e2ec"/>
+        <text x="18" y="31" fill="#102a43" font-size="16" font-weight="700">.catalog/</text>
+        <rect x="18" y="51" width="166" height="48" rx="9" fill="#ffffff" stroke="#d9e2ec"/>
+        <ellipse cx="43" cy="67" rx="12" ry="5" fill="#829ab1"/>
+        <path d="M31 67V83C31 86 36 89 43 89C50 89 55 86 55 83V67" fill="#bcccdc"/>
+        <text x="68" y="80" fill="#486581" font-size="13" font-family="'SFMono-Regular', Consolas, monospace">index.db</text>
+        <text x="18" y="126" fill="#627d98" font-size="12">Служебные данные</text>
+        <text x="18" y="145" fill="#627d98" font-size="12">и пересоздаваемый индекс</text>
+      </g>
+    </g>
+    <g transform="translate(850 165)">
+      <rect width="290" height="152" rx="22" fill="#ffffff" stroke="#b8a3e8" stroke-width="1.5"/>
+      <path d="M32 35L49 24L67 35L61 59L49 73L37 59Z" fill="#805ad5"/>
+      <circle cx="49" cy="45" r="7" fill="#ffffff" opacity=".85"/>
+      <text x="88" y="42" fill="#102a43" font-size="19" font-weight="700">Obsidian</text>
+      <text x="88" y="64" fill="#627d98" font-size="13">те же Markdown-файлы</text>
+      <circle cx="40" cy="108" r="6" fill="#805ad5"/>
+      <circle cx="104" cy="93" r="6" fill="#805ad5"/>
+      <circle cx="167" cy="117" r="6" fill="#805ad5"/>
+      <circle cx="232" cy="92" r="6" fill="#805ad5"/>
+      <path d="M45 105L99 96M109 96L162 114M172 114L227 95M105 97L229 93" stroke="#b8a3e8" stroke-width="2"/>
+    </g>
+    <g transform="translate(850 354)">
+      <rect width="290" height="90" rx="20" fill="#fffaf0" stroke="#f6c56e"/>
+      <text x="20" y="31" fill="#7c4a03" font-size="14" font-weight="700">Внешний LLM API</text>
+      <text x="20" y="54" fill="#805b25" font-size="12">Получает текст только при выполнении</text>
+      <text x="20" y="71" fill="#805b25" font-size="12">операции через настроенного провайдера.</text>
+    </g>
+  </g>
+</svg>

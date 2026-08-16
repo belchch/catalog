@@ -10,15 +10,7 @@
 
 ## Как это работает
 
-```mermaid
-flowchart LR
-  documents[Документы] --> session[Обсуждение задачи]
-  session --> draft[Черновик процесса]
-  draft --> skill[Скилл]
-  skill --> apply[Применение]
-  apply --> checks[Проверки]
-  checks --> result[Результат]
-```
+![Путь от документов к проверенному результату](docs/assets/workflow.svg)
 
 1. Пользователь открывает папку с документами.
 2. В чате описывает требуемый результат.
@@ -65,15 +57,7 @@ Pipeline может включать шаги:
 
 Сохранённый скилл можно подключить к сессии. После этого модель может вызвать его так же, как системный инструмент.
 
-```mermaid
-flowchart LR
-  chat[Сессия] --> attached[Подключённые скиллы]
-  attached --> skillA[Скилл A]
-  skillA --> skillB[Скилл B]
-  skillB --> result[Результат]
-  limits["Глубина, бюджет и дедлайн"] --> skillA
-  limits --> skillB
-```
+![Подключение и вложенный вызов скиллов](docs/assets/skill-composition.svg)
 
 При вложенном вызове Catalog:
 
@@ -95,15 +79,7 @@ flowchart LR
 
 Скилл получает только инструменты из своего `allowed_tools`. Если в конфигурации указан неизвестный инструмент, выполнение не начинается.
 
-```mermaid
-flowchart TB
-  registry[Реестр возможностей] --> listDocuments[list_documents]
-  registry --> readDocument[read_document]
-  registry --> exportDocx["export_docx: write"]
-  registry --> allowed[allowed_tools скилла]
-  allowed --> execution[Выполнение скилла]
-  plugin["Плагин: инструменты, проверки, форматы"] -.-> registry
-```
+![Системный реестр и разрешения скилла](docs/assets/tool-registry.svg)
 
 ### Расширение через плагины
 
@@ -131,14 +107,7 @@ flowchart TB
 
 Пользователь также может создать смысловую проверку через LLM-судью. В интерфейсе и трейсе она обозначается отдельно от детерминированных проверок.
 
-```mermaid
-flowchart LR
-  execution[Выполнение] --> verify[Проверки]
-  verify -->|PASS| result[Результат]
-  verify -->|FAIL| retry[Повтор с причиной ошибки]
-  retry --> execution
-  verify --> custom["LLM-судья: отдельный тип проверки"]
-```
+![Цикл проверки результата](docs/assets/verification.svg)
 
 Трейс показывает шаги скилла, вызовы инструментов, ответы инструментов, reasoning модели, результаты проверок и вложенные прогоны.
 
@@ -154,15 +123,7 @@ flowchart LR
 - Результат сохраняет ссылки на исходные документы.
 - Ту же папку можно открыть в Obsidian.
 
-```mermaid
-flowchart TB
-  workspace[Папка пользователя] --> sources[Исходные документы]
-  workspace --> results["results/*.md"]
-  workspace --> index[".catalog/index.db"]
-  sources --> provenance[Ссылки на источники]
-  provenance --> results
-  results --> obsidian[Obsidian]
-```
+![Устройство рабочей папки и интеграция с Obsidian](docs/assets/workspace.svg)
 
 В конец результата добавляется секция со ссылками:
 
@@ -194,14 +155,7 @@ DOCX разбирается с сохранением порядка параг�
 - сохранение списка источников;
 - повторное чтение созданного файла и сверку структуры.
 
-```mermaid
-flowchart LR
-  wordIn[DOCX] --> catalog[Catalog]
-  catalog --> markdown["Markdown и ссылки"]
-  markdown --> obsidian[Obsidian]
-  markdown --> wordOut["DOCX по шаблону"]
-  wordOut --> roundTrip[Повторное чтение и проверка]
-```
+![Цикл обработки и экспорта документов](docs/assets/document-loop.svg)
 
 ![Экспорт результата в DOCX](docs/assets/docx-export.png)
 
