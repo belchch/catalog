@@ -172,10 +172,6 @@ export function Chat({
     closePicker()
   }
 
-  const submit = () => {
-    sendCurrent(input.trim())
-  }
-
   const canSubmit = !streaming && (input.trim().length > 0 || selectedDocIds.length > 0)
 
   const visibleSuggestions = streaming
