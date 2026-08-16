@@ -976,6 +976,38 @@ def test_budget_reserve_release_two_of_twenty_four() -> None:
     assert budget.nested_runs_left == 19
 
 
+def test_budget_untouched_when_nested_tool_setup_fails(
+    db: Database, monkeypatch
+) -> None:
+    sid = create_session(db)
+    skill_id = _agent_skill(db)
+    attach_skills(db, sid, [skill_id])
+    record = get_skill(db, skill_id)
+    assert record is not None
+    name = skill_tool_name(record, used=set())
+    budget = SkillBudget(llm_calls_left=60, nested_runs_left=20)
+
+    def _boom(*_args, **_kwargs):
+        raise RuntimeError("merge failed")
+
+    monkeypatch.setattr("catalog.skills.skill_tools._merge_tools", _boom)
+    tools = build_session_skill_tools(
+        db,
+        sid,
+        workspace_dir="/tmp",
+        base_tools=ToolRegistry(),
+        budget=budget,
+        kinds=frozenset({"agent"}),
+    )
+    _, fn = tools.get(name)
+    assert fn is not None
+    out = asyncio.run(fn(text="hello"))
+    assert out["ok"] is False
+    assert out["error"] == "merge failed"
+    assert budget.llm_calls_left == 60
+    assert budget.nested_runs_left == 20
+
+
 def test_script_custom_verify_charges_turn_budget(db: Database) -> None:
     row = create_custom_check(db, name="Has Hello", prompt="contains hello")
     sid = create_session(db)

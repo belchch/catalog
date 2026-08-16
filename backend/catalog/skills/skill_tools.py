@@ -287,37 +287,37 @@ def build_session_skill_tools(
                     pinned_hash=_hash,
                     depth=nested.depth,
                 )
-            if _budget is not None:
-                needed_llm, needed_runs = estimate_skill_budget(_config)
-                hold = _budget.reserve(needed_llm, needed_runs)
-                if hold is None:
-                    return _budget_exhausted_result(
-                        db=db,
-                        session_id=session_id,
-                        skill_id=_skill_id,
-                        skill_name=_name,
-                        pinned_hash=_hash,
-                        depth=nested.depth,
-                        budget=_budget,
-                        needed_llm=needed_llm,
-                        needed_runs=needed_runs,
-                    )
-            nested_skill_tools = build_session_skill_tools(
-                db,
-                session_id,
-                workspace_dir=workspace_dir,
-                base_tools=base_tools,
-                reserved=_reserved | set(base_tools.names()),
-                provider=provider,
-                fallback_model=fallback_model,
-                providers=providers,
-                call_context=nested,
-                max_skill_depth=_max_depth,
-                budget=_budget,
-                kinds=_kinds,
-            )
-            apply_tools = _merge_tools(base_tools, nested_skill_tools)
             try:
+                nested_skill_tools = build_session_skill_tools(
+                    db,
+                    session_id,
+                    workspace_dir=workspace_dir,
+                    base_tools=base_tools,
+                    reserved=_reserved | set(base_tools.names()),
+                    provider=provider,
+                    fallback_model=fallback_model,
+                    providers=providers,
+                    call_context=nested,
+                    max_skill_depth=_max_depth,
+                    budget=_budget,
+                    kinds=_kinds,
+                )
+                apply_tools = _merge_tools(base_tools, nested_skill_tools)
+                if _budget is not None:
+                    needed_llm, needed_runs = estimate_skill_budget(_config)
+                    hold = _budget.reserve(needed_llm, needed_runs)
+                    if hold is None:
+                        return _budget_exhausted_result(
+                            db=db,
+                            session_id=session_id,
+                            skill_id=_skill_id,
+                            skill_name=_name,
+                            pinned_hash=_hash,
+                            depth=nested.depth,
+                            budget=_budget,
+                            needed_llm=needed_llm,
+                            needed_runs=needed_runs,
+                        )
                 with nested_skill_hold(hold, _budget):
                     result = await apply_skill_collect(
                         provider=_provider,
