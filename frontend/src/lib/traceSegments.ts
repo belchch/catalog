@@ -61,6 +61,8 @@ export interface SkillToolResultInfo {
   error?: string
   runId?: string
   skillName?: string
+  skillId?: string
+  configHash?: string
   depth?: number
   budget?: LimiterBudget
 }
@@ -109,6 +111,12 @@ function readSkillFields(rec: Record<string, unknown>): SkillToolResultInfo {
   const skillName = typeof rec.skill_name === 'string' && rec.skill_name.length > 0
     ? rec.skill_name
     : undefined
+  const skillId = typeof rec.skill_id === 'string' && rec.skill_id.length > 0
+    ? rec.skill_id
+    : undefined
+  const configHash = typeof rec.config_hash === 'string' && rec.config_hash.length > 0
+    ? rec.config_hash
+    : undefined
   const error = typeof rec.error === 'string' ? rec.error : undefined
   const ok = rec.ok === true ? true : rec.ok === false ? false : undefined
   return {
@@ -116,9 +124,15 @@ function readSkillFields(rec: Record<string, unknown>): SkillToolResultInfo {
     error,
     runId,
     skillName,
+    skillId,
+    configHash,
     depth: asInt(rec.depth),
     budget: readBudget(rec.budget),
   }
+}
+
+function isSkillStepPayload(parsed: SkillToolResultInfo | null): boolean {
+  return Boolean(parsed?.runId && (parsed.skillId || parsed.configHash))
 }
 
 function unescapeJsonString(raw: string): string {
@@ -208,7 +222,10 @@ export function attachSkillToolFields(
   result: unknown,
 ): Pick<RunStep, 'skillDepth' | 'limiter' | 'childRunId'> {
   const parsed = parseSkillToolResult(result)
-  const childRunId = toolName.startsWith('skill_') ? parsed?.runId : undefined
+  const childRunId =
+    toolName.startsWith('skill_') || isSkillStepPayload(parsed)
+      ? parsed?.runId
+      : undefined
   const reason = detectLimiterReason(toolName, ok, parsed, result)
   return {
     skillDepth: parsed?.depth,
@@ -229,8 +246,10 @@ export function limiterReason(step: RunStep): LimiterReason | null {
 }
 
 export function extractChildRunId(name: string, result: unknown): string | null {
-  if (!name.startsWith('skill_')) return null
-  return parseSkillToolResult(result)?.runId ?? null
+  const parsed = parseSkillToolResult(result)
+  if (name.startsWith('skill_')) return parsed?.runId ?? null
+  if (isSkillStepPayload(parsed)) return parsed?.runId ?? null
+  return null
 }
 
 export function pluralRu(n: number, forms: [string, string, string]): string {
@@ -361,9 +380,10 @@ function stepLimiter(item: RunStep): LimiterInfo | undefined {
 
 export function foldNestedRuns(
   items: RunStep[],
-  options?: { foldRuns?: boolean },
+  options?: { foldRuns?: boolean; foldStepRuns?: boolean },
 ): TraceItemNode[] {
   const foldRuns = options?.foldRuns !== false
+  const foldStepRuns = options?.foldStepRuns ?? foldRuns
   const out: TraceItemNode[] = []
   for (const item of items) {
     if (item.kind === 'tool_result') {
@@ -375,7 +395,9 @@ export function foldNestedRuns(
       }
       const childRunId =
         item.childRunId ?? extractChildRunId(item.toolName ?? '', item.result)
-      if (foldRuns && childRunId) {
+      const sessionSkill = (item.toolName ?? '').startsWith('skill_')
+      const shouldFold = childRunId && (sessionSkill ? foldRuns : foldStepRuns)
+      if (shouldFold && childRunId) {
         const input = takeMatchingCall(out, item.toolName)
         out.push({
           kind: 'run',

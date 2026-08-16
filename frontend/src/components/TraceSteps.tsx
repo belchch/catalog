@@ -210,7 +210,7 @@ function TraceItem({ s }: { s: RunStep }) {
 }
 
 function nodeList(items: RunStep[], depth: number): TraceItemNode[] {
-  return foldNestedRuns(items, { foldRuns: depth === 0 })
+  return foldNestedRuns(items, { foldRuns: depth === 0, foldStepRuns: depth < 2 })
 }
 
 function nodeKey(node: TraceItemNode): string {

@@ -119,6 +119,17 @@ describe('extractChildRunId', () => {
     expect(extractChildRunId('skill_extract_terms', { ok: false, error: 'provide text' })).toBeNull()
     expect(extractChildRunId('skill_extract_terms', '{"ok":false}')).toBeNull()
   })
+
+  it('reads run_id from a pipeline skill-step payload without a skill_ prefix', () => {
+    expect(
+      extractChildRunId('Сводка', {
+        run_id: runId,
+        skill_id: 'sk_7f3',
+        config_hash: '1a2b3c4dffff',
+      }),
+    ).toBe(runId)
+    expect(extractChildRunId('Сводка', { run_id: runId })).toBeNull()
+  })
 })
 
 describe('foldNestedRuns', () => {
@@ -239,6 +250,45 @@ describe('foldNestedRuns', () => {
       kind: 'run',
       runId,
     })
+  })
+
+  it('folds a pipeline skill-step run when foldStepRuns is true', () => {
+    const result = step({
+      id: 'r',
+      kind: 'tool_result',
+      toolName: 'Сводка',
+      ok: true,
+      result: JSON.stringify({
+        ok: true,
+        run_id: runId,
+        skill_id: 'sk_7f3',
+        skill_name: 'Сводка',
+        config_hash: '1a2b3c4dffff',
+        depth: 1,
+      }),
+    })
+    expect(foldNestedRuns([result], { foldRuns: false, foldStepRuns: true })[0]).toMatchObject({
+      kind: 'run',
+      runId,
+      toolName: 'Сводка',
+      ok: true,
+    })
+    expect(foldNestedRuns([result], { foldRuns: false, foldStepRuns: false })).toEqual([
+      { kind: 'item', item: result },
+    ])
+  })
+
+  it('does not fold a session skill_* run when only foldStepRuns is true', () => {
+    const result = step({
+      id: 'r',
+      kind: 'tool_result',
+      toolName: 'skill_extract_terms',
+      childRunId: runId,
+      ok: true,
+    })
+    expect(foldNestedRuns([result], { foldRuns: false, foldStepRuns: true })).toEqual([
+      { kind: 'item', item: result },
+    ])
   })
 
   it('folds unavailable even without a child run', () => {
@@ -442,6 +492,44 @@ describe('runTraceToSteps', () => {
     })
     expect(steps[0].limiter).toBeUndefined()
     expect(steps[1].limiter).toMatchObject({ reason: 'deadline', depth: 1 })
+  })
+
+  it('attaches childRunId on a pipeline skill-step tool_result', () => {
+    const child = '7c1f0ab2deadbeef0123456789abcdef'
+    const steps = runTraceToSteps(
+      [
+        {
+          kind: 'tool_result',
+          iteration: 2,
+          data: {
+            name: 'Сводка',
+            ok: true,
+            step_id: 'call_summary',
+            run_id: child,
+            skill_id: 'sk_7f3',
+            skill_name: 'Сводка',
+            config_hash: '1a2b3c4dffff',
+            depth: 1,
+            failures: [],
+            result: {
+              ok: true,
+              status: 'ok',
+              run_id: child,
+              skill_id: 'sk_7f3',
+              skill_name: 'Сводка',
+              config_hash: '1a2b3c4dffff',
+              depth: 1,
+            },
+          },
+        },
+      ],
+      runId,
+    )
+    expect(steps[0]).toMatchObject({
+      toolName: 'Сводка',
+      childRunId: child,
+      skillDepth: 1,
+    })
   })
 })
 

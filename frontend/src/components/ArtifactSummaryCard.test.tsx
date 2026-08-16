@@ -56,6 +56,32 @@ describe('ArtifactSummaryCard', () => {
     expect(screen.getByText('2 шага')).toBeTruthy()
   })
 
+  it('counts skill steps and marks prompt/script as not required', () => {
+    render(
+      <ArtifactSummaryCard
+        artifacts={[
+          art('meta', '{"kind":"pipeline"}'),
+          art(
+            'steps',
+            JSON.stringify({
+              steps: [
+                { id: 'a', type: 'skill', skill_id: 'sk_1' },
+                { id: 'b', type: 'skill', skill_id: 'sk_2' },
+              ],
+            }),
+          ),
+        ]}
+        loading={false}
+        error={null}
+        streaming={false}
+        onOpen={() => {}}
+      />,
+    )
+    expect(screen.getByText('Готово 2 из 2 разделов')).toBeTruthy()
+    expect(screen.getByText('2 шага')).toBeTruthy()
+    expect(screen.getAllByText('не требуется')).toHaveLength(2)
+  })
+
   it('shows a dash when steps are invalid', () => {
     render(
       <ArtifactSummaryCard

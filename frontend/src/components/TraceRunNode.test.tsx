@@ -622,6 +622,40 @@ describe('nested run header and limiter nodes', () => {
     expect(screen.queryByText('← skill_hidden')).toBeNull()
   })
 
+  it('folds a pipeline skill-step run at depth 1 and keeps it flat at depth 2', () => {
+    const stepRun: RunStep = {
+      id: 'r',
+      kind: 'tool_result',
+      text: '← Сводка',
+      toolName: 'Сводка',
+      ok: true,
+      childRunId: RUN_ID,
+      skillDepth: 1,
+      result: JSON.stringify({
+        ok: true,
+        run_id: RUN_ID,
+        skill_id: 'sk_7f3',
+        skill_name: 'Сводка',
+        config_hash: '1a2b3c4dffff',
+        depth: 1,
+      }),
+    }
+    const { unmount } = render(<TraceSteps depth={1} steps={[stepRun]} />)
+    expect(screen.getByText('Сводка')).toBeTruthy()
+    expect(screen.getByText('⤷')).toBeTruthy()
+    expect(screen.getByText('· глубина 1')).toBeTruthy()
+    expect(screen.queryByText('← Сводка')).toBeNull()
+    unmount()
+    render(<TraceSteps depth={2} steps={[stepRun]} />)
+    expect(
+      screen.getByText((_, node) => {
+        return node?.tagName === 'LI' && (node.textContent ?? '').includes('← Сводка')
+      }),
+    ).toBeTruthy()
+    expect(screen.queryByText('⤷')).toBeNull()
+    expect(screen.getByText('· глубина 1')).toBeTruthy()
+  })
+
   it('reads depth from skill_pin after the child run loads', async () => {
     vi.mocked(getRun).mockResolvedValueOnce(
       runOut({

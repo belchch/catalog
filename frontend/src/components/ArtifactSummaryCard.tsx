@@ -1,4 +1,9 @@
-import { parseStepsArtifact, type ArtifactType, type SessionArtifact } from '../api.ts'
+import {
+  parseStepsArtifact,
+  type ArtifactType,
+  type PipelineStepDraft,
+  type SessionArtifact,
+} from '../api.ts'
 
 interface ArtifactSummaryCardProps {
   artifacts: SessionArtifact[]
@@ -35,6 +40,14 @@ function isRowReady(type: ArtifactType, artifacts: SessionArtifact[]): boolean {
   return art.content.trim().length > 0
 }
 
+function promptRequired(steps: PipelineStepDraft[]): boolean {
+  return steps.some((step) => step.type === 'llm' && !step.system_prompt.trim())
+}
+
+function scriptRequired(steps: PipelineStepDraft[]): boolean {
+  return steps.some((step) => step.type === 'script' && !step.code.trim())
+}
+
 export function ArtifactSummaryCard({
   artifacts,
   loading,
@@ -46,9 +59,16 @@ export function ArtifactSummaryCard({
   const visible: ArtifactType[] = hasSteps
     ? ['meta', 'steps', 'prompt', 'script']
     : baseTypes
-  const readyCount = visible.filter((type) => isRowReady(type, artifacts)).length
   const stepsArt = artifacts.find((item) => item.type === 'steps')
   const parsedSteps = stepsArt ? parseStepsArtifact(stepsArt.content).steps : []
+  const needPrompt = !hasSteps || promptRequired(parsedSteps)
+  const needScript = !hasSteps || scriptRequired(parsedSteps)
+  const required = visible.filter((type) => {
+    if (type === 'prompt') return needPrompt
+    if (type === 'script') return needScript
+    return true
+  })
+  const readyCount = required.filter((type) => isRowReady(type, artifacts)).length
 
   return (
     <aside className="artifact-summary" aria-label="Черновик скилла">
@@ -66,7 +86,7 @@ export function ArtifactSummaryCard({
         {streaming
           ? 'Планировщик обновляет черновик…'
           : readyCount > 0
-            ? `Готово ${readyCount} из ${visible.length} разделов`
+            ? `Готово ${readyCount} из ${required.length} разделов`
             : 'Артефакты появятся по мере работы с чатом'}
       </p>
 
@@ -74,7 +94,9 @@ export function ArtifactSummaryCard({
         <p className="artifact-summary__label">Содержимое</p>
         <ul className="artifact-summary__list">
           {visible.map((type) => {
-            const ready = isRowReady(type, artifacts)
+            const needed =
+              type === 'prompt' ? needPrompt : type === 'script' ? needScript : true
+            const ready = needed && isRowReady(type, artifacts)
             return (
               <li key={type}>
                 <span className={ready ? 'artifact-status artifact-status--ready' : 'artifact-status'}>
@@ -86,6 +108,9 @@ export function ArtifactSummaryCard({
                 )}
                 {type !== 'steps' && ready && (
                   <span className="artifact-summary__ready">готово</span>
+                )}
+                {type !== 'steps' && !needed && (
+                  <span className="artifact-summary__ready">не требуется</span>
                 )}
               </li>
             )

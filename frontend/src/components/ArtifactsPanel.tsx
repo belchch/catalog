@@ -2,6 +2,7 @@ import { useEffect, useId, useRef, useState, type ReactNode } from 'react'
 import {
   parseStepsArtifact,
   type ArtifactType,
+  type PipelineStepDraft,
   type SessionArtifact,
   type SkillKind,
   type SkillMetaPatch,
@@ -64,6 +65,24 @@ function findArtifact(
   type: ArtifactType,
 ): SessionArtifact | undefined {
   return artifacts.find((a) => a.type === type)
+}
+
+function pipelinePromptHint(steps: PipelineStepDraft[]): string {
+  const llmSteps = steps.filter((step) => step.type === 'llm')
+  if (llmSteps.length === 0) return 'pipeline: llm-шагов нет — промпт не нужен'
+  if (llmSteps.every((step) => step.system_prompt.trim())) {
+    return 'pipeline: у всех llm-шагов свой промпт'
+  }
+  return 'pipeline: подставится в первый llm-шаг без своего промпта'
+}
+
+function pipelineScriptHint(steps: PipelineStepDraft[]): string {
+  const scriptSteps = steps.filter((step) => step.type === 'script')
+  if (scriptSteps.length === 0) return 'pipeline: script-шагов нет — код не нужен'
+  if (scriptSteps.every((step) => step.code.trim())) {
+    return 'pipeline: у всех script-шагов свой код'
+  }
+  return 'pipeline: подставится в первый script-шаг без своего кода'
 }
 
 function parseVerifyChecks(raw: unknown): VerifyCheckDraft[] {
@@ -718,7 +737,7 @@ export function ArtifactsPanel({
             )}
             {hasMeta && kind === 'pipeline' && (
               <p className="mb-1 text-[10px] text-ink-faint">
-                pipeline: подставится в первый llm-шаг без своего промпта
+                {pipelinePromptHint(parsedSteps.steps)}
               </p>
             )}
             <textarea
@@ -768,7 +787,7 @@ export function ArtifactsPanel({
             )}
             {hasMeta && kind === 'pipeline' && (
               <p className="mb-1 text-[10px] text-ink-faint">
-                pipeline: подставится в первый script-шаг без своего кода
+                {pipelineScriptHint(parsedSteps.steps)}
               </p>
             )}
             <textarea

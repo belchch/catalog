@@ -1,11 +1,11 @@
-import type { PipelineStepDraft } from '../api.ts'
+import type { PipelineStepDraft, PipelineStepType } from '../api.ts'
 
 const PRE_CLS =
   'mt-1 overflow-auto max-h-40 whitespace-pre-wrap break-words rounded bg-surface-muted p-1.5 font-mono text-[11px] text-ink-muted'
 
 function firstEmptyIndex(
   steps: PipelineStepDraft[],
-  type: PipelineStepDraft['type'],
+  type: PipelineStepType,
   field: 'code' | 'system_prompt',
 ): number {
   return steps.findIndex((step) => step.type === type && !step[field].trim())
@@ -13,6 +13,50 @@ function firstEmptyIndex(
 
 function orDefault(value: string): string {
   return value.trim() || 'по умолчанию скила'
+}
+
+function typeBadge(type: PipelineStepType): { className: string; label: string } {
+  if (type === 'script') return { className: 'badge-info', label: 'SCRIPT' }
+  if (type === 'llm') return { className: 'badge-accent', label: 'LLM' }
+  return { className: 'badge-success', label: 'SKILL' }
+}
+
+function shortPin(hash: string): string {
+  return hash.length > 8 ? hash.slice(0, 8) : hash
+}
+
+function SkillStepDetails({ step }: { step: PipelineStepDraft }) {
+  if (step.skill_name.trim()) {
+    const kind = step.skill_kind.trim()
+    return (
+      <>
+        <p className="mt-1 text-[11px] text-ink-muted">
+          {kind ? `${step.skill_name} · ${kind}` : step.skill_name}
+        </p>
+        {step.config_hash.trim() ? (
+          <p className="mt-1 text-[11px] text-ink-muted">
+            пин{' '}
+            <span className="font-mono" title={step.config_hash}>
+              {shortPin(step.config_hash)}
+            </span>
+          </p>
+        ) : null}
+      </>
+    )
+  }
+  if (step.skill_id.trim()) {
+    return (
+      <>
+        <p className="mt-1 break-words font-mono text-[11px] text-ink-muted">
+          id: {step.skill_id}
+        </p>
+        <p className="mt-1 text-[10px] text-ink-faint">
+          имя и пин появятся при сборке
+        </p>
+      </>
+    )
+  }
+  return <p className="mt-1 text-[11px] text-warning-ink">скилл не выбран</p>
 }
 
 export function StepsList({ steps }: { steps: PipelineStepDraft[] }) {
@@ -23,6 +67,7 @@ export function StepsList({ steps }: { steps: PipelineStepDraft[] }) {
     <ol className="flex flex-col gap-1.5">
       {steps.map((step, index) => {
         const idLabel = step.id.trim() ? step.id : '(без id)'
+        const badge = typeBadge(step.type)
         return (
           <li key={step.id || index}>
             <div className="flex flex-wrap items-center gap-2 text-[11px]">
@@ -35,9 +80,7 @@ export function StepsList({ steps }: { steps: PipelineStepDraft[] }) {
               >
                 {idLabel}
               </span>
-              <span className={step.type === 'script' ? 'badge-info' : 'badge-accent'}>
-                {step.type === 'script' ? 'SCRIPT' : 'LLM'}
-              </span>
+              <span className={badge.className}>{badge.label}</span>
               <span className="badge-neutral">
                 {step.input === 'documents' ? 'документы' : 'предыдущий'}
               </span>
@@ -56,7 +99,7 @@ export function StepsList({ steps }: { steps: PipelineStepDraft[] }) {
                 ) : (
                   <p className="mt-1 text-[11px] text-warning-ink">код не задан</p>
                 )
-              ) : (
+              ) : step.type === 'llm' ? (
                 <>
                   {step.system_prompt.trim() ? (
                     <pre className={PRE_CLS}>{step.system_prompt}</pre>
@@ -74,6 +117,8 @@ export function StepsList({ steps }: { steps: PipelineStepDraft[] }) {
                     {step.allowed_tools.length > 0 ? step.allowed_tools.join(', ') : '—'}
                   </p>
                 </>
+              ) : (
+                <SkillStepDetails step={step} />
               )}
             </details>
           </li>

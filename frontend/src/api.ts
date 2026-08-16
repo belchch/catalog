@@ -620,7 +620,7 @@ export type ArtifactType = 'prompt' | 'script' | 'meta' | 'steps'
 
 export type SkillKind = 'agent' | 'script' | 'pipeline'
 
-export type PipelineStepType = 'script' | 'llm'
+export type PipelineStepType = 'script' | 'llm' | 'skill'
 
 export type PipelineStepInput = 'documents' | 'previous'
 
@@ -634,6 +634,10 @@ export interface PipelineStepDraft {
   model: string
   provider: string
   reasoning: string
+  skill_id: string
+  skill_name: string
+  config_hash: string
+  skill_kind: string
 }
 
 export function parseStepsArtifact(content: string): {
@@ -687,9 +691,14 @@ function normalizePipelineStep(
       : typeof data.prompt === 'string'
         ? data.prompt
         : ''
+  const config =
+    data.config && typeof data.config === 'object' && !Array.isArray(data.config)
+      ? (data.config as Record<string, unknown>)
+      : null
+  const skillKind = typeof config?.kind === 'string' ? config.kind : ''
   return {
     id: typeof data.id === 'string' ? data.id : '',
-    type: rawType === 'llm' ? 'llm' : 'script',
+    type: rawType === 'llm' ? 'llm' : rawType === 'skill' ? 'skill' : 'script',
     input:
       rawInput === 'documents' || rawInput === 'previous'
         ? rawInput
@@ -702,6 +711,10 @@ function normalizePipelineStep(
     model: typeof data.model === 'string' ? data.model : '',
     provider: typeof data.provider === 'string' ? data.provider : '',
     reasoning: typeof data.reasoning === 'string' ? data.reasoning : '',
+    skill_id: typeof data.skill_id === 'string' ? data.skill_id : '',
+    skill_name: typeof data.skill_name === 'string' ? data.skill_name : '',
+    config_hash: typeof data.config_hash === 'string' ? data.config_hash : '',
+    skill_kind: skillKind,
   }
 }
 

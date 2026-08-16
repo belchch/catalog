@@ -73,4 +73,51 @@ describe('parseStepsArtifact', () => {
     expect(parseError).toBeNull()
     expect(steps.map((s) => s.id)).toEqual(['ok'])
   })
+
+  it('keeps type skill and reads snapshot fields from config.kind', () => {
+    const { steps, parseError } = parseStepsArtifact(
+      JSON.stringify({
+        steps: [
+          {
+            id: 'call_summary',
+            type: 'skill',
+            input: 'previous',
+            skill_id: 'sk_7f3',
+            skill_name: 'Сводка',
+            config_hash: '1a2b3c4dffff',
+            config: { kind: 'agent', system_prompt: 'x' },
+          },
+        ],
+      }),
+    )
+    expect(parseError).toBeNull()
+    expect(steps[0]).toMatchObject({
+      id: 'call_summary',
+      type: 'skill',
+      input: 'previous',
+      skill_id: 'sk_7f3',
+      skill_name: 'Сводка',
+      config_hash: '1a2b3c4dffff',
+      skill_kind: 'agent',
+    })
+  })
+
+  it('tolerates a skill step without snapshot fields', () => {
+    const { steps, parseError } = parseStepsArtifact(
+      JSON.stringify([{ type: 'skill', skill_id: 'sk_draft' }]),
+    )
+    expect(parseError).toBeNull()
+    expect(steps[0]).toMatchObject({
+      type: 'skill',
+      skill_id: 'sk_draft',
+      skill_name: '',
+      config_hash: '',
+      skill_kind: '',
+    })
+  })
+
+  it('still normalizes an unknown type to script', () => {
+    const { steps } = parseStepsArtifact(JSON.stringify([{ type: 'other' }]))
+    expect(steps[0].type).toBe('script')
+  })
 })
