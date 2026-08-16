@@ -107,7 +107,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         await http_client.aclose()
 
 
-app = FastAPI(title="Catalogue API", version="0.1.0", lifespan=lifespan)
+app = FastAPI(title="Catalog API", version="0.1.0", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
