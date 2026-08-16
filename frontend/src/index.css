@@ -7,35 +7,35 @@
   font-synthesis: none;
 
   --surface: #ffffff;
-  --surface-muted: #f5f6f6;
-  --surface-sunken: #e0e0e0;
-  --surface-hover: #f0f0f0;
-  --sidebar: #f8f8f8;
-  --sidebar-line: #e8e8e8;
-  --sidebar-ink: #2e3236;
-  --sidebar-brand-hover: #f0f0f0;
-  --sidebar-selected: #ececec;
-  --sidebar-selected-ink: #1e2225;
-  --header-line: #ededed;
+  --surface-muted: #f5f2fb;
+  --surface-sunken: #e5def3;
+  --surface-hover: #efe9f9;
+  --sidebar: #f6f2fc;
+  --sidebar-line: #e5dcf4;
+  --sidebar-ink: #2f2b38;
+  --sidebar-brand-hover: #ede5f9;
+  --sidebar-selected: #e3d7f8;
+  --sidebar-selected-ink: #241d33;
+  --header-line: #e5dcf4;
   --header-folder: #585858;
   --notice-line: #f2d5aa;
   --notice-bg: #fff8ed;
   --notice-ink: #805314;
 
-  --line: #ebebeb;
-  --line-strong: #c9c9c9;
-  --line-brand: #4b9fcf;
+  --line: #e9e3f4;
+  --line-strong: #c9bce2;
+  --line-brand: #a78bfa;
 
-  --ink: #292c31;
-  --ink-muted: #4e5257;
-  --ink-faint: #5f6368;
-  --ink-placeholder: #6b7075;
+  --ink: #2b2733;
+  --ink-muted: #504a5c;
+  --ink-faint: #615b6d;
+  --ink-placeholder: #6e6879;
 
-  --brand: #1d83c4;
-  --brand-hover: #146fa9;
-  --brand-soft: #e1f1fa;
-  --brand-ink: #155e91;
-  --brand-link-hover: #0c6ba5;
+  --brand: #7c3aed;
+  --brand-hover: #6b2fd6;
+  --brand-soft: #efe8fc;
+  --brand-ink: #5b21b6;
+  --brand-link-hover: #6d28d9;
 
   --danger: #d64545;
   --danger-hover: #be3b3b;
@@ -53,25 +53,40 @@
   --warning-ink: #8a5a12;
   --warning-line: #f2d5aa;
 
-  --info-soft: #e1f1fa;
-  --info-ink: #155e91;
+  --info-soft: #e7e9fd;
+  --info-ink: #4338ca;
 
+  --accent: #7c3aed;
+  --accent-hover: #6b2fd6;
   --accent-soft: #efe6f8;
   --accent-ink: #7a3ea6;
+  --accent-line: #dcc9f6;
+  --accent-grad-a: #8b5cf6;
+  --accent-grad-b: #d946ef;
+  --accent-grad-a-strong: #7c3aed;
+  --accent-grad-b-strong: #c026d3;
+  --glow-violet: rgba(139, 92, 246, 0.18);
+  --glow-fuchsia: rgba(217, 70, 239, 0.10);
 
-  --overlay: rgba(0, 0, 0, 0.32);
-  --shadow-card: 0 1px 2px rgba(16, 16, 16, 0.04), 0 10px 30px rgba(16, 16, 16, 0.06);
+  --teal-soft: #e0f5f2;
+  --teal-ink: #1a6b63;
+
+  --rose-soft: #f9e8ef;
+  --rose-ink: #9b3d5c;
+
+  --overlay: rgba(28, 12, 58, 0.38);
+  --shadow-card: 0 1px 2px rgba(76, 29, 149, 0.05), 0 10px 30px rgba(76, 29, 149, 0.08);
   --radius-control: 8px;
   --radius-card: 20px;
   --radius-card-lg: 24px;
 
-  --user-bubble: #e6f2f9;
-  --user-bubble-ink: #263640;
-  --md-code-bg: #f2f2f2;
-  --md-pre-bg: #f7f7f7;
-  --md-pre-line: #e6e6e6;
-  --md-table-line: #e1e1e1;
-  --md-quote-line: #9cc6de;
+  --user-bubble: #f0e9fd;
+  --user-bubble-ink: #37304a;
+  --md-code-bg: #f1ecfa;
+  --md-pre-bg: #f7f4fd;
+  --md-pre-line: #e5dcf4;
+  --md-table-line: #dbd0ee;
+  --md-quote-line: #c4b5fd;
   --md-quote-ink: #6c6c6c;
   --artifact-muted: #909090;
   --artifact-title: #333333;
@@ -79,14 +94,13 @@
   --artifact-label: #838383;
   --artifact-item: #585858;
   --artifact-ready-meta: #8e8e8e;
-  --artifact-open: #166ea7;
-  --artifact-open-hover: #f4fafc;
+  --artifact-open: #6d28d9;
+  --artifact-open-hover: #faf7fe;
   --icon-button: #6e6e6e;
-  --icon-button-hover: #f1f1f1;
-  --composer-fade: linear-gradient(0deg, var(--surface) 74%, rgba(255, 255, 255, 0.86));
-  --header-bg: rgba(255, 255, 255, 0.96);
+  --icon-button-hover: #efe9f9;
+  --composer-fade: linear-gradient(0deg, rgba(255, 255, 255, 0.94) 74%, rgba(255, 255, 255, 0.72));
+  --header-bg: rgba(246, 242, 252, 0.96);
   --search-bg: #ffffff;
-  --mark-bg: #3c4043;
 
   color: var(--ink);
   background: var(--surface);
@@ -113,6 +127,23 @@ html, body, #root {
     @apply bg-brand hover:bg-brand-hover active:bg-brand-hover;
     @apply focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand;
     @apply disabled:cursor-not-allowed disabled:bg-surface-muted disabled:text-ink-faint;
+  }
+  .btn-accent {
+    @apply inline-flex items-center justify-center rounded-control px-3 py-1 text-xs font-medium text-white transition-all;
+    @apply focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent;
+    @apply disabled:cursor-not-allowed disabled:text-ink-faint;
+    background-image: linear-gradient(135deg, var(--accent-grad-a), var(--accent-grad-b));
+    box-shadow: 0 1px 2px rgba(109, 40, 217, 0.22), 0 4px 14px rgba(139, 92, 246, 0.28);
+  }
+  .btn-accent:hover:not(:disabled),
+  .btn-accent:active:not(:disabled) {
+    background-image: linear-gradient(135deg, var(--accent-grad-a-strong), var(--accent-grad-b-strong));
+    box-shadow: 0 1px 2px rgba(109, 40, 217, 0.28), 0 6px 18px rgba(192, 38, 211, 0.32);
+  }
+  .btn-accent:disabled {
+    background-image: none;
+    box-shadow: none;
+    @apply bg-surface-muted;
   }
   .btn-secondary {
     @apply inline-flex items-center justify-center rounded-control px-3 py-1 text-xs text-ink-muted transition-colors;
@@ -203,6 +234,12 @@ html, body, #root {
   .badge-danger {
     @apply inline-flex items-center rounded bg-danger-soft px-1.5 py-0.5 text-[10px] uppercase text-danger-ink;
   }
+  .badge-teal {
+    @apply inline-flex items-center rounded bg-teal-soft px-1.5 py-0.5 text-[10px] uppercase text-teal-ink;
+  }
+  .badge-rose {
+    @apply inline-flex items-center rounded bg-rose-soft px-1.5 py-0.5 text-[10px] uppercase text-rose-ink;
+  }
   .badge-neutral {
     @apply inline-flex items-center rounded bg-surface-sunken px-1.5 py-0.5 text-[10px] uppercase text-ink-faint;
   }
@@ -243,7 +280,12 @@ html, body, #root {
   color: var(--notice-ink);
 }
 .catalog-layout { min-height: 0; grid-template-rows: minmax(0, 1fr); }
-.catalog-main { background: var(--surface); }
+.catalog-main {
+  background:
+    radial-gradient(640px 360px at 82% -120px, var(--glow-violet), transparent 70%),
+    radial-gradient(520px 300px at 4% -60px, var(--glow-fuchsia), transparent 70%),
+    var(--surface);
+}
 
 .catalog-sidebar {
   gap: 4px;
@@ -254,7 +296,8 @@ html, body, #root {
 .catalog-mark {
   display: inline-flex; align-items: center; justify-content: center;
   width: 23px; height: 23px; border-radius: 50%;
-  background: var(--mark-bg); color: var(--surface);
+  background: linear-gradient(135deg, var(--accent-grad-a), var(--accent-grad-b));
+  color: var(--surface);
   font-size: 12px; font-weight: 700;
 }
 .catalog-search {

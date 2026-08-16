@@ -81,7 +81,11 @@ export function StepsList({ steps }: { steps: PipelineStepDraft[] }) {
                 {idLabel}
               </span>
               <span className={badge.className}>{badge.label}</span>
-              <span className="badge-neutral">
+              <span
+                className={
+                  step.input === 'documents' ? 'badge-teal' : 'badge-rose'
+                }
+              >
                 {step.input === 'documents' ? 'документы' : 'предыдущий'}
               </span>
             </div>

@@ -93,7 +93,7 @@ export function DocumentList({
               title={d.title}
               onClick={() => onSelect(d.id)}
             >
-              <span className="badge-neutral mr-1">{d.kind}</span>
+              <span className="badge-teal mr-1">{d.kind}</span>
               {d.title}
             </button>
           </li>

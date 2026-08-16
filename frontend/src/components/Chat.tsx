@@ -261,7 +261,7 @@ export function Chat({
           </p>
           <button
             type="button"
-            className="btn-secondary shrink-0"
+            className="btn-accent shrink-0"
             onClick={onCreateSkill}
             disabled={skillBusy || messages.length === 0}
             aria-busy={skillBusy}
@@ -317,7 +317,7 @@ export function Chat({
               <button
                 key={s}
                 type="button"
-                className="chip max-w-full text-left transition-colors hover:border-line-brand hover:bg-surface-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand disabled:cursor-not-allowed disabled:bg-surface-muted disabled:text-ink-faint"
+                className="chip max-w-full text-left transition-colors hover:border-accent-line hover:bg-accent-soft hover:text-accent-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent disabled:cursor-not-allowed disabled:bg-surface-muted disabled:text-ink-faint"
                 onClick={() => sendCurrent(s)}
                 disabled={liveStreaming || socketDown}
               >

@@ -122,7 +122,7 @@ export function SkillTrackPicker({
                   <div className="mt-0.5 text-[11px] text-ink-muted">{track.operation}</div>
                   <div className="mt-0.5 text-[11px] text-ink-faint">{track.rationale}</div>
                 </div>
-                <span className="badge-neutral shrink-0">{arityLabel(track.input_arity)}</span>
+                <span className="badge-rose shrink-0">{arityLabel(track.input_arity)}</span>
               </button>
             )
           })}

@@ -51,8 +51,19 @@ module.exports = {
           ink: "var(--info-ink)",
         },
         accent: {
+          DEFAULT: "var(--accent)",
+          hover: "var(--accent-hover)",
           soft: "var(--accent-soft)",
           ink: "var(--accent-ink)",
+          line: "var(--accent-line)",
+        },
+        teal: {
+          soft: "var(--teal-soft)",
+          ink: "var(--teal-ink)",
+        },
+        rose: {
+          soft: "var(--rose-soft)",
+          ink: "var(--rose-ink)",
         },
       },
       borderRadius: {
