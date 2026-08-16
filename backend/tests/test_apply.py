@@ -12,6 +12,7 @@ from catalog.agent.events import (
     RunMetaEvent,
     ScriptEvent,
     StepEvent,
+    TokenEvent,
     VerifyEvent,
 )
 from catalog.agent.registry import ToolRegistry
@@ -307,6 +308,50 @@ def test_apply_retry_then_success(db: Database, workspace: Path) -> None:
     assert verify_entries[1].data["passed"] is True
     assert verify_entries[1].data["failures"] == []
     assert verify_entries[1].data["checks"][0]["passed"] is True
+
+
+def test_apply_retry_emits_snapshot_token_per_attempt(
+    db: Database, workspace: Path
+) -> None:
+    skill = _make_skill(
+        verify_checks=[VerifyCheck("has_section", params={"heading": "Summary"})],
+        max_retries=2,
+    )
+    skill_id = create_skill(
+        db, name=skill.name, description=skill.description, config=skill
+    )
+    input_doc_id = _ingest_input(db, workspace)
+    provider = ScriptProvider(
+        [
+            _result("Just plain text without a heading."),
+            _result("# Summary\n\nFixed version."),
+        ]
+    )
+
+    events = asyncio.run(
+        _collect_events(
+            apply_skill(
+                provider=provider,
+                db=db,
+                workspace_dir=str(workspace),
+                skill=skill,
+                skill_id=skill_id,
+                input_doc_ids=[input_doc_id],
+                base_tools=build_document_tools(db, workspace),
+            )
+        )
+    )
+
+    tokens = [e for e in events if isinstance(e, TokenEvent)]
+    assert [t.delta for t in tokens] == [
+        "Just plain text without a heading.",
+        "# Summary\n\nFixed version.",
+    ]
+    verifies = [e for e in events if isinstance(e, VerifyEvent)]
+    token_indexes = [i for i, e in enumerate(events) if isinstance(e, TokenEvent)]
+    verify_indexes = [i for i, e in enumerate(events) if isinstance(e, VerifyEvent)]
+    assert len(verifies) == 2
+    assert token_indexes[0] < verify_indexes[0] < token_indexes[1] < verify_indexes[1]
 
 
 def test_apply_verify_never_passes(db: Database, workspace: Path) -> None:

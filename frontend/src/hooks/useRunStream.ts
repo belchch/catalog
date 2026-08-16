@@ -83,7 +83,6 @@ export function useRunStream(runId: string | null): UseRunStreamResult {
   const [cancelling, setCancelling] = useState(false)
   const [closed, setClosed] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const bufferRef = useRef<string>('')
   const connRef = useRef<RunConnection | null>(null)
 
   const handleEvent = useCallback((e: ServerEvent) => {
@@ -110,8 +109,7 @@ export function useRunStream(runId: string | null): UseRunStreamResult {
         ])
         break
       case 'token':
-        bufferRef.current += e.delta
-        setResultText(bufferRef.current)
+        setResultText(e.delta)
         break
       case 'tool_call':
         setSteps((prev) => [
@@ -221,7 +219,6 @@ export function useRunStream(runId: string | null): UseRunStreamResult {
     setOutputDocId(null)
     setClosed(false)
     setError(null)
-    bufferRef.current = ''
 
     const conn = connectRun(runId, handleEvent, {
       onClose: () => setClosed(true),
