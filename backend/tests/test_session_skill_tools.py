@@ -334,6 +334,68 @@ def test_session_skill_tool_runs_pipeline_and_pins(db: Database) -> None:
     assert verify[0]["data"]["passed"] is True
 
 
+def test_session_pipeline_skill_step_nested_run(db: Database) -> None:
+    sid = create_session(db)
+    inner = SkillConfig(
+        name="Inner",
+        description="upper",
+        system_prompt="",
+        allowed_tools=[],
+        model="x",
+        kind="script",
+        code="def main(document):\n    return document.upper()\n",
+        verify_checks=[VerifyCheck(check="non_empty")],
+    )
+    skill_id = _pipeline_skill(
+        db,
+        steps=[
+            PipelineStep(
+                id="call",
+                type="skill",
+                input="documents",
+                skill_id="inner-id",
+                skill_name="Inner",
+                config_hash="deadbeef",
+                config=inner,
+            ),
+        ],
+    )
+    attach_skills(db, sid, [skill_id])
+    record = get_skill(db, skill_id)
+    assert record is not None
+    name = skill_tool_name(record, used=set())
+    budget = SkillBudget(llm_calls_left=60, nested_runs_left=20)
+    tools = build_session_skill_tools(
+        db,
+        sid,
+        workspace_dir="/tmp",
+        base_tools=ToolRegistry(),
+        budget=budget,
+    )
+    _, fn = tools.get(name)
+    assert fn is not None
+    out = asyncio.run(fn(text="hello"))
+    assert out["ok"] is True
+    assert out["text"] == "HELLO"
+    assert out["depth"] == 1
+    parent = get_run(db, out["run_id"])
+    assert parent is not None
+    assert parent["parent_run_id"] == SESSION_TOOL_PARENT_RUN_ID
+    entries = json.loads(parent["trace_json"] or "[]")
+    nested = [
+        e
+        for e in entries
+        if e["kind"] == "tool_result" and e.get("data", {}).get("step_id") == "call"
+    ]
+    assert nested
+    child = get_run(db, nested[0]["data"]["run_id"])
+    assert child is not None
+    assert child["parent_run_id"] == out["run_id"]
+    assert child["result_text"] == "HELLO"
+    assert budget.llm_calls_left == 60
+    assert budget.nested_runs_left == 18
+
+
 def test_session_pipeline_llm_step_uses_provider(db: Database) -> None:
     sid = create_session(db)
     skill_id = _pipeline_skill(

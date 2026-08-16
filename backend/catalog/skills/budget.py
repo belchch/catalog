@@ -13,6 +13,18 @@ TURN_DEADLINE_FLOOR_SECONDS = 600
 TURN_DEADLINE_TIMEOUT_FACTOR = 15
 
 
+@dataclass(frozen=True)
+class SkillCallContext:
+    depth: int = 0
+    chain: tuple[str, ...] = ()
+
+    def nested(self, skill_id: str) -> SkillCallContext:
+        return SkillCallContext(
+            depth=self.depth + 1,
+            chain=self.chain + (skill_id,),
+        )
+
+
 def turn_deadline_seconds(llm_timeout_seconds: int) -> int:
     return max(
         TURN_DEADLINE_FLOOR_SECONDS,
@@ -133,6 +145,16 @@ def nested_deadline_exceeded(now: float | None = None) -> bool:
     if budget is None:
         return False
     return budget.mark_deadline_if_exceeded(now)
+
+
+def current_skill_budget(explicit: SkillBudget | None = None) -> SkillBudget | None:
+    if explicit is not None:
+        return explicit
+    return _active_budget.get()
+
+
+def skill_hold_active() -> bool:
+    return bool(_hold_stack.get())
 
 
 @contextmanager

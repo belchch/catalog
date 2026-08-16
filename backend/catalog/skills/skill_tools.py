@@ -3,7 +3,6 @@ from __future__ import annotations
 import hashlib
 import re
 from collections.abc import AsyncIterator
-from dataclasses import dataclass
 from typing import Any
 
 from catalog.agent.registry import ToolRegistry
@@ -16,9 +15,10 @@ from catalog.llm.base import (
     StreamDelta,
     ToolSpec,
 )
-from catalog.skills.apply import apply_skill_collect
+from catalog.skills.apply import apply_nested_skill_collect
 from catalog.skills.budget import (
     SkillBudget,
+    SkillCallContext,
     estimate_skill_budget,
     estimate_skill_llm_calls,
     nested_skill_hold,
@@ -31,19 +31,6 @@ from catalog.storage.db import Database
 from catalog.storage.repo_session_skill import list_session_skills
 
 SESSION_TOOL_PARENT_RUN_ID = "session"
-
-
-@dataclass(frozen=True)
-class SkillCallContext:
-    depth: int = 0
-    chain: tuple[str, ...] = ()
-
-    def nested(self, skill_id: str) -> SkillCallContext:
-        return SkillCallContext(
-            depth=self.depth + 1,
-            chain=self.chain + (skill_id,),
-        )
-
 
 _SLUG_RE = re.compile(r"[^a-z0-9]+")
 _RESERVED = frozenset(
@@ -320,21 +307,21 @@ def build_session_skill_tools(
                             needed_runs=needed_runs,
                         )
                 with nested_skill_hold(hold, _budget):
-                    result = await apply_skill_collect(
+                    result = await apply_nested_skill_collect(
                         provider=_provider,
                         db=db,
                         workspace_dir=workspace_dir,
                         skill=_config,
                         skill_id=_skill_id,
-                        input_doc_ids=[],
                         base_tools=apply_tools,
                         session_id=session_id,
                         input_texts=input_texts,
-                        persist=False,
                         parent_run_id=SESSION_TOOL_PARENT_RUN_ID,
                         fallback_model=fallback_model,
                         providers=providers,
                         call_context=nested,
+                        budget=_budget,
+                        max_skill_depth=_max_depth,
                     )
             except Exception as exc:
                 return {

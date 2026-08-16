@@ -292,6 +292,9 @@ async def run_stream_ws(websocket: WebSocket, run_id: str) -> None:
                         getattr(websocket.app.state, "active_model", None)
                         or getattr(websocket.app.state.settings, "default_model", "")
                     ),
+                    max_skill_depth=getattr(
+                        websocket.app.state.settings, "max_skill_depth", 2
+                    ),
                 )
             )
             receive_task = asyncio.create_task(websocket.receive_text())
@@ -361,6 +364,7 @@ async def _stream_apply(
     user_prompt: str | None = None,
     providers: dict[str, LLMProvider] | None = None,
     fallback_model: str = "",
+    max_skill_depth: int = 2,
 ) -> None:
     """Drive ``apply_skill`` and forward every event frame to the socket."""
     async for event in apply_skill(
@@ -378,6 +382,7 @@ async def _stream_apply(
         user_prompt=user_prompt,
         providers=providers,
         fallback_model=fallback_model,
+        max_skill_depth=max_skill_depth,
     ):
         frame = agent_event_to_frame(event)
         if frame is not None:

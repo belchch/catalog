@@ -27,7 +27,8 @@ from catalog.llm.base import (
     ToolCall,
     ToolSpec,
 )
-from catalog.skills.apply import apply_skill, apply_skill_collect
+from catalog.skills.apply import PipelineStepError, apply_skill, apply_skill_collect
+from catalog.skills.budget import SkillBudget, SkillCallContext
 from catalog.skills.artifact_tools import (
     resolve_pipeline_skill_steps,
     validate_pipeline_steps,
@@ -1612,6 +1613,354 @@ def test_apply_pipeline_previous_on_first_step_fails(
         ).fetchone()
     assert row is not None
     assert row["status"] == "failed"
+
+
+def _inner_script(
+    *,
+    name: str = "Inner",
+    code: str = "result = document.upper()\n",
+    verify_checks: list[VerifyCheck] | None = None,
+) -> SkillConfig:
+    return SkillConfig(
+        name=name,
+        description="inner script",
+        system_prompt="",
+        allowed_tools=[],
+        model="test/model",
+        kind="script",
+        code=code,
+        verify_checks=verify_checks if verify_checks is not None else [],
+    )
+
+
+def _pipeline_with_skill_step(
+    inner: SkillConfig,
+    *,
+    skill_id: str = "inner-id",
+    extra_steps: list[PipelineStep] | None = None,
+    verify_checks: list[VerifyCheck] | None = None,
+) -> SkillConfig:
+    steps = [
+        PipelineStep(
+            id="call",
+            type="skill",
+            input="documents",
+            skill_id=skill_id,
+            skill_name=inner.name,
+            config_hash="deadbeef",
+            config=inner,
+        ),
+        *(extra_steps or []),
+    ]
+    return SkillConfig(
+        name="pipe-skill",
+        description="pipeline with skill step",
+        system_prompt="",
+        allowed_tools=[],
+        model="test/model",
+        kind="pipeline",
+        verify_checks=verify_checks if verify_checks is not None else [],
+        steps=steps,
+    )
+
+
+def test_apply_pipeline_skill_step_creates_nested_run(
+    db: Database, workspace: Path
+) -> None:
+    inner = _inner_script()
+    skill = _pipeline_with_skill_step(inner)
+    skill_id = create_skill(
+        db, name=skill.name, description=skill.description, config=skill
+    )
+    input_doc_id = _ingest_input(db, workspace)
+    result = asyncio.run(
+        apply_skill_collect(
+            provider=ScriptProvider([]),
+            db=db,
+            workspace_dir=str(workspace),
+            skill=skill,
+            skill_id=skill_id,
+            input_doc_ids=[input_doc_id],
+            base_tools=build_document_tools(db, workspace),
+            persist=False,
+        )
+    )
+    assert result.status == "ok"
+    assert result.result_text == "SOURCE TEXT"
+    assert result.run_id
+    nested = [
+        e
+        for e in result.trace.entries
+        if e.kind == "tool_result" and e.data.get("step_id") == "call"
+    ]
+    assert nested
+    assert nested[0].data["run_id"]
+    assert nested[0].data["skill_name"] == "Inner"
+    assert nested[0].data["config_hash"] == "deadbeef"
+    assert nested[0].data["depth"] == 1
+    child = get_run(db, nested[0].data["run_id"])
+    assert child is not None
+    assert child["parent_run_id"] == result.run_id
+    assert child["persist"] is False
+    assert child["result_text"] == "SOURCE TEXT"
+    assert child["status"] == "ok"
+
+
+def test_apply_pipeline_skill_step_feeds_next_step(
+    db: Database, workspace: Path
+) -> None:
+    inner = _inner_script()
+    skill = _pipeline_with_skill_step(
+        inner,
+        extra_steps=[
+            PipelineStep(
+                id="suffix",
+                type="script",
+                input="previous",
+                code="result = document + '\\nEND'\n",
+            ),
+        ],
+    )
+    skill_id = create_skill(
+        db, name=skill.name, description=skill.description, config=skill
+    )
+    input_doc_id = _ingest_input(db, workspace)
+    result = asyncio.run(
+        apply_skill_collect(
+            provider=ScriptProvider([]),
+            db=db,
+            workspace_dir=str(workspace),
+            skill=skill,
+            skill_id=skill_id,
+            input_doc_ids=[input_doc_id],
+            base_tools=build_document_tools(db, workspace),
+            persist=False,
+        )
+    )
+    assert result.status == "ok"
+    assert result.result_text == "SOURCE TEXT\nEND"
+    step_ids = {
+        e.data.get("step_id")
+        for e in result.trace.entries
+        if e.data.get("step_id")
+    }
+    assert "call" in step_ids
+    assert "suffix" in step_ids
+
+
+def test_apply_pipeline_skill_step_verify_fail_stops(
+    db: Database, workspace: Path
+) -> None:
+    inner = _inner_script(
+        verify_checks=[VerifyCheck("has_section", params={"heading": "Missing"})],
+    )
+    skill = _pipeline_with_skill_step(
+        inner,
+        extra_steps=[
+            PipelineStep(
+                id="suffix",
+                type="script",
+                input="previous",
+                code="result = document + '\\nEND'\n",
+            ),
+        ],
+    )
+    skill_id = create_skill(
+        db, name=skill.name, description=skill.description, config=skill
+    )
+    input_doc_id = _ingest_input(db, workspace)
+    with pytest.raises(PipelineStepError, match="nested skill failed"):
+        asyncio.run(
+            apply_skill_collect(
+                provider=ScriptProvider([]),
+                db=db,
+                workspace_dir=str(workspace),
+                skill=skill,
+                skill_id=skill_id,
+                input_doc_ids=[input_doc_id],
+                base_tools=build_document_tools(db, workspace),
+            )
+        )
+    saved = _saved_trace(db, skill_id)
+    nested = [
+        e
+        for e in saved
+        if e.get("kind") == "tool_result" and e.get("data", {}).get("step_id") == "call"
+    ]
+    assert nested
+    assert nested[0]["data"]["ok"] is False
+    assert nested[0]["data"]["failures"]
+    assert any("has_section" in f for f in nested[0]["data"]["failures"])
+    step_ids = {e.get("data", {}).get("step_id") for e in saved}
+    assert "suffix" not in step_ids
+    child = get_run(db, nested[0]["data"]["run_id"])
+    assert child is not None
+    assert child["status"] == "failed"
+    assert child["parent_run_id"]
+
+
+def test_apply_pipeline_skill_step_top_level_budget_none(
+    db: Database, workspace: Path
+) -> None:
+    inner = _inner_script()
+    skill = _pipeline_with_skill_step(inner)
+    skill_id = create_skill(
+        db, name=skill.name, description=skill.description, config=skill
+    )
+    input_doc_id = _ingest_input(db, workspace)
+    result = asyncio.run(
+        apply_skill_collect(
+            provider=ScriptProvider([]),
+            db=db,
+            workspace_dir=str(workspace),
+            skill=skill,
+            skill_id=skill_id,
+            input_doc_ids=[input_doc_id],
+            base_tools=build_document_tools(db, workspace),
+            budget=None,
+            persist=False,
+        )
+    )
+    assert result.status == "ok"
+    assert result.result_text == "SOURCE TEXT"
+
+
+def test_apply_pipeline_skill_step_budget_exhausted_in_trace(
+    db: Database, workspace: Path
+) -> None:
+    inner = _inner_script()
+    skill = _pipeline_with_skill_step(inner)
+    skill_id = create_skill(
+        db, name=skill.name, description=skill.description, config=skill
+    )
+    input_doc_id = _ingest_input(db, workspace)
+    budget = SkillBudget(llm_calls_left=60, nested_runs_left=0)
+    result = asyncio.run(
+        apply_skill_collect(
+            provider=ScriptProvider([]),
+            db=db,
+            workspace_dir=str(workspace),
+            skill=skill,
+            skill_id=skill_id,
+            input_doc_ids=[input_doc_id],
+            base_tools=build_document_tools(db, workspace),
+            budget=budget,
+        )
+    )
+    assert result.status == "failed"
+    nodes = [e for e in result.trace.entries if e.kind == "budget"]
+    assert nodes
+    assert nodes[0].data["error"] == "budget exhausted"
+    assert nodes[0].data["step_id"] == "call"
+    assert budget.nested_runs_left == 0
+    with db.connect() as conn:
+        rows = conn.execute(
+            "SELECT id FROM skill_run WHERE skill_id = ?",
+            ("inner-id",),
+        ).fetchall()
+    assert rows == []
+
+
+def test_apply_pipeline_skill_step_budget_released_on_failure(
+    db: Database, workspace: Path
+) -> None:
+    inner = _inner_script(code="result = 1 / 0\n")
+    skill = _pipeline_with_skill_step(inner)
+    skill_id = create_skill(
+        db, name=skill.name, description=skill.description, config=skill
+    )
+    input_doc_id = _ingest_input(db, workspace)
+    budget = SkillBudget(llm_calls_left=60, nested_runs_left=20)
+    with pytest.raises(Exception, match="division|script raised"):
+        asyncio.run(
+            apply_skill_collect(
+                provider=ScriptProvider([]),
+                db=db,
+                workspace_dir=str(workspace),
+                skill=skill,
+                skill_id=skill_id,
+                input_doc_ids=[input_doc_id],
+                base_tools=build_document_tools(db, workspace),
+                budget=budget,
+            )
+        )
+    assert budget.llm_calls_left == 60
+    assert budget.nested_runs_left == 19
+
+
+def test_apply_pipeline_skill_step_deadline_in_trace(
+    db: Database, workspace: Path
+) -> None:
+    inner = _inner_script()
+    skill = _pipeline_with_skill_step(inner)
+    skill_id = create_skill(
+        db, name=skill.name, description=skill.description, config=skill
+    )
+    input_doc_id = _ingest_input(db, workspace)
+    budget = SkillBudget(
+        llm_calls_left=60,
+        nested_runs_left=20,
+        deadline_monotonic=0.0,
+    )
+    result = asyncio.run(
+        apply_skill_collect(
+            provider=ScriptProvider([]),
+            db=db,
+            workspace_dir=str(workspace),
+            skill=skill,
+            skill_id=skill_id,
+            input_doc_ids=[input_doc_id],
+            base_tools=build_document_tools(db, workspace),
+            budget=budget,
+        )
+    )
+    assert result.status == "failed"
+    nodes = [e for e in result.trace.entries if e.kind == "deadline"]
+    assert nodes
+    assert nodes[0].data["error"] == "deadline exceeded"
+    assert nodes[0].data["step_id"] == "call"
+    with db.connect() as conn:
+        rows = conn.execute(
+            "SELECT id FROM skill_run WHERE skill_id = ?",
+            ("inner-id",),
+        ).fetchall()
+    assert rows == []
+
+
+def test_apply_pipeline_skill_step_max_depth_error(
+    db: Database, workspace: Path
+) -> None:
+    inner = _inner_script()
+    skill = _pipeline_with_skill_step(inner)
+    skill_id = create_skill(
+        db, name=skill.name, description=skill.description, config=skill
+    )
+    input_doc_id = _ingest_input(db, workspace)
+    with pytest.raises(PipelineStepError, match="max skill depth exceeded"):
+        asyncio.run(
+            apply_skill_collect(
+                provider=ScriptProvider([]),
+                db=db,
+                workspace_dir=str(workspace),
+                skill=skill,
+                skill_id=skill_id,
+                input_doc_ids=[input_doc_id],
+                base_tools=build_document_tools(db, workspace),
+                call_context=SkillCallContext(depth=2),
+                max_skill_depth=2,
+            )
+        )
+    saved = _saved_trace(db, skill_id)
+    errors = [e for e in saved if e.get("kind") == "error"]
+    assert errors
+    assert "max skill depth" in errors[0]["data"]["error"]
+    assert errors[0]["data"]["step_id"] == "call"
+    with db.connect() as conn:
+        rows = conn.execute(
+            "SELECT id FROM skill_run WHERE skill_id = ?",
+            ("inner-id",),
+        ).fetchall()
+    assert rows == []
 
 
 def test_apply_pipeline_finish_ignores_early_step_cap(

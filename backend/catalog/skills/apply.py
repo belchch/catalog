@@ -28,7 +28,6 @@ from asyncio import CancelledError
 from collections.abc import AsyncIterator
 from dataclasses import dataclass, replace
 from pathlib import Path
-from typing import TYPE_CHECKING
 
 from catalog.agent.events import (
     AgentEvent,
@@ -55,7 +54,16 @@ from catalog.documents.obsidian import (
 )
 from catalog.llm.base import LLMProvider, Message
 from catalog.llm.factory import provider_for_skill
-from catalog.skills.budget import nested_deadline_exceeded
+from catalog.documents.tools import build_document_tools
+from catalog.skills.budget import (
+    SkillBudget,
+    SkillCallContext,
+    current_skill_budget,
+    estimate_skill_budget,
+    nested_deadline_exceeded,
+    nested_skill_hold,
+    skill_hold_active,
+)
 from catalog.skills.config import PipelineStep, SkillConfig, ensure_read_document_tool
 from catalog.skills.repo_run import claim_run, create_run, finish_run, get_run
 from catalog.skills.script_runner import ScriptRuntimeError, run_script_async
@@ -64,12 +72,31 @@ from catalog.storage.db import Database
 from catalog.storage.repo_document import create_document, get_document
 from catalog.storage.repo_session_document import attach_documents
 
-if TYPE_CHECKING:
-    from catalog.skills.skill_tools import SkillCallContext
-
 logger = logging.getLogger("catalog.skills.apply")
 
 PipelineValue = str | list[str]
+
+
+class PipelineStepError(RuntimeError):
+    pass
+
+
+def _config_hash(skill: SkillConfig) -> str:
+    return hashlib.sha256(skill.to_json().encode("utf-8")).hexdigest()[:16]
+
+
+def _step_input_texts(value: PipelineValue) -> list[str]:
+    if isinstance(value, list):
+        return [str(item) for item in value]
+    return [str(value)]
+
+
+def _nested_verify_failures(trace: Trace) -> list[str]:
+    failures: list[str] = []
+    for entry in trace.entries:
+        if entry.kind == "verify" and not entry.data.get("passed", True):
+            failures.extend(str(item) for item in (entry.data.get("failures") or []))
+    return failures
 
 
 def _value_as_text(value: PipelineValue) -> str:
@@ -211,6 +238,8 @@ async def _apply_core(
     parent_run_id: str | None = None,
     fallback_model: str = "",
     call_context: SkillCallContext | None = None,
+    budget: SkillBudget | None = None,
+    max_skill_depth: int = 2,
 ) -> AsyncIterator[AgentEvent]:
     """Shared apply loop: streams events, fills ``trace`` and ``outcome``.
 
@@ -302,7 +331,7 @@ async def _apply_core(
 
     outcome.run_id = run_id
     if parent_run_id is not None:
-        pinned = hashlib.sha256(skill.to_json().encode("utf-8")).hexdigest()[:16]
+        pinned = _config_hash(skill)
         trace.entries.append(
             TraceEntry(
                 kind="skill_pin",
@@ -328,6 +357,7 @@ async def _apply_core(
     last_capped = False
     passed = False
     deadline_stopped = False
+    pipeline_halted = False
     output_doc_id: str | None = None
     verify_model = skill.model or fallback_model
     verify_provider = provider_for_skill(providers, provider, skill.provider)
@@ -540,16 +570,182 @@ async def _apply_core(
                         break
                     if index == len(skill.steps) - 1:
                         last_capped = capped
+                elif step.type == "skill":
+                    nested_skill = step.config
+                    if nested_skill is None:
+                        raise ValueError(
+                            f"pipeline step {step.id!r}: skill snapshot is missing"
+                        )
+                    nested_id = step.skill_id or nested_skill.name
+                    nested_name = step.skill_name or nested_skill.name
+                    nested_hash = step.config_hash or _config_hash(nested_skill)
+                    current_depth = (
+                        0 if call_context is None else call_context.depth
+                    )
+                    nested_ctx = (call_context or SkillCallContext()).nested(
+                        nested_id
+                    )
+                    if current_depth >= max_skill_depth:
+                        message = (
+                            f"pipeline step {step.id!r}: max skill depth "
+                            f"exceeded ({current_depth} >= {max_skill_depth})"
+                        )
+                        trace.entries.append(
+                            TraceEntry(
+                                kind="error",
+                                iteration=index + 1,
+                                data={
+                                    "step_id": step.id,
+                                    "error": message,
+                                    "skill_name": nested_name,
+                                    "config_hash": nested_hash,
+                                    "depth": nested_ctx.depth,
+                                },
+                            )
+                        )
+                        raise PipelineStepError(message)
+                    step_budget = current_skill_budget(budget)
+                    already_held = skill_hold_active()
+                    hold = None
+                    if step_budget is not None:
+                        if step_budget.mark_deadline_if_exceeded():
+                            trace.entries.append(
+                                TraceEntry(
+                                    kind="deadline",
+                                    iteration=index + 1,
+                                    data={
+                                        "error": "deadline exceeded",
+                                        "step_id": step.id,
+                                        "skill_name": nested_name,
+                                        "depth": nested_ctx.depth,
+                                    },
+                                )
+                            )
+                            deadline_stopped = True
+                            last_capped = True
+                            break
+                        if already_held:
+                            needed_llm, needed_runs = 0, 1
+                        else:
+                            needed_llm, needed_runs = estimate_skill_budget(
+                                nested_skill
+                            )
+                        hold = step_budget.reserve(needed_llm, needed_runs)
+                        if hold is None:
+                            trace.entries.append(
+                                TraceEntry(
+                                    kind="budget",
+                                    iteration=index + 1,
+                                    data={
+                                        "error": "budget exhausted",
+                                        "step_id": step.id,
+                                        "skill_name": nested_name,
+                                        "config_hash": nested_hash,
+                                        "depth": nested_ctx.depth,
+                                        "llm_calls_left": step_budget.llm_calls_left,
+                                        "nested_runs_left": step_budget.nested_runs_left,
+                                        "needed_llm_calls": needed_llm,
+                                        "needed_nested_runs": needed_runs,
+                                    },
+                                )
+                            )
+                            last_capped = True
+                            pipeline_halted = True
+                            break
+                    nested_tools = build_document_tools(
+                        db, workspace_dir, session_id
+                    )
+                    try:
+                        with nested_skill_hold(
+                            None if already_held else hold,
+                            None if already_held else step_budget,
+                        ):
+                            nested_result = await apply_nested_skill_collect(
+                                provider=provider,
+                                db=db,
+                                workspace_dir=workspace_dir,
+                                skill=nested_skill,
+                                skill_id=nested_id,
+                                base_tools=nested_tools,
+                                session_id=session_id,
+                                input_texts=_step_input_texts(step_input),
+                                parent_run_id=run_id,
+                                fallback_model=fallback_model,
+                                providers=providers,
+                                call_context=nested_ctx,
+                                budget=step_budget,
+                                max_skill_depth=max_skill_depth,
+                            )
+                    except Exception as exc:
+                        trace.entries.append(
+                            TraceEntry(
+                                kind="error",
+                                iteration=index + 1,
+                                data={
+                                    "step_id": step.id,
+                                    "error": str(exc),
+                                    "skill": True,
+                                    "skill_name": nested_name,
+                                    "depth": nested_ctx.depth,
+                                },
+                            )
+                        )
+                        raise
+                    finally:
+                        if step_budget is not None and hold is not None:
+                            step_budget.release(hold)
+                    verify_failures = _nested_verify_failures(
+                        nested_result.trace
+                    )
+                    trace.entries.append(
+                        TraceEntry(
+                            kind="tool_result",
+                            iteration=index + 1,
+                            data={
+                                "name": nested_name,
+                                "ok": nested_result.status == "ok",
+                                "step_id": step.id,
+                                "run_id": nested_result.run_id,
+                                "skill_id": nested_id,
+                                "skill_name": nested_name,
+                                "config_hash": nested_hash,
+                                "depth": nested_ctx.depth,
+                                "failures": verify_failures,
+                                "result": {
+                                    "ok": nested_result.status == "ok",
+                                    "status": nested_result.status,
+                                    "run_id": nested_result.run_id,
+                                    "skill_id": nested_id,
+                                    "skill_name": nested_name,
+                                    "config_hash": nested_hash,
+                                    "depth": nested_ctx.depth,
+                                    "verify_failures": verify_failures,
+                                },
+                            },
+                        )
+                    )
+                    if nested_result.status != "ok":
+                        reason = (
+                            "; ".join(verify_failures)
+                            if verify_failures
+                            else (nested_result.status or "failed")
+                        )
+                        raise PipelineStepError(
+                            f"pipeline step {step.id!r}: "
+                            f"nested skill failed: {reason}"
+                        )
+                    current = nested_result.result_text or ""
+                    last_text = current
                 else:
                     raise ValueError(
                         f"unknown pipeline step type: {step.type!r}"
                     )
-            if not deadline_stopped and _deadline_reached(
+            if not deadline_stopped and not pipeline_halted and _deadline_reached(
                 trace, max(len(skill.steps), 1)
             ):
                 deadline_stopped = True
                 last_capped = True
-            if not deadline_stopped:
+            if not deadline_stopped and not pipeline_halted:
                 final_text = last_text or ""
                 if last_text:
                     yield TokenEvent(delta=last_text)
@@ -863,6 +1059,8 @@ async def apply_skill(
     parent_run_id: str | None = None,
     fallback_model: str = "",
     call_context: SkillCallContext | None = None,
+    budget: SkillBudget | None = None,
+    max_skill_depth: int = 2,
 ) -> AsyncIterator[AgentEvent]:
     """Run a skill over one or more documents, streaming :data:`AgentEvent` items.
 
@@ -908,6 +1106,8 @@ async def apply_skill(
         parent_run_id=parent_run_id,
         fallback_model=fallback_model,
         call_context=call_context,
+        budget=budget,
+        max_skill_depth=max_skill_depth,
     ):
         yield event
 
@@ -931,6 +1131,8 @@ async def apply_skill_collect(
     parent_run_id: str | None = None,
     fallback_model: str = "",
     call_context: SkillCallContext | None = None,
+    budget: SkillBudget | None = None,
+    max_skill_depth: int = 2,
 ) -> ApplyResult:
     """Drain :func:`apply_skill` and return the final :class:`ApplyResult`."""
     trace = Trace()
@@ -955,6 +1157,8 @@ async def apply_skill_collect(
         parent_run_id=parent_run_id,
         fallback_model=fallback_model,
         call_context=call_context,
+        budget=budget,
+        max_skill_depth=max_skill_depth,
     ):
         pass
     return ApplyResult(
@@ -963,4 +1167,41 @@ async def apply_skill_collect(
         result_text=outcome.result_text,
         trace=trace,
         run_id=outcome.run_id,
+    )
+
+
+async def apply_nested_skill_collect(
+    *,
+    provider: LLMProvider,
+    db: Database,
+    workspace_dir: str,
+    skill: SkillConfig,
+    skill_id: str,
+    base_tools: ToolRegistry,
+    session_id: str | None,
+    input_texts: list[str],
+    parent_run_id: str,
+    fallback_model: str = "",
+    providers: dict[str, LLMProvider] | None = None,
+    call_context: SkillCallContext | None = None,
+    budget: SkillBudget | None = None,
+    max_skill_depth: int = 2,
+) -> ApplyResult:
+    return await apply_skill_collect(
+        provider=provider,
+        db=db,
+        workspace_dir=workspace_dir,
+        skill=skill,
+        skill_id=skill_id,
+        input_doc_ids=[],
+        base_tools=base_tools,
+        session_id=session_id,
+        persist=False,
+        providers=providers,
+        input_texts=input_texts,
+        parent_run_id=parent_run_id,
+        fallback_model=fallback_model,
+        call_context=call_context,
+        budget=budget,
+        max_skill_depth=max_skill_depth,
     )
