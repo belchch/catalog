@@ -1,6 +1,7 @@
 import { useRef, useState } from 'react'
 import { extractApiDetail, type DocumentOut } from '../api.ts'
 import type { UseDocumentsResult } from '../hooks/useDocuments.ts'
+import { ExportDocxButton } from './ExportDocxButton.tsx'
 
 interface DocumentListProps {
   docs: UseDocumentsResult
@@ -34,6 +35,9 @@ export function DocumentList({
   }
 
   const disabled = uploadDisabled || uploading
+  const selectedDoc = currentDocId
+    ? docs.documents.find((d) => d.id === currentDocId)
+    : undefined
 
   return (
     <div className="flex flex-col gap-2">
@@ -61,6 +65,20 @@ export function DocumentList({
         </p>
       )}
       {docs.error && <p className="text-xs text-danger-ink">{docs.error}</p>}
+      {selectedDoc && (
+        <div className="flex flex-col gap-1.5 rounded-md border border-line bg-surface px-2 py-2">
+          <p className="truncate text-[11px] text-ink-faint" title={selectedDoc.title}>
+            {selectedDoc.title}
+          </p>
+          <ExportDocxButton
+            docIds={[selectedDoc.id]}
+            title={selectedDoc.title}
+            disabled={uploadDisabled}
+            disabledHint="Откройте папку воркспейса"
+            layout="stacked"
+          />
+        </div>
+      )}
       <ul className="flex flex-col gap-1">
         {docs.documents.map((d: DocumentOut) => (
           <li key={d.id}>

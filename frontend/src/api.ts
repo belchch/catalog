@@ -300,6 +300,32 @@ export function uploadDocument(file: File): Promise<DocumentOut> {
   return jsonFetch<DocumentOut>('/documents', { method: 'POST', body: form })
 }
 
+export interface ExportDocxOut {
+  ok: boolean
+  path: string
+  headings: number
+  tables: number
+}
+
+export function exportDocx(body: {
+  doc_ids: string[]
+  title?: string
+  template?: string
+}): Promise<ExportDocxOut> {
+  const payload: { doc_ids: string[]; title?: string; template?: string } = {
+    doc_ids: body.doc_ids,
+  }
+  const title = body.title?.trim()
+  if (title) payload.title = title
+  const template = body.template?.trim()
+  if (template) payload.template = template
+  return jsonFetch<ExportDocxOut>('/export/docx', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  })
+}
+
 export function createSession(docIds?: string[]): Promise<SessionCreated> {
   if (docIds && docIds.length > 0) {
     return jsonFetch<SessionCreated>('/sessions', {

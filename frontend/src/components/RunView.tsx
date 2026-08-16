@@ -1,5 +1,6 @@
 import type { DocumentOut } from '../api.ts'
 import type { UseRunStreamResult } from '../hooks/useRunStream.ts'
+import { ExportDocxButton } from './ExportDocxButton.tsx'
 import { MarkdownView } from './MarkdownView.tsx'
 import { segmentTraceSteps } from '../lib/traceSegments.ts'
 import { TraceSteps } from './TraceSteps.tsx'
@@ -32,6 +33,7 @@ export function RunView({
     ? documents.find((d) => d.id === outputDocId) ?? (savedDoc?.id === outputDocId ? savedDoc : null)
     : null
   const canSaveResult = run.finished && statusOk && !outputDocId && !!run.resultText
+  const exportDocIds = outputDocId ? [outputDocId] : (run.meta?.inputDocs ?? [])
   const groupCount = segmentTraceSteps(run.steps).filter((seg) => seg.kind === 'group').length
   return (
     <div className="flex h-full flex-col">
@@ -124,6 +126,18 @@ export function RunView({
               {savingResult ? 'Сохраняю…' : 'Сохранить как новый документ'}
             </button>
           )}
+          <div className="mb-2">
+            <ExportDocxButton
+              docIds={exportDocIds}
+              title={outputDoc?.title}
+              disabled={!run.finished || exportDocIds.length === 0}
+              disabledHint={
+                !run.finished
+                  ? 'Дождитесь завершения прогона'
+                  : 'Нет документов для выгрузки'
+              }
+            />
+          </div>
           {run.resultText ? (
             <MarkdownView
               text={run.resultText}
