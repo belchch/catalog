@@ -209,6 +209,16 @@ def test_apply_success_first_try(db: Database, workspace: Path) -> None:
     assert len(verify_entries) == 1
     assert verify_entries[0].data["passed"] is True
     assert verify_entries[0].data["failures"] == []
+    assert verify_entries[0].data["checks"] == [
+        {
+            "check": "non_empty",
+            "params": {},
+            "passed": True,
+            "reason": None,
+            "source": "builtin",
+            "skipped": False,
+        }
+    ]
 
 
 def test_apply_persist_attaches_output_to_session(
@@ -285,9 +295,13 @@ def test_apply_retry_then_success(db: Database, workspace: Path) -> None:
     assert verify_entries[0].iteration == 1
     assert verify_entries[0].data["passed"] is False
     assert verify_entries[0].data["failures"]
+    assert verify_entries[0].data["checks"][0]["check"] == "has_section"
+    assert verify_entries[0].data["checks"][0]["passed"] is False
+    assert verify_entries[0].data["checks"][0]["skipped"] is False
     assert verify_entries[1].iteration == 2
     assert verify_entries[1].data["passed"] is True
     assert verify_entries[1].data["failures"] == []
+    assert verify_entries[1].data["checks"][0]["passed"] is True
 
 
 def test_apply_verify_never_passes(db: Database, workspace: Path) -> None:
@@ -602,6 +616,8 @@ def test_apply_script_skill(db: Database, workspace: Path) -> None:
     assert len(verify_entries) == 1
     assert verify_entries[0].data["passed"] is True
     assert verify_entries[0].data["failures"] == []
+    assert verify_entries[0].data["checks"][0]["check"] == "non_empty"
+    assert verify_entries[0].data["checks"][0]["passed"] is True
 
 
 def test_apply_script_verify_failure_saved_in_trace(
@@ -643,6 +659,9 @@ def test_apply_script_verify_failure_saved_in_trace(
     assert verify_entries[0]["data"]["passed"] is False
     assert verify_entries[0]["data"]["failures"]
     assert any("non_empty" in f for f in verify_entries[0]["data"]["failures"])
+    assert verify_entries[0]["data"]["checks"][0]["check"] == "non_empty"
+    assert verify_entries[0]["data"]["checks"][0]["passed"] is False
+    assert verify_entries[0]["data"]["checks"][0]["skipped"] is False
 
 
 class _JudgeProvider:
@@ -1245,6 +1264,7 @@ def test_apply_pipeline_script_llm_script(db: Database, workspace: Path) -> None
     assert len(verify_entries) == 1
     assert verify_entries[0].data["passed"] is True
     assert verify_entries[0].data["failures"] == []
+    assert "checks" in verify_entries[0].data
 
 
 def test_apply_pipeline_verify_failure_saved_in_trace(
@@ -1293,6 +1313,8 @@ def test_apply_pipeline_verify_failure_saved_in_trace(
     assert verify_entries[0]["data"]["passed"] is False
     assert verify_entries[0]["data"]["failures"]
     assert any("has_section" in f for f in verify_entries[0]["data"]["failures"])
+    assert verify_entries[0]["data"]["checks"][0]["check"] == "has_section"
+    assert verify_entries[0]["data"]["checks"][0]["passed"] is False
 
 
 def test_apply_pipeline_user_prompt_in_llm_step(

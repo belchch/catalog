@@ -75,10 +75,11 @@ def log_agent_event(event: AgentEvent) -> None:
         return
     if isinstance(event, VerifyEvent):
         logger.info(
-            "verify attempt=%d passed=%s failures=%s",
+            "verify attempt=%d passed=%s failures=%s checks=%s",
             event.iteration,
             event.result.passed,
             list(event.result.failures),
+            _trunc([item.as_dict() for item in event.result.checks]),
         )
         return
     if isinstance(event, FinishEvent):

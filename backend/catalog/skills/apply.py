@@ -392,10 +392,7 @@ async def _apply_core(
                 TraceEntry(
                     kind="verify",
                     iteration=1,
-                    data={
-                        "passed": result.passed,
-                        "failures": list(result.failures),
-                    },
+                    data=result.as_payload(),
                 )
             )
             passed = result.passed
@@ -527,10 +524,7 @@ async def _apply_core(
                 TraceEntry(
                     kind="verify",
                     iteration=1,
-                    data={
-                        "passed": result.passed,
-                        "failures": list(result.failures),
-                    },
+                    data=result.as_payload(),
                 )
             )
             passed = result.passed
@@ -619,10 +613,7 @@ async def _apply_core(
                     TraceEntry(
                         kind="verify",
                         iteration=r + 1,
-                        data={
-                            "passed": result.passed,
-                            "failures": list(result.failures),
-                        },
+                        data=result.as_payload(),
                     )
                 )
 

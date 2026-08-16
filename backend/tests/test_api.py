@@ -1718,6 +1718,8 @@ def test_apply_skill_run(client, provider, db) -> None:
     # A verify frame was emitted and passed.
     verifies = [f for f in frames if f["type"] == "verify"]
     assert verifies and verifies[-1]["passed"] is True
+    assert verifies[-1]["checks"][0]["check"] == "non_empty"
+    assert verifies[-1]["checks"][0]["passed"] is True
 
     # GET /runs/{id} returns the persisted trace.
     run = client.get(f"/runs/{run_id}").json()
@@ -1729,6 +1731,7 @@ def test_apply_skill_run(client, provider, db) -> None:
     assert saved_verify
     assert saved_verify[-1]["data"]["passed"] is True
     assert saved_verify[-1]["data"]["failures"] == []
+    assert saved_verify[-1]["data"]["checks"][0]["check"] == "non_empty"
 
 
 def test_apply_creates_pending_run_before_stream(client, db) -> None:

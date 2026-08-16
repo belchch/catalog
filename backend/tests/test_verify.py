@@ -6,6 +6,7 @@ from catalog.api.skills import _validate_config
 from catalog.llm.base import CompletionResult, Message
 from catalog.skills.config import SkillConfig, VerifyCheck
 from catalog.skills.verify import (
+    CheckOutcome,
     VerifyResult,
     registered_checks,
     run_custom_judge,
@@ -357,6 +358,15 @@ def test_run_verify_multiple_all_pass() -> None:
     )
     assert r.passed is True
     assert r.failures == []
+    assert [c.check for c in r.checks] == [
+        "non_empty",
+        "markdown_well_formed",
+        "has_section",
+        "has_field",
+        "table_parses",
+    ]
+    assert all(isinstance(c, CheckOutcome) for c in r.checks)
+    assert all(c.passed and not c.skipped and c.source == "builtin" for c in r.checks)
 
 
 def test_run_verify_multiple_some_fail() -> None:
@@ -373,6 +383,14 @@ def test_run_verify_multiple_some_fail() -> None:
     assert len(r.failures) == 2
     assert any("has_field" in f for f in r.failures)
     assert any("table_parses" in f for f in r.failures)
+    assert [c.check for c in r.checks] == ["non_empty", "has_field", "table_parses"]
+    assert [c.passed for c in r.checks] == [True, False, False]
+    assert [c.skipped for c in r.checks] == [False, False, False]
+    assert [c.source for c in r.checks] == ["builtin", "builtin", "builtin"]
+    assert r.checks[0].reason is None
+    assert r.checks[1].reason is not None
+    assert r.checks[1].params == {"key": "Автор"}
+    assert r.as_payload()["checks"][2]["check"] == "table_parses"
 
 
 def test_run_verify_empty_checks_passes() -> None:
@@ -380,19 +398,33 @@ def test_run_verify_empty_checks_passes() -> None:
     r = run_verify("anything", [])
     assert r.passed is True
     assert isinstance(r, VerifyResult)
+    assert r.checks == []
 
 
-def test_run_verify_unknown_short_circuits() -> None:
-    # Even if later checks would fail, unknown check is reported alone.
-    r = run_verify("", [_vc("non_empty"), _vc("bogus")])
+def test_run_verify_unknown_keeps_tail() -> None:
+    r = run_verify("", [_vc("bogus"), _vc("non_empty")])
     assert r.passed is False
-    assert r.failures == ["unknown check: bogus"]
+    assert r.failures[0] == "unknown check: bogus"
+    assert any("non_empty" in f for f in r.failures)
+    assert [c.check for c in r.checks] == ["bogus", "non_empty"]
+    assert r.checks[0].skipped is True
+    assert r.checks[0].passed is False
+    assert r.checks[0].source == "builtin"
+    assert r.checks[1].skipped is False
+    assert r.checks[1].passed is False
+    assert r.checks[1].source == "builtin"
 
 
 def test_run_verify_sync_fail_closed_on_custom() -> None:
-    r = run_verify("hello", [_vc("custom:abc")])
+    r = run_verify("hello", [_vc("custom:abc"), _vc("non_empty")])
     assert r.passed is False
     assert "custom check requires async verify" in r.failures[0]
+    assert [c.check for c in r.checks] == ["custom:abc", "non_empty"]
+    assert r.checks[0].skipped is True
+    assert r.checks[0].passed is False
+    assert r.checks[0].source == "custom"
+    assert r.checks[1].skipped is False
+    assert r.checks[1].passed is True
 
 
 def test_validate_verify_check_accepts_custom_ref() -> None:
@@ -467,6 +499,13 @@ def test_run_verify_async_skips_judge_when_deterministic_fails() -> None:
     assert result.passed is False
     assert any("empty" in f for f in result.failures)
     assert provider.requests == []
+    assert [c.check for c in result.checks] == ["non_empty", f"custom:{row.id}"]
+    assert result.checks[0].passed is False
+    assert result.checks[0].skipped is False
+    assert result.checks[0].source == "builtin"
+    assert result.checks[1].skipped is True
+    assert result.checks[1].passed is False
+    assert result.checks[1].source == "custom"
 
 
 def test_run_verify_async_hidden_custom_fails_closed() -> None:
@@ -486,6 +525,12 @@ def test_run_verify_async_hidden_custom_fails_closed() -> None:
     assert result.passed is False
     assert result.failures == [f"hidden custom check: {row.id!r}"]
     assert provider.requests == []
+    assert len(result.checks) == 1
+    assert result.checks[0].check == f"custom:{row.id}"
+    assert result.checks[0].passed is False
+    assert result.checks[0].skipped is False
+    assert result.checks[0].source == "custom"
+    assert result.checks[0].reason == f"hidden custom check: {row.id!r}"
 
 
 def test_run_verify_async_unknown_custom_fails_closed() -> None:
@@ -503,6 +548,10 @@ def test_run_verify_async_unknown_custom_fails_closed() -> None:
     assert result.passed is False
     assert result.failures == ["unknown custom check: 'deadbeef'"]
     assert provider.requests == []
+    assert result.checks[0].check == "custom:deadbeef"
+    assert result.checks[0].passed is False
+    assert result.checks[0].skipped is False
+    assert result.checks[0].source == "custom"
 
 
 def test_run_verify_async_judge_runs_after_deterministic_pass() -> None:
@@ -520,6 +569,12 @@ def test_run_verify_async_judge_runs_after_deterministic_pass() -> None:
     )
     assert result.passed is True
     assert result.failures == []
+    assert [c.check for c in result.checks] == ["non_empty", "custom"]
+    assert [c.passed for c in result.checks] == [True, True]
+    assert [c.skipped for c in result.checks] == [False, False]
+    assert result.checks[1].source == "custom"
+    assert result.checks[1].reason is None
+    assert result.checks[1].params == {"id": row.id}
     assert len(provider.requests) == 1
     messages = provider.requests[0]["messages"]
     assert all(m.role == "user" for m in messages)
@@ -543,6 +598,11 @@ def test_run_verify_async_judge_fail() -> None:
     )
     assert result.passed is False
     assert result.failures == ["custom:Has Python: нет стека"]
+    assert len(result.checks) == 1
+    assert result.checks[0].source == "custom"
+    assert result.checks[0].passed is False
+    assert result.checks[0].skipped is False
+    assert result.checks[0].reason == "custom:Has Python: нет стека"
 
 
 def test_run_custom_judge_missing_model() -> None:

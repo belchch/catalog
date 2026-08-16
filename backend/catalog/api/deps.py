@@ -116,8 +116,7 @@ def agent_event_to_frame(event) -> dict | None:
             {
                 "type": "verify",
                 "iteration": event.iteration,
-                "passed": event.result.passed,
-                "failures": list(event.result.failures),
+                **event.result.as_payload(),
             },
             event,
         )

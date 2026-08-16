@@ -19,11 +19,39 @@ from catalog.skills.config import VerifyCheck
 
 
 @dataclass
+class CheckOutcome:
+    check: str
+    params: dict
+    passed: bool
+    reason: str | None
+    source: str
+    skipped: bool = False
+
+    def as_dict(self) -> dict:
+        return {
+            "check": self.check,
+            "params": dict(self.params),
+            "passed": self.passed,
+            "reason": self.reason,
+            "source": self.source,
+            "skipped": self.skipped,
+        }
+
+
+@dataclass
 class VerifyResult:
     """Outcome of running a list of checks over a text."""
 
     passed: bool
     failures: list[str] = field(default_factory=list)
+    checks: list[CheckOutcome] = field(default_factory=list)
+
+    def as_payload(self) -> dict:
+        return {
+            "passed": self.passed,
+            "failures": list(self.failures),
+            "checks": [item.as_dict() for item in self.checks],
+        }
 
 
 # (text, params) -> None if ok, otherwise a human-readable failure reason.
@@ -136,21 +164,67 @@ def validate_verify_checks(
     return errors
 
 
+def _outcome(
+    check: VerifyCheck,
+    *,
+    passed: bool,
+    reason: str | None,
+    source: str,
+    skipped: bool = False,
+) -> CheckOutcome:
+    return CheckOutcome(
+        check=check.check,
+        params=dict(check.params),
+        passed=passed,
+        reason=reason,
+        source=source,
+        skipped=skipped,
+    )
+
+
 def run_verify(text: str, checks: list[VerifyCheck]) -> VerifyResult:
     failures: list[str] = []
+    outcomes: list[CheckOutcome] = []
     for c in checks:
         if is_custom_check_id(c.check):
-            return VerifyResult(
-                passed=False,
-                failures=[f"custom check requires async verify: {c.check}"],
+            reason = f"custom check requires async verify: {c.check}"
+            outcomes.append(
+                _outcome(
+                    c,
+                    passed=False,
+                    reason=reason,
+                    source="custom",
+                    skipped=True,
+                )
             )
+            failures.append(reason)
+            continue
         fn = _REGISTRY.get(c.check)
         if fn is None:
-            return VerifyResult(passed=False, failures=[f"unknown check: {c.check}"])
+            reason = f"unknown check: {c.check}"
+            outcomes.append(
+                _outcome(
+                    c,
+                    passed=False,
+                    reason=reason,
+                    source="builtin",
+                    skipped=True,
+                )
+            )
+            failures.append(reason)
+            continue
         reason = fn(text, c.params)
+        outcomes.append(
+            _outcome(
+                c,
+                passed=reason is None,
+                reason=reason,
+                source="builtin",
+            )
+        )
         if reason is not None:
             failures.append(f"{c.check}: {reason}")
-    return VerifyResult(passed=not failures, failures=failures)
+    return VerifyResult(passed=not failures, failures=failures, checks=outcomes)
 
 
 def _judge_user_message(criterion: str, text: str) -> str:
@@ -209,53 +283,116 @@ async def run_verify_async(
     provider=None,
     model: str = "",
 ) -> VerifyResult:
+    from catalog.storage.repo_custom_check import CustomCheckRow, get_custom_check
+
     det = [c for c in checks if not is_custom_check_id(c.check)]
     custom = [c for c in checks if is_custom_check_id(c.check)]
     resolve_failures: list[str] = []
-    resolved: list[object] = []
+    resolve_errors: list[str | None] = [None] * len(custom)
+    resolved: list[CustomCheckRow | None] = [None] * len(custom)
     if custom:
-        from catalog.storage.repo_custom_check import get_custom_check
-
         if db is None:
             resolve_failures.append("custom check requires workspace db")
         else:
-            for c in custom:
+            for i, c in enumerate(custom):
                 cid = custom_check_ref_id(c.check, c.params)
                 if not cid:
-                    resolve_failures.append("custom: missing check id")
+                    msg = "custom: missing check id"
+                    resolve_failures.append(msg)
+                    resolve_errors[i] = msg
                     continue
                 row = get_custom_check(db, cid)
                 if row is None:
-                    resolve_failures.append(f"unknown custom check: {cid!r}")
+                    msg = f"unknown custom check: {cid!r}"
+                    resolve_failures.append(msg)
+                    resolve_errors[i] = msg
                     continue
                 if row.hidden:
-                    resolve_failures.append(f"hidden custom check: {cid!r}")
+                    msg = f"hidden custom check: {cid!r}"
+                    resolve_failures.append(msg)
+                    resolve_errors[i] = msg
                     continue
-                resolved.append(row)
+                resolved[i] = row
     base = run_verify(text, det)
+    can_judge = (
+        base.passed
+        and not resolve_failures
+        and any(row is not None for row in resolved)
+        and provider is not None
+    )
+    judge_failures: list[str] = []
+    custom_outcomes: list[CheckOutcome] = []
+    for i, c in enumerate(custom):
+        row = resolved[i]
+        resolve_error = resolve_errors[i]
+        if can_judge and row is not None:
+            reason = await run_custom_judge(
+                text,
+                row.prompt,
+                provider=provider,
+                model=model,
+                label=row.name,
+            )
+            if reason is not None:
+                judge_failures.append(reason)
+            custom_outcomes.append(
+                _outcome(
+                    c,
+                    passed=reason is None,
+                    reason=reason,
+                    source="custom",
+                )
+            )
+            continue
+        if resolve_error is not None and base.passed:
+            custom_outcomes.append(
+                _outcome(
+                    c,
+                    passed=False,
+                    reason=resolve_error,
+                    source="custom",
+                )
+            )
+            continue
+        skip_reason = None
+        if provider is None and base.passed and not resolve_failures:
+            skip_reason = "custom check requires LLM provider"
+        custom_outcomes.append(
+            _outcome(
+                c,
+                passed=False,
+                reason=skip_reason,
+                source="custom",
+                skipped=True,
+            )
+        )
+    outcomes: list[CheckOutcome] = []
+    det_iter = iter(base.checks)
+    custom_iter = iter(custom_outcomes)
+    for c in checks:
+        if is_custom_check_id(c.check):
+            outcomes.append(next(custom_iter))
+        else:
+            outcomes.append(next(det_iter))
     if not base.passed or resolve_failures:
         return VerifyResult(
-            passed=False, failures=base.failures + resolve_failures
+            passed=False,
+            failures=base.failures + resolve_failures,
+            checks=outcomes,
         )
-    if not resolved:
-        return base
+    if not any(row is not None for row in resolved):
+        return VerifyResult(
+            passed=base.passed, failures=base.failures, checks=outcomes
+        )
     if provider is None:
         return VerifyResult(
             passed=False,
             failures=["custom check requires LLM provider"],
+            checks=outcomes,
         )
-    failures: list[str] = []
-    for row in resolved:
-        reason = await run_custom_judge(
-            text,
-            row.prompt,
-            provider=provider,
-            model=model,
-            label=row.name,
-        )
-        if reason is not None:
-            failures.append(reason)
-    return VerifyResult(passed=not failures, failures=failures)
+    return VerifyResult(
+        passed=not judge_failures, failures=judge_failures, checks=outcomes
+    )
 
 
 # --------------------------------------------------------------------------- #
