@@ -309,6 +309,7 @@ async def _apply_core(
     passed = False
     output_doc_id: str | None = None
     verify_model = skill.model or fallback_model
+    verify_provider = provider_for_skill(providers, provider, skill.provider)
     # ``done`` guards finish_run so it runs exactly once across the normal
     # path, the exception path, and the finally safety net.
     done = False
@@ -381,7 +382,7 @@ async def _apply_core(
                 text or "",
                 skill.verify_checks,
                 db=db,
-                provider=provider,
+                provider=verify_provider,
                 model=verify_model,
             )
             verify_event = VerifyEvent(iteration=1, result=result)
@@ -516,7 +517,7 @@ async def _apply_core(
                 final_text,
                 skill.verify_checks,
                 db=db,
-                provider=provider,
+                provider=verify_provider,
                 model=verify_model,
             )
             verify_event = VerifyEvent(iteration=1, result=result)
@@ -608,7 +609,7 @@ async def _apply_core(
                     text or "",
                     skill.verify_checks,
                     db=db,
-                    provider=provider,
+                    provider=verify_provider,
                     model=verify_model,
                 )
                 verify_event = VerifyEvent(iteration=r + 1, result=result)

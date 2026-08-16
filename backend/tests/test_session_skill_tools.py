@@ -61,6 +61,7 @@ def _script_skill(
     verify_checks: list[VerifyCheck] | None = None,
     input_arity: int | None = 1,
     model: str = "x",
+    provider: str = "",
 ) -> str:
     config = SkillConfig(
         name=name,
@@ -68,6 +69,7 @@ def _script_skill(
         system_prompt="",
         allowed_tools=[],
         model=model,
+        provider=provider,
         kind="script",
         code=code,
         verify_checks=verify_checks
@@ -216,6 +218,40 @@ def test_session_skill_tool_custom_verify_uses_provider(db: Database) -> None:
     assert out["verify_failures"] == []
     assert len(provider.requests) == 1
     assert provider.requests[0]["model"] == "workspace/model"
+
+
+def test_session_skill_tool_custom_verify_uses_pinned_provider(
+    db: Database,
+) -> None:
+    row = create_custom_check(db, name="Has Hello", prompt="contains hello")
+    sid = create_session(db)
+    skill_id = _script_skill(
+        db,
+        model="",
+        provider="zai",
+        verify_checks=[VerifyCheck(check=f"custom:{row.id}")],
+    )
+    attach_skills(db, sid, [skill_id])
+    record = get_skill(db, skill_id)
+    assert record is not None
+    name = skill_tool_name(record, used=set())
+    workspace = _JudgeProvider(["SHOULD NOT RUN"])
+    pinned = _JudgeProvider(["PASS"])
+    tools = build_session_skill_tools(
+        db,
+        sid,
+        workspace_dir="/tmp",
+        base_tools=ToolRegistry(),
+        provider=workspace,
+        fallback_model="workspace/model",
+        providers={"openrouter": workspace, "zai": pinned},
+    )
+    _, fn = tools.get(name)
+    assert fn is not None
+    out = asyncio.run(fn(text="hello"))
+    assert out["ok"] is True
+    assert pinned.requests
+    assert workspace.requests == []
 
 
 def test_session_skill_tool_custom_verify_without_provider_fails(

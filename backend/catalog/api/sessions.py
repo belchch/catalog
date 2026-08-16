@@ -716,6 +716,7 @@ def _ws_session_tools(
     websocket: WebSocket,
     provider: LLMProvider | None = None,
     fallback_model: str = "",
+    providers: dict[str, LLMProvider] | None = None,
 ) -> ToolRegistry:
     tools: ToolRegistry = build_document_tools(db, workspace, session_id)
 
@@ -740,6 +741,7 @@ def _ws_session_tools(
         reserved=set(tools.names()),
         provider=provider,
         fallback_model=fallback_model,
+        providers=providers,
     )
     for name in skill_tools.names():
         entry = skill_tools.get(name)
@@ -819,6 +821,7 @@ async def session_ws(
                     fallback_model=(
                         getattr(state, "active_model", None) or settings.default_model
                     ),
+                    providers=getattr(state, "providers", None),
                 )
 
                 if buffered is not None:

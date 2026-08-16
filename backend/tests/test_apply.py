@@ -747,6 +747,48 @@ def test_apply_script_custom_verify_empty_model_without_fallback_fails(
     assert provider.requests == []
 
 
+def test_apply_script_custom_verify_uses_pinned_provider(
+    db: Database, workspace: Path
+) -> None:
+    row = create_custom_check(db, name="Has source", prompt="есть source")
+    skill = SkillConfig(
+        name="echo",
+        description="echo",
+        system_prompt="",
+        allowed_tools=[],
+        model="",
+        provider="zai",
+        verify_checks=[VerifyCheck(check=f"custom:{row.id}")],
+        kind="script",
+        code="result = document\n",
+    )
+    skill_id = create_skill(
+        db, name=skill.name, description=skill.description, config=skill
+    )
+    input_doc_id = _ingest_input(db, workspace)
+    workspace_provider = _JudgeProvider(["SHOULD NOT RUN"])
+    pinned = _JudgeProvider(["PASS"])
+
+    result = asyncio.run(
+        apply_skill_collect(
+            provider=workspace_provider,
+            db=db,
+            workspace_dir=str(workspace),
+            skill=skill,
+            skill_id=skill_id,
+            input_doc_ids=[input_doc_id],
+            base_tools=build_document_tools(db, workspace),
+            persist=False,
+            fallback_model="workspace/model",
+            providers={"openrouter": workspace_provider, "zai": pinned},
+        )
+    )
+
+    assert result.status == "ok"
+    assert pinned.requests
+    assert workspace_provider.requests == []
+
+
 def test_apply_script_custom_verify_prefers_skill_model(
     db: Database, workspace: Path
 ) -> None:

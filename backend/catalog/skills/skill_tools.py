@@ -87,6 +87,7 @@ def build_session_skill_tools(
     reserved: set[str] | None = None,
     provider: LLMProvider | None = None,
     fallback_model: str = "",
+    providers: dict[str, LLMProvider] | None = None,
 ) -> ToolRegistry:
     reg = ToolRegistry()
     used: set[str] = set(reserved or ())
@@ -150,6 +151,7 @@ def build_session_skill_tools(
                     persist=False,
                     parent_run_id=SESSION_TOOL_PARENT_RUN_ID,
                     fallback_model=fallback_model,
+                    providers=providers,
                 )
             except Exception as exc:
                 return {

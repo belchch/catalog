@@ -91,6 +91,20 @@ def test_custom_checks_preview(client, provider) -> None:
     assert "Python 5 лет" in (message.content or "")
 
 
+def test_custom_checks_preview_uses_active_model(client, provider) -> None:
+    client.app.state.active_model = "ui/selected-model"
+    provider.script.append(
+        CompletionResult(content="PASS", tool_calls=[], finish_reason="stop")
+    )
+    resp = client.post(
+        "/custom-checks/preview",
+        json={"prompt": "есть опыт Python", "sample": "Python 5 лет"},
+    )
+    assert resp.status_code == 200
+    assert resp.json() == {"passed": True, "failures": []}
+    assert provider.requests[0]["model"] == "ui/selected-model"
+
+
 def test_custom_checks_preview_fail(client, provider) -> None:
     provider.script.append(
         CompletionResult(

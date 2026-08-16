@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 
 from catalog.api.deps import get_provider, get_settings, get_workspace_db
 from catalog.api.schemas import (
@@ -62,14 +62,16 @@ async def create_custom_check_endpoint(
 @router.post("/custom-checks/preview", response_model=CustomCheckPreviewOut)
 async def preview_custom_check_endpoint(
     body: CustomCheckPreviewRequest,
+    request: Request,
     provider: LLMProvider = Depends(get_provider),
     settings: Settings = Depends(get_settings),
 ) -> CustomCheckPreviewOut:
+    model = getattr(request.app.state, "active_model", None) or settings.default_model
     reason = await run_custom_judge(
         body.sample,
         body.prompt,
         provider=provider,
-        model=settings.default_model,
+        model=model,
         label="preview",
     )
     if reason is None:
