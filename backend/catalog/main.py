@@ -12,7 +12,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
-from catalog.api import checks, documents, models, runs, sessions, skills, workspaces
+from catalog.api import checks, documents, export, models, runs, sessions, skills, workspaces
 from catalog.config import get_settings, with_persisted_skill_budget, with_resolved_keys
 from catalog.llm.factory import build_providers, select_provider
 from catalog.llm.openrouter import build_debug_hooks
@@ -125,6 +125,7 @@ app.add_middleware(
 )
 
 app.include_router(documents.router)
+app.include_router(export.router)
 app.include_router(sessions.router)
 app.include_router(skills.router)
 app.include_router(runs.router)

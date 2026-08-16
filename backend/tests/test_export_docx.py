@@ -6,8 +6,17 @@ from pathlib import Path
 import docx
 from docx.oxml.ns import qn
 
-from catalog.documents.export_docx import render_docx
+from catalog.documents.export_docx import (
+    count_md_structure,
+    render_docx,
+    write_export_docx,
+)
 from catalog.documents.extract import extract_text
+from catalog.documents.ingest import ingest_file
+from catalog.documents.tools import build_document_tools
+from catalog.storage.db import Database
+from catalog.storage.repo_session import create_session
+from catalog.storage.repo_session_document import attach_documents
 
 
 def _document(data: bytes) -> docx.Document:
@@ -165,3 +174,79 @@ def test_render_docx_round_trip_structure(tmp_path: Path) -> None:
     assert "| 1 | 2 |" in extracted
     assert "| 3\\|4 | 5 |" in extracted
     assert extracted.index("| 3\\|4 | 5 |") < extracted.index("Closing.")
+
+
+def test_count_md_structure_headings_and_table_rows() -> None:
+    md = (
+        "# Title\n\n"
+        "## Section\n\n"
+        "| a | b |\n"
+        "| --- | --- |\n"
+        "| 1 | 2 |\n"
+        "| 3 | 4 |\n"
+    )
+    headings, tables = count_md_structure(md)
+    assert headings == 2
+    assert tables == 3
+
+
+def test_write_export_docx_ok_and_section_breaks(tmp_path: Path) -> None:
+    db = Database(":memory:")
+    db.init_schema()
+    first = ingest_file(db, tmp_path, filename="a.md", content=b"# One\n\nA")
+    second = ingest_file(db, tmp_path, filename="b.md", content=b"# Two\n\nB")
+    result = write_export_docx(
+        db, tmp_path, [first.id, second.id], title="Combined"
+    )
+    assert result["ok"] is True
+    assert result["path"].startswith("export/")
+    assert result["headings"] == 2
+    dest = tmp_path / result["path"]
+    assert dest.is_file()
+    document = docx.Document(str(dest))
+    assert len(document.sections) == 2
+    texts = [p.text for p in document.paragraphs if p.text]
+    assert "One" in texts
+    assert "Two" in texts
+
+
+def test_write_export_docx_session_isolation(tmp_path: Path) -> None:
+    db = Database(":memory:")
+    db.init_schema()
+    session_id = create_session(db)
+    attached = ingest_file(db, tmp_path, filename="in.md", content=b"# In")
+    orphan = ingest_file(db, tmp_path, filename="out.md", content=b"# Out")
+    attach_documents(db, session_id, [attached.id])
+    denied = write_export_docx(
+        db, tmp_path, [orphan.id], title="Nope", session_id=session_id
+    )
+    assert denied == {"error": "document_not_available_in_session"}
+    allowed = write_export_docx(
+        db, tmp_path, [attached.id], title="Yes", session_id=session_id
+    )
+    assert allowed["ok"] is True
+
+
+def test_write_export_docx_self_check_fails_on_mismatch(
+    tmp_path: Path, monkeypatch
+) -> None:
+    db = Database(":memory:")
+    db.init_schema()
+    row = ingest_file(db, tmp_path, filename="note.md", content=b"# Title\n\nbody")
+    monkeypatch.setattr(
+        "catalog.documents.export_docx.count_docx_headings", lambda _path: 0
+    )
+    result = write_export_docx(db, tmp_path, [row.id], title="Broken")
+    assert result["ok"] is False
+    assert result["path"].startswith("export/")
+    assert (tmp_path / result["path"]).is_file()
+
+
+def test_export_docx_tool_registered_as_write(tmp_path: Path) -> None:
+    db = Database(":memory:")
+    db.init_schema()
+    tools = build_document_tools(db, tmp_path)
+    assert "export_docx" in tools.names()
+    subset = tools.filter(["export_docx"])
+    assert subset.names() == ["export_docx"]
+    assert subset.specs()[0].side == "write"

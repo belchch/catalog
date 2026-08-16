@@ -61,6 +61,7 @@ class Settings:
     max_skill_depth: int = 2
     skill_budget_llm_calls: int = 60
     skill_budget_nested_runs: int = 20
+    docx_template: str = ""
 
 
 def resolve_provider_keys(
@@ -126,6 +127,7 @@ def get_settings() -> Settings:
         max_skill_depth=_env_int("APP_MAX_SKILL_DEPTH", 2),
         skill_budget_llm_calls=_env_int("APP_SKILL_BUDGET_LLM_CALLS", 60, minimum=0),
         skill_budget_nested_runs=_env_int("APP_SKILL_BUDGET_NESTED_RUNS", 20, minimum=0),
+        docx_template=os.getenv("CATALOG_DOCX_TEMPLATE", "").strip(),
     )
 
 

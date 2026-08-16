@@ -15,6 +15,7 @@ from catalog.storage.repo_document import (
 )
 
 _CATALOG_DIR = ".catalog"
+_EXPORT_DIR = "export"
 _HASH_CHUNK_SIZE = 1024 * 1024
 
 
@@ -73,7 +74,9 @@ def _walk_workspace(root: Path) -> tuple[list[_FsEntry], list[str]]:
     skipped: list[str] = []
     for dirpath, dirnames, filenames in os.walk(root):
         dirnames[:] = [
-            d for d in dirnames if d != _CATALOG_DIR and not _is_hidden_part(d)
+            d
+            for d in dirnames
+            if d != _CATALOG_DIR and d != _EXPORT_DIR and not _is_hidden_part(d)
         ]
         base = Path(dirpath)
         for name in filenames:
@@ -87,7 +90,7 @@ def _walk_workspace(root: Path) -> tuple[list[_FsEntry], list[str]]:
             ):
                 skipped.append(rel)
                 continue
-            if _CATALOG_DIR in Path(rel).parts:
+            if _CATALOG_DIR in Path(rel).parts or _EXPORT_DIR in Path(rel).parts:
                 skipped.append(rel)
                 continue
             kind = kind_for_filename(name, skip=True)

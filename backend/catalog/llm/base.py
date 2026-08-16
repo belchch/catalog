@@ -11,6 +11,7 @@ class ToolSpec:
     name: str
     description: str
     parameters: dict = field(default_factory=dict)
+    side: str = "read"
 
 
 @dataclass

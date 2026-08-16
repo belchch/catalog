@@ -37,6 +37,7 @@ from catalog.agent.registry import ToolRegistry
 from catalog.agent.runner import run_agent_collect
 from catalog.api.skills import build_skill_from_session
 from catalog.config import Settings
+from catalog.documents.export_docx import write_export_docx
 from catalog.documents.ingest import ingest_file
 from catalog.documents.tools import build_document_tools
 from catalog.llm.base import LLMProvider, Message
@@ -66,7 +67,7 @@ PLAN_MESSAGE_TEMPLATE = (
 
 # Acceptance criteria constants (step-08 plan).
 REQUIRED_CHECKS = {"non_empty", "markdown_well_formed", "has_section"}
-ALLOWED_TOOL_SET = {"read_document", "list_documents"}
+ALLOWED_TOOL_SET = {"read_document", "list_documents", "export_docx"}
 
 
 async def run_golden(
@@ -170,6 +171,12 @@ async def run_golden(
         "apply trace has no read_document tool_call"
     )
 
+    export = write_export_docx(
+        db, workspace_dir, [result.output_doc_id], title="golden-export"
+    )
+    assert export.get("ok") is True, f"export failed: {export}"
+    assert str(export.get("path", "")).startswith("export/"), export
+
     return {
         "doc1_id": doc1.id,
         "doc2_id": doc2.id,
@@ -179,6 +186,8 @@ async def run_golden(
         "result_preview": (result.result_text or "")[:200],
         "planner_capped": planner_capped,
         "apply_status": result.status,
+        "export_path": export["path"],
+        "export_ok": export["ok"],
     }
 
 

@@ -32,6 +32,14 @@ verify_checks: [
 - `json_schema` — соответствует JSON-Schema. `params: { schema }`.
 - `archimate_well_formed` — well-formed XML (для будущего экспорта в ArchiMate).
 
+## Проверки экспорта
+
+Самопроверка экспорта docx выполняется **внутри** тула/REST `export_docx`, не в этом реестре: `CheckFn` видит только текст результата скилла, не файлы на диске.
+
+После записи в `export/` файл перечитывается через `extract_text(..., "docx")`. Сверяются число заголовков (стили Heading в записанном docx) и число строк таблиц (pipe-строки в extract, без разделителя). Расхождение → `{ok: false}`. Каталог `export/` не индексируется сканом.
+
+`export_docx` — первый write-тул в реестре (`ToolSpec.side="write"`). Механика разрешений read/write не реализована.
+
 ## Правила расширения
 1. Завести `id` (snake_case), краткое описание, набор `params`.
 2. Зарегистрировать реализацию в коде (registry: `id -> fn(text, params) -> bool | {ok, reason}`).

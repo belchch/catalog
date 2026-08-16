@@ -73,6 +73,11 @@ async def _tool_read(reg, doc_id: str) -> dict:
     return await fn(doc_id=doc_id)
 
 
+async def _tool_export(reg, doc_ids: list[str], **kwargs) -> dict:
+    _, fn = reg.get("export_docx")
+    return await fn(doc_ids=doc_ids, **kwargs)
+
+
 def test_tools_scoped_to_session(db: Database, tmp_path: Path) -> None:
     session_a = create_session(db)
     session_b = create_session(db)
@@ -190,5 +195,8 @@ def test_global_list_unaffected_by_session_scope(
     listed = asyncio.run(_tool_list(tools))
     assert [item["id"] for item in listed] == [attached.id]
     assert asyncio.run(_tool_read(tools, orphan.id)) == {
+        "error": "document_not_available_in_session"
+    }
+    assert asyncio.run(_tool_export(tools, [orphan.id], title="x")) == {
         "error": "document_not_available_in_session"
     }

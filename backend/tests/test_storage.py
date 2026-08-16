@@ -304,15 +304,19 @@ def test_read_document_tool_md(db: Database, tmp_path: Path) -> None:
 
 def test_document_tools_registered(db: Database, tmp_path: Path) -> None:
     reg = build_document_tools(db, tmp_path)
-    assert reg.names() == ["list_documents", "read_document"]
+    assert reg.names() == ["list_documents", "read_document", "export_docx"]
 
     specs = {s.name: s for s in reg.specs()}
     assert specs["list_documents"].parameters == {"type": "object", "properties": {}}
+    assert specs["list_documents"].side == "read"
     assert specs["read_document"].parameters == {
         "type": "object",
         "properties": {"doc_id": {"type": "string"}},
         "required": ["doc_id"],
     }
+    assert specs["read_document"].side == "read"
+    assert specs["export_docx"].side == "write"
+    assert specs["export_docx"].parameters["required"] == ["doc_ids"]
 
 
 def test_row_factory_is_set(db: Database) -> None:

@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Any
 
 from catalog.agent.registry import ToolRegistry
+from catalog.documents.export_docx import write_export_docx
 from catalog.documents.extract import extract_text
 from catalog.llm.base import ToolSpec
 from catalog.storage.db import Database
@@ -42,6 +43,25 @@ def build_document_tools(
         text = extract_text(os.path.join(workspace, row.path), row.kind)
         return {"title": row.title, "kind": row.kind, "text": text}
 
+    async def _export_docx(
+        *,
+        doc_ids: list[str] | str,
+        title: str = "",
+        template: str = "",
+    ) -> dict[str, Any]:
+        if isinstance(doc_ids, str):
+            ids = [doc_ids] if doc_ids.strip() else []
+        else:
+            ids = [str(item).strip() for item in doc_ids if str(item).strip()]
+        return write_export_docx(
+            db,
+            workspace,
+            ids,
+            title=title or "",
+            template=template or "",
+            session_id=session_id,
+        )
+
     scope_note = (
         " Scope: only documents attached to the current session."
         if session_id is not None
@@ -72,5 +92,30 @@ def build_document_tools(
             },
         ),
         _read_document,
+    )
+    reg.register(
+        ToolSpec(
+            name="export_docx",
+            description=(
+                "Export one or more documents to a single .docx in export/. "
+                "Multiple documents are joined with section breaks. "
+                "Returns ok, path, headings and tables. This is a write tool."
+                + scope_note
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "doc_ids": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                    },
+                    "title": {"type": "string"},
+                    "template": {"type": "string"},
+                },
+                "required": ["doc_ids"],
+            },
+            side="write",
+        ),
+        _export_docx,
     )
     return reg

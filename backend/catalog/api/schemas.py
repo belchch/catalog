@@ -51,6 +51,27 @@ class DocumentOut(BaseModel):
     created_at: str
 
 
+class ExportDocxRequest(BaseModel):
+    doc_ids: list[str] = Field(min_length=1)
+    title: str = ""
+    template: str = ""
+
+    @field_validator("doc_ids")
+    @classmethod
+    def _non_empty_doc_ids(cls, value: list[str]) -> list[str]:
+        cleaned = [str(item).strip() for item in value if str(item).strip()]
+        if not cleaned:
+            raise ValueError("doc_ids must be a non-empty list")
+        return cleaned
+
+
+class ExportDocxOut(BaseModel):
+    ok: bool
+    path: str
+    headings: int
+    tables: int
+
+
 class SkillOut(BaseModel):
     id: str
     name: str

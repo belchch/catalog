@@ -3,9 +3,20 @@ from __future__ import annotations
 import re
 from io import BytesIO
 from pathlib import Path
+from typing import Any
 
 import docx
+from docx.enum.section import WD_SECTION
 from docx.oxml.ns import qn
+
+from catalog.config import get_settings
+from catalog.documents.extract import extract_text
+from catalog.documents.ingest import allocate_rel_path, safe_filename
+from catalog.storage.db import Database
+from catalog.storage.repo_document import get_document
+from catalog.storage.repo_session_document import list_session_documents
+
+EXPORT_DIR = "export"
 
 _FRONTMATTER_RE = re.compile(r"\A---[ \t]*\n(.*?\n)---[ \t]*(?:\n|\Z)", re.DOTALL)
 _WIKI_RE = re.compile(r"(?<!!)\[\[([^\]]+)\]\]")
@@ -19,16 +30,173 @@ _MONO_FONT = "Courier New"
 
 
 def render_docx(md: str, *, template: Path | None = None) -> bytes:
+    return render_docx_parts([md], template=template)
+
+
+def render_docx_parts(
+    parts: list[str],
+    *,
+    template: Path | None = None,
+    title: str = "",
+) -> bytes:
     document = _open_document(template)
-    body, props = _split_frontmatter(md or "")
-    if props.get("title"):
-        document.core_properties.title = props["title"]
-    if props.get("author"):
-        document.core_properties.author = props["author"]
-    _render_blocks(document, _rewrite_wikilinks(body))
+    if title.strip():
+        document.core_properties.title = title.strip()
+    for index, md in enumerate(parts):
+        if index > 0:
+            document.add_section(WD_SECTION.NEW_PAGE)
+        body, props = _split_frontmatter(md or "")
+        if index == 0 and not title.strip():
+            if props.get("title"):
+                document.core_properties.title = props["title"]
+            if props.get("author"):
+                document.core_properties.author = props["author"]
+        elif index == 0 and props.get("author"):
+            document.core_properties.author = props["author"]
+        _render_blocks(document, _rewrite_wikilinks(body))
     buffer = BytesIO()
     document.save(buffer)
     return buffer.getvalue()
+
+
+def count_md_structure(md: str) -> tuple[int, int]:
+    body, _props = _split_frontmatter(md or "")
+    body = _rewrite_wikilinks(body)
+    headings = 0
+    table_rows = 0
+    lines = body.split("\n")
+    index = 0
+    while index < len(lines):
+        line = lines[index]
+        if line.startswith("```"):
+            index += 1
+            while index < len(lines) and not lines[index].startswith("```"):
+                index += 1
+            if index < len(lines):
+                index += 1
+            continue
+        if _parse_heading(line) is not None:
+            headings += 1
+            index += 1
+            continue
+        stripped = line.lstrip()
+        if stripped.startswith("|") and "|" in stripped[1:]:
+            while index < len(lines):
+                candidate = lines[index].lstrip()
+                if not (candidate.startswith("|") and "|" in candidate[1:]):
+                    break
+                cells = _split_table_row(candidate)
+                if not _is_separator_row(cells):
+                    table_rows += 1
+                index += 1
+            continue
+        index += 1
+    return headings, table_rows
+
+
+def count_extracted_table_rows(text: str) -> int:
+    rows = 0
+    for line in text.split("\n"):
+        stripped = line.lstrip()
+        if not (stripped.startswith("|") and "|" in stripped[1:]):
+            continue
+        if not _is_separator_row(_split_table_row(stripped)):
+            rows += 1
+    return rows
+
+
+def count_docx_headings(path: str | Path) -> int:
+    document = docx.Document(str(path))
+    count = 0
+    for paragraph in document.paragraphs:
+        style = paragraph.style
+        if style is None:
+            continue
+        name = style.name or ""
+        if name.startswith("Heading"):
+            count += 1
+    return count
+
+
+def _resolve_template(workspace: Path, template: str) -> Path | None:
+    explicit = (template or "").strip()
+    if explicit:
+        path = Path(explicit)
+        if not path.is_absolute():
+            path = workspace / path
+        if not path.is_file():
+            raise FileNotFoundError(str(path))
+        return path
+    raw = (get_settings().docx_template or "").strip()
+    if not raw:
+        return None
+    path = Path(raw)
+    if not path.is_absolute():
+        path = workspace / path
+    if path.is_file():
+        return path
+    return None
+
+
+def write_export_docx(
+    db: Database,
+    workspace_dir: str | Path,
+    doc_ids: list[str],
+    *,
+    title: str = "",
+    template: str = "",
+    session_id: str | None = None,
+) -> dict[str, Any]:
+    if session_id is not None:
+        attached_ids = {row.id for row in list_session_documents(db, session_id)}
+        for doc_id in doc_ids:
+            if doc_id not in attached_ids:
+                return {"error": "document_not_available_in_session"}
+
+    if not doc_ids:
+        return {"error": "doc_ids required"}
+
+    workspace = Path(workspace_dir)
+    parts: list[str] = []
+    first_title = ""
+    expected_headings = 0
+    expected_tables = 0
+    for doc_id in doc_ids:
+        row = get_document(db, doc_id)
+        if row is None:
+            return {"error": "document not found"}
+        if not first_title:
+            first_title = row.title
+        text = extract_text(str(workspace / row.path), row.kind)
+        parts.append(text)
+        headings, tables = count_md_structure(text)
+        expected_headings += headings
+        expected_tables += tables
+
+    try:
+        template_path = _resolve_template(workspace, template)
+    except FileNotFoundError:
+        return {"error": "template not found"}
+
+    export_title = (title or "").strip() or first_title or "export"
+    rel_path = allocate_rel_path(
+        workspace, safe_filename(export_title, ".docx"), subdir=EXPORT_DIR
+    )
+    dest = workspace / rel_path
+    dest.write_bytes(
+        render_docx_parts(parts, template=template_path, title=export_title)
+    )
+
+    extracted = extract_text(str(dest), "docx")
+    actual_headings = count_docx_headings(dest)
+    actual_tables = count_extracted_table_rows(extracted)
+    ok = actual_headings == expected_headings and actual_tables == expected_tables
+    return {
+        "ok": ok,
+        "path": rel_path,
+        "headings": actual_headings,
+        "tables": actual_tables,
+    }
 
 
 def _open_document(template: Path | None) -> docx.Document:

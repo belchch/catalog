@@ -124,6 +124,7 @@ def test_business_endpoints_409_without_workspace(client_no_workspace) -> None:
     assert client.get("/sessions").status_code == 409
     assert client.get("/documents").status_code == 409
     assert client.get("/skills").status_code == 409
+    assert client.post("/export/docx", json={"doc_ids": ["x"]}).status_code == 409
     assert client.get("/settings").status_code == 200
     assert client.get("/providers").status_code == 200
     assert client.get("/models").status_code == 200
@@ -2436,3 +2437,40 @@ def test_apply_requires_at_least_one_doc(client, db) -> None:
     skill_id = _seed_committed_skill(db)
     resp = client.post(f"/skills/{skill_id}/apply", json={})
     assert resp.status_code == 422
+
+
+def test_export_docx_200_writes_export_and_rescan_skips(client, db) -> None:
+    from catalog.storage.repo_document import list_documents
+
+    doc_id = _upload(client, "note.md", b"# Title\n\nHello\n")
+    resp = client.post("/export/docx", json={"doc_ids": [doc_id], "title": "Report"})
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["ok"] is True
+    assert body["path"].startswith("export/")
+    assert body["path"].endswith(".docx")
+    assert body["headings"] >= 1
+    workspace = Path(client.app.state.workspace)
+    dest = workspace / body["path"]
+    assert dest.is_file()
+    before = {d.path for d in list_documents(db)}
+    assert body["path"] not in before
+    again = client.post("/workspaces/rescan").json()
+    assert body["path"] not in again["added"]
+    after = {d.path for d in list_documents(db)}
+    assert body["path"] not in after
+
+
+def test_export_docx_404_unknown_document(client) -> None:
+    resp = client.post("/export/docx", json={"doc_ids": ["missing-id"]})
+    assert resp.status_code == 404
+    assert resp.json()["detail"] == "document not found"
+
+
+def test_export_docx_filter_allows_write_tool(client, db) -> None:
+    workspace = Path(client.app.state.workspace)
+    tools = build_document_tools(db, workspace)
+    subset = tools.filter(["export_docx"])
+    assert subset.names() == ["export_docx"]
+    spec = subset.specs()[0]
+    assert spec.side == "write"

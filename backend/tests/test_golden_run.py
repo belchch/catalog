@@ -181,3 +181,6 @@ def test_golden_run_end_to_end(tmp_path: Path) -> None:
     assert report["apply_status"] == "ok"
     assert report["run_output_doc_id"]
     assert "## Тезисы" in report["result_preview"]
+    assert report["export_ok"] is True
+    assert str(report["export_path"]).startswith("export/")
+    assert (Path(workspace) / report["export_path"]).is_file()

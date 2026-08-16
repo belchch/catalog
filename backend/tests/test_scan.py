@@ -16,6 +16,22 @@ from catalog.storage.schema import (
 from catalog.storage.workspace import WorkspaceManager
 
 
+def test_scan_skips_export_dir(db: Database, tmp_path: Path) -> None:
+    from catalog.documents.export_docx import render_docx
+
+    export = tmp_path / "export"
+    export.mkdir()
+    (export / "out.docx").write_bytes(render_docx("# Hi\n\nbody"))
+    (tmp_path / "keep.md").write_text("x", encoding="utf-8")
+
+    report = scan_workspace(db, tmp_path)
+    assert report.added == ["keep.md"]
+    assert "export/out.docx" not in report.added
+    again = scan_workspace(db, tmp_path)
+    assert again.added == []
+    assert again.updated == []
+
+
 def test_scan_indexes_nested_and_skips(db: Database, tmp_path: Path) -> None:
     nested = tmp_path / "sub" / "deep"
     nested.mkdir(parents=True)
