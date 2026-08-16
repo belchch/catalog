@@ -16,22 +16,22 @@ vi.mock('../ws.ts', () => ({
 
 interface CapturedConn {
   onEvent: ((e: ServerEvent) => void) | null
-  close: ReturnType<typeof vi.fn>
-  cancel: ReturnType<typeof vi.fn>
+  close: ReturnType<typeof vi.fn<() => void>>
+  cancel: ReturnType<typeof vi.fn<() => void>>
 }
 
 const captured: CapturedConn = {
   onEvent: null,
-  close: vi.fn(),
-  cancel: vi.fn(),
+  close: vi.fn<() => void>(),
+  cancel: vi.fn<() => void>(),
 }
 
 describe('useRunStream', () => {
   beforeEach(() => {
     connectRun.mockReset()
     captured.onEvent = null
-    captured.close = vi.fn()
-    captured.cancel = vi.fn()
+    captured.close = vi.fn<() => void>()
+    captured.cancel = vi.fn<() => void>()
     connectRun.mockImplementation(
       (_runId: string, onEvent: (e: ServerEvent) => void): RunConnection => {
         captured.onEvent = onEvent
