@@ -127,6 +127,33 @@ def test_run_script_main_document_arg() -> None:
     assert out == "cba"
 
 
+def test_run_script_main_text_alias() -> None:
+    code = "def main(text: str) -> str:\n    return text.upper()\n"
+    out = run_script(code, "hello", memory_bytes=_TEST_MEM)
+    assert out == "HELLO"
+
+
+def test_run_script_main_texts_alias() -> None:
+    code = "def main(texts):\n    return '|'.join(texts)\n"
+    out = run_script(
+        code, "hello", documents=["hello", "world"], memory_bytes=_TEST_MEM
+    )
+    assert out == "hello|world"
+
+
+def test_run_script_main_unsupported_required_param() -> None:
+    """An unrecognised required parameter yields a helpful error, not a TypeError."""
+    code = "def main(payload):\n    return payload\n"
+    with pytest.raises(ScriptRuntimeError, match="unsupported required parameter"):
+        run_script(code, "hello", memory_bytes=_TEST_MEM)
+
+
+def test_run_script_main_optional_unknown_param_uses_default() -> None:
+    code = "def main(document, sep=','):\n    return sep.join([document, document])\n"
+    out = run_script(code, "ab", memory_bytes=_TEST_MEM)
+    assert out == "ab,ab"
+
+
 def test_run_script_documents_global_defaults_to_single() -> None:
     code = "result = str(len(documents)) + ':' + documents[0]\n"
     out = run_script(code, "solo", memory_bytes=_TEST_MEM)
@@ -206,3 +233,27 @@ def test_run_script_timeout() -> None:
     code = "while True:\n    pass\n"
     with pytest.raises(ScriptRuntimeError, match="time limit"):
         run_script(code, "", timeout_seconds=0.3, memory_bytes=_TEST_MEM)
+
+
+def test_run_script_timeout_covers_main_body() -> None:
+    """The timer must still be armed while main() runs, not only at module level."""
+    code = "def main(document):\n    while True:\n        pass\n"
+    with pytest.raises(ScriptRuntimeError, match="time limit"):
+        run_script(code, "", timeout_seconds=0.3, memory_bytes=_TEST_MEM)
+
+
+# --------------------------------------------------------------------------- #
+# Error wrapping
+# --------------------------------------------------------------------------- #
+
+
+def test_run_script_wraps_module_level_error() -> None:
+    with pytest.raises(ScriptRuntimeError, match="script raised"):
+        run_script("x = 1 / 0\n", "irrelevant", memory_bytes=_TEST_MEM)
+
+
+def test_run_script_wraps_error_raised_inside_main() -> None:
+    """An exception from main() must not escape as a raw error (it would abort the run)."""
+    code = "def main(document):\n    return 1 / 0\n"
+    with pytest.raises(ScriptRuntimeError, match="script raised"):
+        run_script(code, "irrelevant", memory_bytes=_TEST_MEM)

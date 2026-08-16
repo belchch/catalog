@@ -12,10 +12,12 @@ two cooperating pieces:
   the usual footguns (``eval``/``exec``/``compile``/``open``/``breakpoint``).
 - :func:`run_script` — runtime execution in a restricted namespace: a tiny
   allow-list of builtins, a curated set of safe stdlib modules, and a wall-clock
-  timeout. The script receives input as ``document`` (alias ``input_text``,
-  joined text) and ``documents`` (``list[str]`` of each input). It returns
-  its result by ``return`` from ``main()`` / ``main(document)`` /
-  ``main(documents)``, by assigning a global ``result``, or via ``print``.
+  timeout. The script receives input as ``document`` (aliases ``input_text``,
+  ``doc_text``, ``text``; joined text) and ``documents`` (alias ``texts``;
+  ``list[str]`` of each input). It returns its result by ``return`` from
+  ``main()`` / ``main(document)`` / ``main(documents)``, by assigning a global
+  ``result``, or via ``print``. Both the timeout and the error wrapping cover
+  the ``main()`` call, not just module-level execution.
 
 This is deliberately a *process-local* sandbox (option (a) of the plan's
 sandbox decision): simple and dependency-free, with defence in depth (AST
@@ -277,6 +279,11 @@ def _build_globals(
     return namespace
 
 
+_LIST_PARAM_NAMES = ("documents", "texts")
+_TEXT_PARAM_NAMES = ("document", "input_text", "doc_text", "text")
+_INPUT_PARAM_LIST = ", ".join((*_TEXT_PARAM_NAMES, *_LIST_PARAM_NAMES))
+
+
 def _call_main(main: Any, namespace: dict[str, Any]) -> Any:
     try:
         sig = inspect.signature(main)
@@ -284,18 +291,26 @@ def _call_main(main: Any, namespace: dict[str, Any]) -> Any:
         return main()
 
     kwargs: dict[str, Any] = {}
+    unknown: list[str] = []
     for name, param in sig.parameters.items():
         if param.kind in (
             inspect.Parameter.VAR_POSITIONAL,
             inspect.Parameter.VAR_KEYWORD,
         ):
             continue
-        if name == "documents":
+        if name in _LIST_PARAM_NAMES:
             kwargs[name] = namespace["documents"]
-        elif name in ("document", "input_text", "doc_text"):
+        elif name in _TEXT_PARAM_NAMES:
             kwargs[name] = namespace["document"]
-        elif param.default is not inspect.Parameter.empty:
-            continue
+        elif param.default is inspect.Parameter.empty:
+            unknown.append(name)
+
+    if unknown:
+        names = ", ".join(repr(name) for name in unknown)
+        raise ScriptRuntimeError(
+            f"main() has unsupported required parameter(s): {names}; "
+            f"the input is passed as one of: {_INPUT_PARAM_LIST}"
+        )
 
     bound = sig.bind(**kwargs)
     bound.apply_defaults()
@@ -378,6 +393,7 @@ def run_script(
     signal.signal(signal.SIGALRM, _timeout_handler)
     try:
         exec(compile(code, "<script-skill>", "exec"), namespace)  # noqa: S102
+        return _extract_result(namespace)
     except _ScriptTimeoutError as exc:
         raise ScriptRuntimeError(
             f"script exceeded the {timeout_seconds}s time limit"
@@ -385,13 +401,13 @@ def run_script(
     except MemoryError as exc:
         # Unlikely now that we don't set RLIMIT_AS, but surface it deterministically.
         raise ScriptRuntimeError("script exceeded the memory limit") from exc
+    except ScriptRuntimeError:
+        raise
     except Exception as exc:  # noqa: BLE001 — surface any script error verbatim
         raise ScriptRuntimeError(f"script raised: {exc}") from exc
     finally:
         signal.setitimer(signal.ITIMER_REAL, 0)
         signal.signal(signal.SIGALRM, old_handler)
-
-    return _extract_result(namespace)
 
 
 async def run_script_async(
