@@ -15,6 +15,7 @@ from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from typing import cast
 
+from catalog.skills.budget import estimate_skill_llm_calls
 from catalog.skills.config import SkillConfig, compute_tags
 from catalog.skills.repo_run import delete_runs_for_skill
 from catalog.storage.db import Database
@@ -109,6 +110,7 @@ def list_skills(db: Database, status: str | None = None) -> list[dict]:
             config_model = config.model or None
             config_provider = config.provider or None
             config_reasoning = config.reasoning or None
+            config_cost = estimate_skill_llm_calls(config)
         except (ValueError, KeyError):
             # Unparseable/legacy config: degrade to the agent defaults so the
             # row still renders on the UI with an ``ai`` tag.
@@ -118,6 +120,7 @@ def list_skills(db: Database, status: str | None = None) -> list[dict]:
             config_model = None
             config_provider = None
             config_reasoning = None
+            config_cost = 24
         result.append(
             {
                 "id": r["id"],
@@ -132,6 +135,7 @@ def list_skills(db: Database, status: str | None = None) -> list[dict]:
                 "model": config_model,
                 "provider": config_provider,
                 "reasoning": config_reasoning,
+                "estimated_llm_calls": config_cost,
             }
         )
     return result

@@ -20,8 +20,10 @@ from catalog.skills.apply import apply_skill_collect
 from catalog.skills.budget import (
     SkillBudget,
     estimate_skill_budget,
+    estimate_skill_llm_calls,
     nested_skill_hold,
 )
+from catalog.skills.config import SKILL_KINDS
 from catalog.skills.repo_run import create_run, finish_run
 from catalog.skills.repo_skill import SkillRecord
 from catalog.storage.db import Database
@@ -204,10 +206,12 @@ def build_session_skill_tools(
         return reg
     reserved_names = frozenset(reserved or ())
     used: set[str] = set(reserved_names)
-    resolved_provider: LLMProvider = provider or _UnusedProvider()
-    allowed_kinds = kinds if kinds is not None else frozenset({"script"})
+    session_provider: LLMProvider = provider or _UnusedProvider()
+    allowed_kinds = kinds if kinds is not None else frozenset(SKILL_KINDS)
     for skill in list_session_skills(db, session_id):
         if skill.id in ctx.chain:
+            continue
+        if skill.status != "committed":
             continue
         if skill.config.kind not in allowed_kinds:
             continue
@@ -215,14 +219,24 @@ def build_session_skill_tools(
         pinned_hash = config_hash(skill.config.to_json())
         skill_id = skill.id
         skill_config = skill.config
+        skill_kind = skill_config.kind
+        has_custom_verify = any(
+            check.check.startswith("custom:") for check in skill_config.verify_checks
+        )
+        if skill_kind == "script" and not has_custom_verify:
+            skill_provider: LLMProvider = _UnusedProvider()
+        else:
+            skill_provider = session_provider
         description = (
             (skill.description or skill.name).strip()
-            or f"Run frozen script skill {skill.name!r}"
+            or f"Run frozen {skill_kind} skill {skill.name!r}"
         )
         n_checks = len(skill_config.verify_checks)
+        cost = estimate_skill_llm_calls(skill_config)
         description = (
-            f"{description} (script"
+            f"{description} ({skill_kind}"
             + (f", {n_checks} verify checks" if n_checks else "")
+            + f", ~{cost} LLM calls"
             + f"; pinned={pinned_hash})"
         )
 
@@ -239,6 +253,7 @@ def build_session_skill_tools(
             _reserved: frozenset[str] = reserved_names,
             _budget: SkillBudget | None = budget,
             _kinds: frozenset[str] = allowed_kinds,
+            _provider: LLMProvider = skill_provider,
         ) -> dict[str, Any]:
             nested = _ctx.nested(_skill_id)
             if texts is not None:
@@ -292,7 +307,7 @@ def build_session_skill_tools(
                 workspace_dir=workspace_dir,
                 base_tools=base_tools,
                 reserved=_reserved | set(base_tools.names()),
-                provider=resolved_provider,
+                provider=provider,
                 fallback_model=fallback_model,
                 providers=providers,
                 call_context=nested,
@@ -304,7 +319,7 @@ def build_session_skill_tools(
             try:
                 with nested_skill_hold(hold, _budget):
                     result = await apply_skill_collect(
-                        provider=resolved_provider,
+                        provider=_provider,
                         db=db,
                         workspace_dir=workspace_dir,
                         skill=_config,

@@ -66,6 +66,7 @@ class SkillOut(BaseModel):
     provider: str | None = None
     model: str | None = None
     reasoning: str | None = None
+    estimated_llm_calls: int = 0
 
 
 class ApplyRequest(BaseModel):

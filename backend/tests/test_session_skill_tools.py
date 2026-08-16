@@ -17,6 +17,7 @@ from catalog.skills.apply import apply_skill_collect
 from catalog.skills.budget import (
     SkillBudget,
     estimate_skill_budget,
+    estimate_skill_llm_calls,
     make_turn_budget,
     nested_skill_hold,
     turn_deadline_seconds,
@@ -107,16 +108,65 @@ def _agent_skill(
     name: str = "Agent Skill",
     max_iterations: int = 8,
     max_retries: int = 2,
+    verify_checks: list[VerifyCheck] | None = None,
+    model: str = "x",
+    provider: str = "",
 ) -> str:
     config = SkillConfig(
         name=name,
         description="Agent",
         system_prompt="do things",
         allowed_tools=["read_document"],
-        model="x",
+        model=model,
+        provider=provider,
         kind="agent",
         max_iterations=max_iterations,
         max_retries=max_retries,
+        verify_checks=verify_checks
+        if verify_checks is not None
+        else [VerifyCheck(check="non_empty")],
+    )
+    return create_skill(
+        db,
+        name=config.name,
+        description=config.description,
+        config=config,
+        status="committed",
+    )
+
+
+def _pipeline_skill(
+    db: Database,
+    *,
+    name: str = "Pipe Skill",
+    steps: list[PipelineStep] | None = None,
+    verify_checks: list[VerifyCheck] | None = None,
+    max_iterations: int = 5,
+    model: str = "x",
+    provider: str = "",
+) -> str:
+    config = SkillConfig(
+        name=name,
+        description="Pipeline",
+        system_prompt="",
+        allowed_tools=[],
+        model=model,
+        provider=provider,
+        kind="pipeline",
+        max_iterations=max_iterations,
+        steps=steps
+        if steps is not None
+        else [
+            PipelineStep(
+                id="upper",
+                type="script",
+                input="documents",
+                code="def main(document):\n    return document.upper()\n",
+            ),
+        ],
+        verify_checks=verify_checks
+        if verify_checks is not None
+        else [VerifyCheck(check="non_empty")],
     )
     return create_skill(
         db,
@@ -195,6 +245,203 @@ def test_session_skill_tool_runs_script_and_pins(db: Database) -> None:
     assert verify
     assert verify[0]["data"]["passed"] is True
     assert list_documents(db) == []
+    spec = tools.get(name)
+    assert spec is not None
+    assert "script" in spec[0].description
+    assert "~0 LLM calls" in spec[0].description
+
+
+def test_session_skill_tool_runs_agent_and_pins(db: Database) -> None:
+    sid = create_session(db)
+    skill_id = _agent_skill(db)
+    attach_skills(db, sid, [skill_id])
+    record = get_skill(db, skill_id)
+    assert record is not None
+    name = skill_tool_name(record, used=set())
+    provider = _JudgeProvider(["AGENT OK"])
+    tools = build_session_skill_tools(
+        db,
+        sid,
+        workspace_dir="/tmp",
+        base_tools=build_document_tools(db, "/tmp"),
+        provider=provider,
+        fallback_model="ws/model",
+    )
+    spec = tools.get(name)
+    assert spec is not None
+    assert "agent" in spec[0].description
+    assert "~24 LLM calls" in spec[0].description
+    _, fn = spec
+    out = asyncio.run(fn(text="hello"))
+    assert out["ok"] is True
+    assert out["text"] == "AGENT OK"
+    assert out["skill_id"] == skill_id
+    assert out["config_hash"] == config_hash(record.config.to_json())
+    assert out["run_id"]
+    assert out["depth"] == 1
+    assert out["verify_failures"] == []
+    assert provider.requests
+    run = get_run(db, out["run_id"])
+    assert run is not None
+    assert run["parent_run_id"] == SESSION_TOOL_PARENT_RUN_ID
+    assert run["persist"] is False
+    assert run["result_text"] == "AGENT OK"
+    entries = json.loads(run["trace_json"] or "[]")
+    pins = [e for e in entries if e["kind"] == "skill_pin"]
+    assert pins
+    assert pins[0]["data"]["skill_id"] == skill_id
+    assert pins[0]["data"]["config_hash"] == out["config_hash"]
+    verify = [e for e in entries if e["kind"] == "verify"]
+    assert verify
+    assert verify[0]["data"]["passed"] is True
+
+
+def test_session_skill_tool_runs_pipeline_and_pins(db: Database) -> None:
+    sid = create_session(db)
+    skill_id = _pipeline_skill(db)
+    attach_skills(db, sid, [skill_id])
+    record = get_skill(db, skill_id)
+    assert record is not None
+    name = skill_tool_name(record, used=set())
+    provider = _JudgeProvider(["SHOULD NOT RUN"])
+    tools = build_session_skill_tools(
+        db,
+        sid,
+        workspace_dir="/tmp",
+        base_tools=ToolRegistry(),
+        provider=provider,
+    )
+    spec = tools.get(name)
+    assert spec is not None
+    assert "pipeline" in spec[0].description
+    assert "~5 LLM calls" in spec[0].description
+    _, fn = spec
+    out = asyncio.run(fn(text="hello"))
+    assert out["ok"] is True
+    assert out["text"] == "HELLO"
+    assert out["config_hash"] == config_hash(record.config.to_json())
+    assert provider.requests == []
+    run = get_run(db, out["run_id"])
+    assert run is not None
+    assert run["parent_run_id"] == SESSION_TOOL_PARENT_RUN_ID
+    assert run["result_text"] == "HELLO"
+    entries = json.loads(run["trace_json"] or "[]")
+    pins = [e for e in entries if e["kind"] == "skill_pin"]
+    assert pins
+    assert pins[0]["data"]["config_hash"] == out["config_hash"]
+    verify = [e for e in entries if e["kind"] == "verify"]
+    assert verify
+    assert verify[0]["data"]["passed"] is True
+
+
+def test_session_pipeline_llm_step_uses_provider(db: Database) -> None:
+    sid = create_session(db)
+    skill_id = _pipeline_skill(
+        db,
+        steps=[
+            PipelineStep(
+                id="note",
+                type="llm",
+                input="documents",
+                system_prompt="note the text",
+            ),
+        ],
+    )
+    attach_skills(db, sid, [skill_id])
+    record = get_skill(db, skill_id)
+    assert record is not None
+    name = skill_tool_name(record, used=set())
+    provider = _JudgeProvider(["NOTED"])
+    tools = build_session_skill_tools(
+        db,
+        sid,
+        workspace_dir="/tmp",
+        base_tools=build_document_tools(db, "/tmp"),
+        provider=provider,
+        fallback_model="ws/model",
+    )
+    _, fn = tools.get(name)
+    assert fn is not None
+    out = asyncio.run(fn(text="source"))
+    assert out["ok"] is True
+    assert out["text"] == "NOTED"
+    assert provider.requests
+    assert provider.requests[0]["model"] == "x"
+
+
+def test_session_agent_uses_pinned_provider(db: Database) -> None:
+    sid = create_session(db)
+    skill_id = _agent_skill(db, provider="zai", model="pinned/model")
+    attach_skills(db, sid, [skill_id])
+    record = get_skill(db, skill_id)
+    assert record is not None
+    name = skill_tool_name(record, used=set())
+    workspace = _JudgeProvider(["SHOULD NOT RUN"])
+    pinned = _JudgeProvider(["PINNED OK"])
+    tools = build_session_skill_tools(
+        db,
+        sid,
+        workspace_dir="/tmp",
+        base_tools=build_document_tools(db, "/tmp"),
+        provider=workspace,
+        fallback_model="ws/model",
+        providers={"openrouter": workspace, "zai": pinned},
+    )
+    _, fn = tools.get(name)
+    assert fn is not None
+    out = asyncio.run(fn(text="hello"))
+    assert out["ok"] is True
+    assert out["text"] == "PINNED OK"
+    assert pinned.requests
+    assert pinned.requests[0]["model"] == "pinned/model"
+    assert workspace.requests == []
+
+
+def test_session_agent_falls_back_to_session_model(db: Database) -> None:
+    sid = create_session(db)
+    skill_id = _agent_skill(db, model="")
+    attach_skills(db, sid, [skill_id])
+    record = get_skill(db, skill_id)
+    assert record is not None
+    name = skill_tool_name(record, used=set())
+    provider = _JudgeProvider(["FALLBACK OK"])
+    tools = build_session_skill_tools(
+        db,
+        sid,
+        workspace_dir="/tmp",
+        base_tools=build_document_tools(db, "/tmp"),
+        provider=provider,
+        fallback_model="ws/model",
+    )
+    _, fn = tools.get(name)
+    assert fn is not None
+    out = asyncio.run(fn(text="hello"))
+    assert out["ok"] is True
+    assert provider.requests[0]["model"] == "ws/model"
+
+
+def test_script_session_tool_does_not_call_llm(db: Database) -> None:
+    sid = create_session(db)
+    skill_id = _script_skill(db)
+    attach_skills(db, sid, [skill_id])
+    record = get_skill(db, skill_id)
+    assert record is not None
+    name = skill_tool_name(record, used=set())
+    provider = _JudgeProvider(["SHOULD NOT RUN"])
+    tools = build_session_skill_tools(
+        db,
+        sid,
+        workspace_dir="/tmp",
+        base_tools=ToolRegistry(),
+        provider=provider,
+        fallback_model="ws/model",
+    )
+    _, fn = tools.get(name)
+    assert fn is not None
+    out = asyncio.run(fn(text="hello"))
+    assert out["ok"] is True
+    assert out["text"] == "HELLO"
+    assert provider.requests == []
 
 
 def test_get_run_returns_parent_run_id(client, db: Database) -> None:
@@ -363,19 +610,25 @@ def test_skill_tool_name_collisions() -> None:
     assert _TOOL_NAME_RE.match(reserved)
 
 
-def test_agent_skill_is_not_registered_as_tool(db: Database) -> None:
+def test_agent_and_pipeline_skills_are_registered_as_tools(db: Database) -> None:
     sid = create_session(db)
     script_id = _script_skill(db)
     agent_id = _agent_skill(db)
-    attach_skills(db, sid, [script_id, agent_id])
-    assert {s.id for s in list_session_skills(db, sid)} == {script_id, agent_id}
+    pipe_id = _pipeline_skill(db)
+    attach_skills(db, sid, [script_id, agent_id, pipe_id])
+    assert {s.id for s in list_session_skills(db, sid)} == {
+        script_id,
+        agent_id,
+        pipe_id,
+    }
     tools = build_session_skill_tools(
         db, sid, workspace_dir="/tmp", base_tools=ToolRegistry()
     )
     names = tools.names()
     assert any(n.startswith("skill_upper") for n in names)
-    assert not any("agent" in n for n in names)
-    assert len(names) == 1
+    assert any("agent" in n for n in names)
+    assert any("pipe" in n for n in names)
+    assert len(names) == 3
 
 
 def test_ws_session_tools_includes_attached_script(db: Database) -> None:
@@ -448,6 +701,7 @@ def test_rest_attach_detach_list_session_tools(client, db: Database) -> None:
     assert body["skipped_skill_ids"] == [missing]
     assert [s["id"] for s in body["skills"]] == [skill_id]
     assert body["skills"][0]["kind"] == "script"
+    assert body["skills"][0]["estimated_llm_calls"] == 0
 
     listed2 = client.get(f"/sessions/{session_id}/tools")
     assert [s["id"] for s in listed2.json()] == [skill_id]
@@ -465,6 +719,86 @@ def test_rest_attach_detach_list_session_tools(client, db: Database) -> None:
     )
     empty = client.post(f"/sessions/{session_id}/tools", json={"skill_ids": []})
     assert empty.status_code == 422
+
+
+def test_rest_attach_rejects_draft_skill(client, db: Database) -> None:
+    session_id = client.post("/sessions").json()["id"]
+    config = SkillConfig(
+        name="Draft Tool",
+        description="draft",
+        system_prompt="",
+        allowed_tools=[],
+        model="x",
+        kind="script",
+        code="def main(document):\n    return document\n",
+    )
+    skill_id = create_skill(
+        db,
+        name=config.name,
+        description=config.description,
+        config=config,
+        status="draft",
+    )
+    resp = client.post(
+        f"/sessions/{session_id}/tools",
+        json={"skill_ids": [skill_id]},
+    )
+    assert resp.status_code == 422
+    assert "draft" in resp.json()["detail"]
+    assert client.get(f"/sessions/{session_id}/tools").json() == []
+
+
+def test_rest_attach_rejects_unknown_kind(client, db: Database) -> None:
+    session_id = client.post("/sessions").json()["id"]
+    config = SkillConfig(
+        name="Weird Tool",
+        description="unknown kind",
+        system_prompt="",
+        allowed_tools=[],
+        model="x",
+        kind="wizard",
+    )
+    skill_id = create_skill(
+        db,
+        name=config.name,
+        description=config.description,
+        config=config,
+        status="committed",
+    )
+    resp = client.post(
+        f"/sessions/{session_id}/tools",
+        json={"skill_ids": [skill_id]},
+    )
+    assert resp.status_code == 422
+    detail = resp.json()["detail"]
+    assert "unknown kind" in detail
+    assert "wizard" in detail
+    assert client.get(f"/sessions/{session_id}/tools").json() == []
+
+
+def test_draft_skill_is_not_registered_as_tool(db: Database) -> None:
+    sid = create_session(db)
+    config = SkillConfig(
+        name="Draft Script",
+        description="draft",
+        system_prompt="",
+        allowed_tools=[],
+        model="x",
+        kind="script",
+        code="def main(document):\n    return document.upper()\n",
+    )
+    skill_id = create_skill(
+        db,
+        name=config.name,
+        description=config.description,
+        config=config,
+        status="draft",
+    )
+    attach_skills(db, sid, [skill_id])
+    tools = build_session_skill_tools(
+        db, sid, workspace_dir="/tmp", base_tools=ToolRegistry()
+    )
+    assert tools.names() == []
 
 
 def test_depth_2_registers_no_skill_tools(db: Database) -> None:
@@ -565,6 +899,9 @@ def test_estimate_skill_budget_by_kind() -> None:
             PipelineStep(id="three", type="llm"),
         ],
     )
+    assert estimate_skill_llm_calls(script) == 0
+    assert estimate_skill_llm_calls(agent) == 24
+    assert estimate_skill_llm_calls(pipeline) == 15
     assert estimate_skill_budget(script) == (0, 1)
     assert estimate_skill_budget(agent) == (24, 1)
     assert estimate_skill_budget(pipeline) == (15, 1)

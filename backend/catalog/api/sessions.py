@@ -55,8 +55,9 @@ from catalog.skills.artifact_tools import (
     parse_steps_content,
     validate_pipeline_steps,
 )
+from catalog.skills.budget import SkillBudget, estimate_skill_llm_calls, make_turn_budget
 from catalog.skills.config import SKILL_KINDS, compute_tags, pipeline_step_to_dict
-from catalog.skills.budget import SkillBudget, make_turn_budget
+from catalog.skills.repo_skill import get_skill
 from catalog.skills.skill_tools import SkillCallContext, build_session_skill_tools
 from catalog.skills.script_runner import (
     SCRIPT_CODE_CONTRACT_RU,
@@ -355,6 +356,7 @@ def _session_skill_out(row) -> SkillOut:
         provider=row.config.provider or None,
         model=row.config.model or None,
         reasoning=row.config.reasoning or None,
+        estimated_llm_calls=estimate_skill_llm_calls(row.config),
     )
 
 
@@ -376,6 +378,23 @@ async def attach_session_tools_endpoint(
 ) -> SessionToolsAttachResult:
     if get_session(db, session_id) is None:
         raise HTTPException(status_code=404, detail="session not found")
+    for skill_id in body.skill_ids:
+        skill = get_skill(db, skill_id)
+        if skill is None:
+            continue
+        if skill.status == "draft":
+            raise HTTPException(
+                status_code=422,
+                detail=f"cannot attach draft skill {skill_id}",
+            )
+        if skill.config.kind not in SKILL_KINDS:
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    f"cannot attach skill {skill_id} with unknown kind "
+                    f"{skill.config.kind!r}"
+                ),
+            )
     skipped = attach_skills(db, session_id, body.skill_ids)
     return SessionToolsAttachResult(
         skipped_skill_ids=skipped,

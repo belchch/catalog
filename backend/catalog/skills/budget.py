@@ -92,12 +92,16 @@ _active_budget: ContextVar[SkillBudget | None] = ContextVar(
 )
 
 
-def estimate_skill_budget(skill: SkillConfig) -> tuple[int, int]:
+def estimate_skill_llm_calls(skill: SkillConfig) -> int:
     if skill.kind == "script":
-        return 0, 1
+        return 0
     if skill.kind == "pipeline":
-        return len(skill.steps) * skill.max_iterations, 1
-    return skill.max_iterations * (skill.max_retries + 1), 1
+        return len(skill.steps) * skill.max_iterations
+    return skill.max_iterations * (skill.max_retries + 1)
+
+
+def estimate_skill_budget(skill: SkillConfig) -> tuple[int, int]:
+    return estimate_skill_llm_calls(skill), 1
 
 
 def charge_nested_skill_llm() -> None:
