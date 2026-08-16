@@ -207,7 +207,7 @@ describe('Chat composer', () => {
 describe('Chat connection banner', () => {
   it('hides the thinking indicator when the socket is closed even if streaming is stuck', () => {
     renderChat({ streaming: true, closed: true, interrupted: true })
-    expect(screen.queryByText('●●● планировщик думает…')).toBeNull()
+    expect(screen.queryByText(/планировщик думает/)).toBeNull()
     expect(screen.getByText('Соединение потеряно — ответ прерван')).toBeTruthy()
     expect(screen.queryByRole('button', { name: 'Остановить генерацию' })).toBeNull()
     expect(screen.getByRole('button', { name: 'Отправить' })).toBeTruthy()
