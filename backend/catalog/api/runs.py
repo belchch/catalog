@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import asyncio
 import uuid
+from contextlib import suppress
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, WebSocket, WebSocketDisconnect
@@ -29,7 +30,7 @@ from fastapi import APIRouter, Depends, HTTPException, WebSocket, WebSocketDisco
 from catalog.agent.registry import ToolRegistry
 from catalog.api.deps import agent_event_to_frame, get_workspace_db, get_workspace
 from catalog.api.schemas import ApplyRequest, DocumentOut, RunCreated, RunOut
-from catalog.api.sessions import _is_cancel_frame
+from catalog.api.sessions import _wait_work_or_ws
 from catalog.documents.ingest import (
     allocate_rel_path,
     content_hash_bytes,
@@ -297,31 +298,24 @@ async def run_stream_ws(websocket: WebSocket, run_id: str) -> None:
 
             try:
                 while True:
-                    done, _pending = await asyncio.wait(
-                        {apply_task, receive_task},
-                        return_when=asyncio.FIRST_COMPLETED,
+                    kind, _payload = await _wait_work_or_ws(
+                        websocket, apply_task, receive_task
                     )
-                    if receive_task in done:
-                        frame_raw = receive_task.result()
-                        if _is_cancel_frame(frame_raw):
-                            apply_task.cancel()
-                            try:
-                                await apply_task
-                            except asyncio.CancelledError:
-                                pass
-                            break
-                        # Non-cancel frame during apply: keep listening.
-                        receive_task = asyncio.create_task(
-                            websocket.receive_text()
-                        )
-                    if apply_task in done:
+                    if kind == "work":
                         receive_task.cancel()
-                        try:
+                        with suppress(asyncio.CancelledError, WebSocketDisconnect):
                             await receive_task
-                        except (asyncio.CancelledError, WebSocketDisconnect):
-                            pass
                         apply_task.result()
                         break
+                    if kind == "cancel":
+                        apply_task.cancel()
+                        with suppress(asyncio.CancelledError):
+                            await apply_task
+                        break
+                    if kind == "ping":
+                        await websocket.send_json({"type": "ping"})
+                        continue
+                    receive_task = asyncio.create_task(websocket.receive_text())
             except BaseException:
                 apply_task.cancel()
                 receive_task.cancel()

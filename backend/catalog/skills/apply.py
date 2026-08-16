@@ -30,7 +30,14 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from catalog.agent.events import AgentEvent, FinishEvent, RunMetaEvent, ScriptEvent, VerifyEvent
+from catalog.agent.events import (
+    AgentEvent,
+    FinishEvent,
+    RunMetaEvent,
+    ScriptEvent,
+    TokenEvent,
+    VerifyEvent,
+)
 from catalog.agent.logging import log_agent_event
 from catalog.agent.registry import ToolRegistry
 from catalog.agent.runner import _run_agent_core
@@ -391,6 +398,8 @@ async def _apply_core(
                 )
             )
             last_text = text
+            if text:
+                yield TokenEvent(delta=text)
             if _deadline_reached(trace, 1):
                 deadline_stopped = True
                 last_capped = True
@@ -542,6 +551,8 @@ async def _apply_core(
                 last_capped = True
             if not deadline_stopped:
                 final_text = last_text or ""
+                if last_text:
+                    yield TokenEvent(delta=last_text)
                 result = await run_verify_async(
                     final_text,
                     skill.verify_checks,
@@ -643,6 +654,8 @@ async def _apply_core(
 
                 last_text = text
                 last_capped = capped
+                if last_text:
+                    yield TokenEvent(delta=last_text)
                 if deadline_stopped:
                     break
                 if _deadline_reached(trace, r + 1):

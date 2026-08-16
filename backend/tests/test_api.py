@@ -844,6 +844,86 @@ def test_ws_session_cancel(client, provider, db) -> None:
     assert frames2[-1]["status"] == "ok"
 
 
+def test_wait_work_or_ws_prefers_done_work_over_cancel() -> None:
+    from catalog.api.sessions import _wait_work_or_ws
+
+    class _DummyWS:
+        async def send_json(self, data):
+            raise AssertionError("should not ping")
+
+    async def _run() -> None:
+        work = asyncio.create_task(asyncio.sleep(0))
+        receive = asyncio.create_task(asyncio.sleep(0, result='{"type":"cancel"}'))
+        await work
+        await receive
+        kind, payload = await _wait_work_or_ws(_DummyWS(), work, receive)
+        assert kind == "work"
+        assert payload is None
+
+    asyncio.run(_run())
+
+
+def test_wait_work_or_ws_cancel_while_work_running() -> None:
+    from catalog.api.sessions import _wait_work_or_ws
+
+    class _DummyWS:
+        async def send_json(self, data):
+            raise AssertionError("should not ping")
+
+    async def _run() -> None:
+        blocker = asyncio.Event()
+        work = asyncio.create_task(blocker.wait())
+        receive = asyncio.create_task(asyncio.sleep(0, result='{"type":"cancel"}'))
+        kind, payload = await _wait_work_or_ws(_DummyWS(), work, receive)
+        assert kind == "cancel"
+        assert payload == '{"type":"cancel"}'
+        work.cancel()
+        try:
+            await work
+        except asyncio.CancelledError:
+            pass
+
+    asyncio.run(_run())
+
+
+def test_ws_session_idle_cancel_sends_noop(client) -> None:
+    session_id = client.post("/sessions").json()["id"]
+    with client.websocket_connect(f"/sessions/{session_id}") as ws:
+        assert ws.receive_json()["type"] == "suggestions"
+        ws.send_text('{"type":"cancel"}')
+        frame = ws.receive_json()
+        assert frame == {"type": "finish", "status": "noop"}
+
+
+def test_ws_session_planner_keepalive_during_turn(client, db, monkeypatch) -> None:
+    import catalog.api.sessions as sessions_mod
+    from tests.conftest import HoldCompleteProvider
+
+    monkeypatch.setattr(sessions_mod, "WS_KEEPALIVE_INTERVAL_S", 0.05)
+    hold = HoldCompleteProvider(_completion("готово"))
+    client.app.state.provider = hold
+    session_id = client.post("/sessions").json()["id"]
+
+    with client.websocket_connect(f"/sessions/{session_id}") as ws:
+        assert ws.receive_json()["type"] == "suggestions"
+        ws.send_text("вопрос")
+        frames: list[dict] = []
+        while True:
+            frame = ws.receive_json()
+            frames.append(frame)
+            if frame.get("type") == "ping":
+                break
+        hold.release.set()
+        while True:
+            frame = ws.receive_json()
+            frames.append(frame)
+            if frame.get("type") == "finish":
+                break
+
+    assert any(f.get("type") == "ping" for f in frames)
+    assert frames[-1]["status"] == "ok"
+
+
 # --------------------------------------------------------------------------- #
 # Skill build / commit / list
 # --------------------------------------------------------------------------- #
@@ -1732,6 +1812,62 @@ def test_apply_skill_run(client, provider, db) -> None:
     assert saved_verify[-1]["data"]["passed"] is True
     assert saved_verify[-1]["data"]["failures"] == []
     assert saved_verify[-1]["data"]["checks"][0]["check"] == "non_empty"
+
+
+def test_apply_stream_preview_token_before_verify(client, provider, db) -> None:
+    doc_id = _upload(client, "input.md", b"source text")
+    skill_id = _seed_committed_skill(
+        db, verify_checks=[VerifyCheck("non_empty")], max_retries=2
+    )
+    provider.script = [_completion("# Result\n\nGreat document.")]
+
+    run_id = client.post(
+        f"/skills/{skill_id}/apply", json={"doc_id": doc_id}
+    ).json()["run_id"]
+
+    frames = _drain_run_ws(client, run_id)
+    types = [f["type"] for f in frames]
+    assert "token" in types
+    assert "verify" in types
+    assert types.index("token") < types.index("verify")
+    token = next(f for f in frames if f["type"] == "token")
+    assert token["delta"] == "# Result\n\nGreat document."
+    assert frames[-1]["status"] == "ok"
+
+
+def test_apply_stream_keepalive_during_run(client, db, monkeypatch) -> None:
+    import catalog.api.sessions as sessions_mod
+    from tests.conftest import HoldCompleteProvider
+
+    monkeypatch.setattr(sessions_mod, "WS_KEEPALIVE_INTERVAL_S", 0.05)
+    hold = HoldCompleteProvider(_completion("# Result\n\nGreat document."))
+    client.app.state.provider = hold
+
+    doc_id = _upload(client, "input.md", b"source text")
+    skill_id = _seed_committed_skill(
+        db, verify_checks=[VerifyCheck("non_empty")], max_retries=2
+    )
+    run_id = client.post(
+        f"/skills/{skill_id}/apply", json={"doc_id": doc_id}
+    ).json()["run_id"]
+
+    with client.websocket_connect(f"/runs/{run_id}/stream") as ws:
+        frames: list[dict] = []
+        while True:
+            frame = ws.receive_json()
+            frames.append(frame)
+            if frame.get("type") == "ping":
+                break
+        hold.release.set()
+        while True:
+            frame = ws.receive_json()
+            frames.append(frame)
+            if frame.get("type") == "finish":
+                break
+
+    assert any(f.get("type") == "ping" for f in frames)
+    assert frames[-1]["type"] == "finish"
+    assert frames[-1]["status"] == "ok"
 
 
 def test_apply_creates_pending_run_before_stream(client, db) -> None:

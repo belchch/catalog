@@ -240,6 +240,34 @@ async def _receive_text_with_keepalive(websocket: WebSocket) -> str:
             raise
 
 
+async def _wait_work_or_ws(
+    websocket: WebSocket,
+    work_task: asyncio.Task,
+    receive_task: asyncio.Task,
+) -> tuple[str, str | None]:
+    sleep_task = asyncio.create_task(asyncio.sleep(WS_KEEPALIVE_INTERVAL_S))
+    try:
+        done, _pending = await asyncio.wait(
+            {work_task, receive_task, sleep_task},
+            return_when=asyncio.FIRST_COMPLETED,
+        )
+        if work_task in done:
+            return "work", None
+        if receive_task in done:
+            frame_raw = receive_task.result()
+            if _is_cancel_frame(frame_raw):
+                return "cancel", frame_raw
+            if _is_keepalive_frame(frame_raw):
+                return "keepalive", frame_raw
+            return "message", frame_raw
+        return "ping", None
+    finally:
+        if not sleep_task.done():
+            sleep_task.cancel()
+            with suppress(asyncio.CancelledError):
+                await sleep_task
+
+
 def _conversation_messages(db: Database, session_id: str) -> list[Message]:
     """Rebuild the user/assistant conversation from persisted messages."""
     msgs: list[Message] = []
@@ -686,36 +714,30 @@ async def _run_planner_turn(
 
     try:
         while True:
-            done, _pending = await asyncio.wait(
-                {agent_task, receive_task},
-                return_when=asyncio.FIRST_COMPLETED,
+            kind, payload = await _wait_work_or_ws(
+                websocket, agent_task, receive_task
             )
-            if receive_task in done:
-                # receive_text() raises WebSocketDisconnect on close — propagate.
-                frame_raw = receive_task.result()
-                if _is_cancel_frame(frame_raw):
-                    cancelled = True
-                    agent_task.cancel()
-                    try:
-                        await agent_task
-                    except asyncio.CancelledError:
-                        pass
-                    break
-                # A non-cancel frame arrived mid-turn: buffer it for the next
-                # loop iteration and keep listening for a cancel.
-                buffered = frame_raw
-                receive_task = asyncio.create_task(websocket.receive_text())
-            if agent_task in done:
+            if kind == "work":
                 receive_task.cancel()
-                try:
+                with suppress(asyncio.CancelledError, WebSocketDisconnect):
                     await receive_task
-                except (asyncio.CancelledError, WebSocketDisconnect):
-                    pass
-                # Surface any agent exception to the outer handler.
                 agent_task.result()
                 break
+            if kind == "cancel":
+                cancelled = True
+                agent_task.cancel()
+                with suppress(asyncio.CancelledError):
+                    await agent_task
+                break
+            if kind == "ping":
+                await websocket.send_json({"type": "ping"})
+                continue
+            if kind == "keepalive":
+                receive_task = asyncio.create_task(websocket.receive_text())
+                continue
+            buffered = payload
+            receive_task = asyncio.create_task(websocket.receive_text())
     except BaseException:
-        # Ensure both tasks are cleaned up on disconnect/error.
         agent_task.cancel()
         receive_task.cancel()
         raise
@@ -842,7 +864,10 @@ async def session_ws(
             else:
                 raw = await _receive_text_with_keepalive(websocket)
 
-            if _is_cancel_frame(raw) or _is_keepalive_frame(raw):
+            if _is_keepalive_frame(raw):
+                continue
+            if _is_cancel_frame(raw):
+                await websocket.send_json({"type": "finish", "status": "noop"})
                 continue
 
             content, doc_ids = _parse_user_payload(raw)
