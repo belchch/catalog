@@ -1,8 +1,13 @@
 # Catalog
 
+[![CI](https://github.com/belchch/catalog/actions/workflows/ci.yml/badge.svg)](https://github.com/belchch/catalog/actions/workflows/ci.yml)
+[![License: PolyForm Noncommercial](https://img.shields.io/badge/license-PolyForm%20NC%201.0.0-blue)](LICENSE.md)
+
 Локальное приложение для создания и повторного использования процессов обработки документов.
 
 Пользователь описывает задачу в чате, уточняет план и сохраняет его как скилл. Скилл можно применять к другим документам, подключать как инструмент в новых сессиях и использовать как шаг более сложного процесса.
+
+> **In English:** Catalog is a local-first app for building reusable document-processing workflows. You describe a task in chat, refine the plan, and save it as a "skill" — a frozen, reproducible config that can be applied to other documents, plugged into new sessions as a tool, or composed into pipelines. Documents stay in a plain folder on your disk (Obsidian-compatible); DOCX/XLSX/PDF in, verified Markdown/DOCX out. The README is in Russian; the [architecture decision records](docs/adr/README.md) document the design.
 
 ![Основной экран Catalog](docs/assets/catalog-overview.png)
 
@@ -27,14 +32,20 @@
 
 ```yaml
 kind: agent
-system_prompt: ...
-model: ...
+name: Выжимка договора
+description: Стороны, предмет, сроки и суммы из договора
+system_prompt: |
+  Прочитай договор и составь выжимку в Markdown
+  с разделами «Стороны», «Предмет», «Сроки», «Суммы».
+model: google/gemini-3.5-flash
 temperature: 0
 allowed_tools:
   - read_document
 verify_checks:
-  - non_empty
-  - has_section
+  - check: non_empty
+  - check: has_section
+    params: { heading: "Сроки" }
+  - check: no_leftover_placeholders
 ```
 
 Поддерживаются три вида скиллов:
@@ -173,7 +184,7 @@ DOCX разбирается с сохранением порядка параг�
 
 ## Быстрый старт
 
-Требуются Python 3.11+, Node.js и pnpm:
+Требуются [uv](https://docs.astral.sh/uv/), Python 3.11+, Node.js и pnpm (Node и pnpm нужны только при установке из git — сборочный hook упаковывает фронтенд в пакет):
 
 ```bash
 uv tool install "git+https://github.com/belchch/catalog.git#subdirectory=backend"
