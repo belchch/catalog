@@ -293,8 +293,8 @@ export function Chat({
           />
         ))}
         {liveStreaming && (
-          <div className="my-2 text-xs text-gold-ink">
-            <span aria-hidden="true" className="opacity-40">●●●</span> планировщик думает…
+          <div className="my-2 text-xs text-gold-ink opacity-70">
+            <span aria-hidden="true" className="opacity-50">●●●</span> планировщик думает…
           </div>
         )}
         {showBanner && (
