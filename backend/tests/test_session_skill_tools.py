@@ -3,11 +3,22 @@ from __future__ import annotations
 import asyncio
 import json
 import re
+from dataclasses import replace
+from pathlib import Path
 
 from catalog.agent.registry import ToolRegistry
+from catalog.agent.runner import run_agent_collect
 from catalog.api.sessions import _ws_session_tools
-from catalog.llm.base import CompletionResult, Message
-from catalog.skills.config import SkillConfig, VerifyCheck
+from catalog.documents.ingest import ingest_file
+from catalog.documents.tools import build_document_tools
+from catalog.llm.base import CompletionResult, Message, ToolCall
+from catalog.skills.apply import apply_skill_collect
+from catalog.skills.budget import (
+    SkillBudget,
+    estimate_skill_budget,
+    nested_skill_hold,
+)
+from catalog.skills.config import PipelineStep, SkillConfig, VerifyCheck
 from catalog.skills.repo_run import get_run
 from catalog.skills.repo_skill import create_skill, get_skill
 from catalog.skills.skill_tools import (
@@ -87,7 +98,13 @@ def _script_skill(
     )
 
 
-def _agent_skill(db: Database, *, name: str = "Agent Skill") -> str:
+def _agent_skill(
+    db: Database,
+    *,
+    name: str = "Agent Skill",
+    max_iterations: int = 8,
+    max_retries: int = 2,
+) -> str:
     config = SkillConfig(
         name=name,
         description="Agent",
@@ -95,6 +112,8 @@ def _agent_skill(db: Database, *, name: str = "Agent Skill") -> str:
         allowed_tools=["read_document"],
         model="x",
         kind="agent",
+        max_iterations=max_iterations,
+        max_retries=max_retries,
     )
     return create_skill(
         db,
@@ -506,3 +525,295 @@ def test_self_call_a_to_a_is_impossible(db: Database) -> None:
     )
     assert name_a not in nested.names()
     assert nested.names() == []
+
+
+def test_estimate_skill_budget_by_kind() -> None:
+    script = SkillConfig(
+        name="s",
+        description="",
+        system_prompt="",
+        allowed_tools=[],
+        model="x",
+        kind="script",
+        max_iterations=8,
+        max_retries=2,
+    )
+    agent = SkillConfig(
+        name="a",
+        description="",
+        system_prompt="p",
+        allowed_tools=[],
+        model="x",
+        kind="agent",
+        max_iterations=8,
+        max_retries=2,
+    )
+    pipeline = SkillConfig(
+        name="p",
+        description="",
+        system_prompt="",
+        allowed_tools=[],
+        model="x",
+        kind="pipeline",
+        max_iterations=5,
+        steps=[
+            PipelineStep(id="one", type="llm"),
+            PipelineStep(id="two", type="script"),
+            PipelineStep(id="three", type="llm"),
+        ],
+    )
+    assert estimate_skill_budget(script) == (0, 1)
+    assert estimate_skill_budget(agent) == (24, 1)
+    assert estimate_skill_budget(pipeline) == (15, 1)
+
+
+def test_budget_reserve_release_two_of_twenty_four() -> None:
+    budget = SkillBudget(llm_calls_left=60, nested_runs_left=20)
+    hold = budget.reserve(24, 1)
+    assert hold is not None
+    assert budget.snapshot() == {"llm_calls_left": 36, "nested_runs_left": 19}
+    hold.charge_llm()
+    hold.charge_llm()
+    budget.release(hold)
+    assert hold.llm_used == 2
+    assert budget.llm_calls_left == 58
+    assert budget.nested_runs_left == 19
+
+
+def test_agent_skill_does_not_start_when_budget_short(db: Database) -> None:
+    sid = create_session(db)
+    skill_id = _agent_skill(db)
+    attach_skills(db, sid, [skill_id])
+    record = get_skill(db, skill_id)
+    assert record is not None
+    name = skill_tool_name(record, used=set())
+    provider = _JudgeProvider(["SHOULD NOT RUN"])
+    budget = SkillBudget(llm_calls_left=5, nested_runs_left=20)
+    tools = build_session_skill_tools(
+        db,
+        sid,
+        workspace_dir="/tmp",
+        base_tools=ToolRegistry(),
+        provider=provider,
+        budget=budget,
+        kinds=frozenset({"agent"}),
+    )
+    _, fn = tools.get(name)
+    assert fn is not None
+    out = asyncio.run(fn(text="hello"))
+    assert out["ok"] is False
+    assert out["error"] == "budget exhausted"
+    assert out["budget"]["needed_llm_calls"] == 24
+    assert out["budget"]["needed_nested_runs"] == 1
+    assert out["budget"]["llm_calls_left"] == 5
+    assert out["budget"]["nested_runs_left"] == 20
+    assert provider.requests == []
+    run = get_run(db, out["run_id"])
+    assert run is not None
+    entries = json.loads(run["trace_json"] or "[]")
+    nodes = [e for e in entries if e["kind"] == "budget"]
+    assert nodes
+    assert nodes[0]["data"]["error"] == "budget exhausted"
+
+
+def test_budget_returns_unused_after_two_nested_llm_calls(
+    db: Database, client
+) -> None:
+    workspace = Path(client.app.state.workspace_manager.root)
+    doc_id = ingest_file(db, workspace, filename="in.md", content=b"hello").id
+    skill_id = _agent_skill(db)
+    record = get_skill(db, skill_id)
+    assert record is not None
+    provider = _JudgeProvider([])
+    provider.answers = []
+
+    class _TwoCallProvider(_JudgeProvider):
+        def __init__(self) -> None:
+            super().__init__([])
+            self.step = 0
+
+        async def complete(self, model, messages, tools=None, temperature=0.0, **kwargs):
+            self.requests.append({"model": model})
+            self.step += 1
+            if self.step == 1:
+                return CompletionResult(
+                    content=None,
+                    tool_calls=[
+                        ToolCall(
+                            id="c1",
+                            name="read_document",
+                            arguments={"doc_id": doc_id},
+                        )
+                    ],
+                    finish_reason="tool_calls",
+                )
+            return CompletionResult(
+                content="done",
+                tool_calls=[],
+                finish_reason="stop",
+            )
+
+    two = _TwoCallProvider()
+    budget = SkillBudget(llm_calls_left=60, nested_runs_left=20)
+    hold = budget.reserve(*estimate_skill_budget(record.config))
+    assert hold is not None
+    assert hold.llm_reserved == 24
+
+    def _run() -> None:
+        with nested_skill_hold(hold):
+            asyncio.run(
+                apply_skill_collect(
+                    provider=two,
+                    db=db,
+                    workspace_dir=str(workspace),
+                    skill=record.config,
+                    skill_id=skill_id,
+                    input_doc_ids=[doc_id],
+                    base_tools=build_document_tools(db, workspace),
+                    persist=False,
+                )
+            )
+
+    try:
+        _run()
+    finally:
+        budget.release(hold)
+    assert two.step == 2
+    assert hold.llm_used == 2
+    assert budget.llm_calls_left == 58
+    assert budget.nested_runs_left == 19
+
+
+def test_budget_release_on_exception(db: Database) -> None:
+    sid = create_session(db)
+    skill_id = _script_skill(
+        db,
+        code="def main(document):\n    return 1 / 0\n",
+    )
+    attach_skills(db, sid, [skill_id])
+    record = get_skill(db, skill_id)
+    assert record is not None
+    name = skill_tool_name(record, used=set())
+    budget = SkillBudget(llm_calls_left=60, nested_runs_left=20)
+    tools = build_session_skill_tools(
+        db, sid, workspace_dir="/tmp", base_tools=ToolRegistry(), budget=budget
+    )
+    _, fn = tools.get(name)
+    assert fn is not None
+    out = asyncio.run(fn(text="hello"))
+    assert out["ok"] is False
+    assert out["error"]
+    assert budget.llm_calls_left == 60
+    assert budget.nested_runs_left == 19
+
+
+def test_script_tool_refuses_when_run_budget_exhausted(db: Database) -> None:
+    sid = create_session(db)
+    skill_id = _script_skill(db)
+    attach_skills(db, sid, [skill_id])
+    record = get_skill(db, skill_id)
+    assert record is not None
+    name = skill_tool_name(record, used=set())
+    budget = SkillBudget(llm_calls_left=60, nested_runs_left=0)
+    tools = build_session_skill_tools(
+        db, sid, workspace_dir="/tmp", base_tools=ToolRegistry(), budget=budget
+    )
+    _, fn = tools.get(name)
+    assert fn is not None
+    out = asyncio.run(fn(text="hello"))
+    assert out["ok"] is False
+    assert out["error"] == "budget exhausted"
+    assert out["budget"]["nested_runs_left"] == 0
+    assert budget.nested_runs_left == 0
+
+
+def test_next_budget_is_fresh(db: Database) -> None:
+    sid = create_session(db)
+    skill_id = _script_skill(db)
+    attach_skills(db, sid, [skill_id])
+    record = get_skill(db, skill_id)
+    assert record is not None
+    name = skill_tool_name(record, used=set())
+    first = SkillBudget(llm_calls_left=60, nested_runs_left=1)
+    tools_first = build_session_skill_tools(
+        db, sid, workspace_dir="/tmp", base_tools=ToolRegistry(), budget=first
+    )
+    _, fn_first = tools_first.get(name)
+    assert fn_first is not None
+    assert asyncio.run(fn_first(text="hello"))["ok"] is True
+    assert first.nested_runs_left == 0
+    assert asyncio.run(fn_first(text="hello"))["error"] == "budget exhausted"
+    second = SkillBudget(llm_calls_left=60, nested_runs_left=1)
+    tools_second = build_session_skill_tools(
+        db, sid, workspace_dir="/tmp", base_tools=ToolRegistry(), budget=second
+    )
+    _, fn_second = tools_second.get(name)
+    assert fn_second is not None
+    assert asyncio.run(fn_second(text="hello"))["ok"] is True
+    assert second.nested_runs_left == 0
+    assert first.nested_runs_left == 0
+
+
+def test_planner_iterations_do_not_charge_budget() -> None:
+    budget = SkillBudget(llm_calls_left=60, nested_runs_left=20)
+
+    class _PlannerProvider(_JudgeProvider):
+        async def complete(self, model, messages, tools=None, temperature=0.0, **kwargs):
+            self.requests.append({"model": model})
+            return CompletionResult(
+                content="plan",
+                tool_calls=[],
+                finish_reason="stop",
+            )
+
+    provider = _PlannerProvider(["plan"])
+    text, _trace, capped = asyncio.run(
+        run_agent_collect(
+            provider=provider,
+            model="x",
+            system_prompt="planner",
+            messages=[Message(role="user", content="hi")],
+            tools=ToolRegistry(),
+            use_stream=False,
+        )
+    )
+    assert text == "plan"
+    assert capped is False
+    assert len(provider.requests) == 1
+    assert budget.snapshot() == {"llm_calls_left": 60, "nested_runs_left": 20}
+
+
+def test_ws_budget_exhausted_does_not_fail_turn(client, provider, db) -> None:
+    client.app.state.settings = replace(
+        client.app.state.settings, skill_budget_nested_runs=0
+    )
+    sid = client.post("/sessions").json()["id"]
+    skill_id = _script_skill(db)
+    client.post(f"/sessions/{sid}/tools", json={"skill_ids": [skill_id]})
+    record = get_skill(db, skill_id)
+    assert record is not None
+    name = skill_tool_name(record, used=set())
+    provider.script = [
+        CompletionResult(
+            content=None,
+            tool_calls=[ToolCall(id="t1", name=name, arguments={"text": "one"})],
+            finish_reason="tool_calls",
+        ),
+        CompletionResult(content="продолжаю", tool_calls=[], finish_reason="stop"),
+    ]
+    with client.websocket_connect(f"/sessions/{sid}") as ws:
+        first = ws.receive_json()
+        assert first.get("type") == "suggestions"
+        ws.send_text("вызови скилл")
+        frames: list[dict] = []
+        while True:
+            frame = ws.receive_json()
+            frames.append(frame)
+            if frame.get("type") == "finish":
+                break
+    results = [f for f in frames if f.get("type") == "tool_result"]
+    assert len(results) == 1
+    payload = json.loads(results[0]["result"])
+    assert payload["ok"] is False
+    assert payload["error"] == "budget exhausted"
+    assert frames[-1]["status"] == "ok"

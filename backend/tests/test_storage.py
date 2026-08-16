@@ -94,7 +94,20 @@ def test_app_schema_tables() -> None:
             row["name"]
             for row in conn.execute("PRAGMA table_info(app_settings)").fetchall()
         }
-    assert {"openrouter_api_key", "zai_api_key"} <= cols
+    assert {
+        "openrouter_api_key",
+        "zai_api_key",
+        "skill_budget_llm_calls",
+        "skill_budget_nested_runs",
+    } <= cols
+    from catalog.storage.repo_app_settings import (
+        get_skill_budget_limits,
+        set_skill_budget_limits,
+    )
+
+    assert get_skill_budget_limits(d) == (60, 20)
+    assert set_skill_budget_limits(d, llm_calls=30, nested_runs=4) == (30, 4)
+    assert get_skill_budget_limits(d) == (30, 4)
 
 
 def test_create_and_get_document(db: Database) -> None:

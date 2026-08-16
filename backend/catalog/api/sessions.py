@@ -56,6 +56,7 @@ from catalog.skills.artifact_tools import (
     validate_pipeline_steps,
 )
 from catalog.skills.config import SKILL_KINDS, compute_tags, pipeline_step_to_dict
+from catalog.skills.budget import SkillBudget
 from catalog.skills.skill_tools import SkillCallContext, build_session_skill_tools
 from catalog.skills.script_runner import (
     SCRIPT_CODE_CONTRACT_RU,
@@ -719,6 +720,7 @@ def _ws_session_tools(
     providers: dict[str, LLMProvider] | None = None,
     call_context: SkillCallContext | None = None,
     max_skill_depth: int = 2,
+    budget: SkillBudget | None = None,
 ) -> ToolRegistry:
     tools: ToolRegistry = build_document_tools(db, workspace, session_id)
 
@@ -746,6 +748,7 @@ def _ws_session_tools(
         providers=providers,
         call_context=call_context or SkillCallContext(),
         max_skill_depth=max_skill_depth,
+        budget=budget,
     )
     for name in skill_tools.names():
         entry = skill_tools.get(name)
@@ -813,20 +816,6 @@ async def session_ws(
                 await websocket.send_json({"type": "error", "message": "workspace not open"})
                 await websocket.close()
                 return
-            tools = _ws_session_tools(
-                db,
-                workspace,
-                session_id,
-                base_tools,
-                websocket,
-                provider=state.provider,
-                fallback_model=(
-                    getattr(state, "active_model", None) or settings.default_model
-                ),
-                providers=getattr(state, "providers", None),
-                call_context=SkillCallContext(),
-                max_skill_depth=settings.max_skill_depth,
-            )
 
             if buffered is not None:
                 raw = buffered
@@ -856,6 +845,25 @@ async def session_ws(
                 session_row.llm_timeout_seconds
                 if session_row is not None
                 else DEFAULT_LLM_TIMEOUT_SECONDS
+            )
+            budget = SkillBudget(
+                llm_calls_left=settings.skill_budget_llm_calls,
+                nested_runs_left=settings.skill_budget_nested_runs,
+            )
+            tools = _ws_session_tools(
+                db,
+                workspace,
+                session_id,
+                base_tools,
+                websocket,
+                provider=state.provider,
+                fallback_model=(
+                    getattr(state, "active_model", None) or settings.default_model
+                ),
+                providers=getattr(state, "providers", None),
+                call_context=SkillCallContext(),
+                max_skill_depth=settings.max_skill_depth,
+                budget=budget,
             )
             _inc_active_planner_turns(state)
             try:

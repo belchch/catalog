@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from catalog.agent.registry import ToolRegistry
+from catalog.agent.trace import Trace, TraceEntry
 from catalog.llm.base import (
     CompletionResult,
     LLMProvider,
@@ -16,6 +17,12 @@ from catalog.llm.base import (
     ToolSpec,
 )
 from catalog.skills.apply import apply_skill_collect
+from catalog.skills.budget import (
+    SkillBudget,
+    estimate_skill_budget,
+    nested_skill_hold,
+)
+from catalog.skills.repo_run import create_run, finish_run
 from catalog.skills.repo_skill import SkillRecord
 from catalog.storage.db import Database
 from catalog.storage.repo_session_skill import list_session_skills
@@ -102,6 +109,46 @@ def _merge_tools(*registries: ToolRegistry) -> ToolRegistry:
     return merged
 
 
+def _budget_exhausted_result(
+    *,
+    db: Database,
+    session_id: str,
+    skill_id: str,
+    skill_name: str,
+    pinned_hash: str,
+    depth: int,
+    budget: SkillBudget,
+    needed_llm: int,
+    needed_runs: int,
+) -> dict[str, Any]:
+    payload = {
+        "llm_calls_left": budget.llm_calls_left,
+        "nested_runs_left": budget.nested_runs_left,
+        "needed_llm_calls": needed_llm,
+        "needed_nested_runs": needed_runs,
+    }
+    run_id = create_run(
+        db,
+        skill_id=skill_id,
+        session_id=session_id,
+        persist=False,
+        parent_run_id=SESSION_TOOL_PARENT_RUN_ID,
+    )
+    trace = Trace()
+    trace.entries.append(TraceEntry("budget", 0, {"error": "budget exhausted", **payload}))
+    finish_run(db, run_id, status="failed", output_doc_id=None, trace=trace)
+    return {
+        "ok": False,
+        "error": "budget exhausted",
+        "budget": payload,
+        "skill_id": skill_id,
+        "skill_name": skill_name,
+        "config_hash": pinned_hash,
+        "depth": depth,
+        "run_id": run_id,
+    }
+
+
 def build_session_skill_tools(
     db: Database,
     session_id: str,
@@ -114,6 +161,8 @@ def build_session_skill_tools(
     providers: dict[str, LLMProvider] | None = None,
     call_context: SkillCallContext | None = None,
     max_skill_depth: int = 2,
+    budget: SkillBudget | None = None,
+    kinds: frozenset[str] | None = None,
 ) -> ToolRegistry:
     ctx = call_context or SkillCallContext()
     reg = ToolRegistry()
@@ -122,10 +171,11 @@ def build_session_skill_tools(
     reserved_names = frozenset(reserved or ())
     used: set[str] = set(reserved_names)
     resolved_provider: LLMProvider = provider or _UnusedProvider()
+    allowed_kinds = kinds if kinds is not None else frozenset({"script"})
     for skill in list_session_skills(db, session_id):
         if skill.id in ctx.chain:
             continue
-        if skill.config.kind != "script":
+        if skill.config.kind not in allowed_kinds:
             continue
         tool_name = skill_tool_name(skill, used=used)
         pinned_hash = config_hash(skill.config.to_json())
@@ -153,6 +203,8 @@ def build_session_skill_tools(
             _ctx: SkillCallContext = ctx,
             _max_depth: int = max_skill_depth,
             _reserved: frozenset[str] = reserved_names,
+            _budget: SkillBudget | None = budget,
+            _kinds: frozenset[str] = allowed_kinds,
         ) -> dict[str, Any]:
             nested = _ctx.nested(_skill_id)
             if texts is not None:
@@ -175,6 +227,22 @@ def build_session_skill_tools(
                     "config_hash": _hash,
                     "depth": nested.depth,
                 }
+            hold = None
+            if _budget is not None:
+                needed_llm, needed_runs = estimate_skill_budget(_config)
+                hold = _budget.reserve(needed_llm, needed_runs)
+                if hold is None:
+                    return _budget_exhausted_result(
+                        db=db,
+                        session_id=session_id,
+                        skill_id=_skill_id,
+                        skill_name=_name,
+                        pinned_hash=_hash,
+                        depth=nested.depth,
+                        budget=_budget,
+                        needed_llm=needed_llm,
+                        needed_runs=needed_runs,
+                    )
             nested_skill_tools = build_session_skill_tools(
                 db,
                 session_id,
@@ -186,25 +254,28 @@ def build_session_skill_tools(
                 providers=providers,
                 call_context=nested,
                 max_skill_depth=_max_depth,
+                budget=_budget,
+                kinds=_kinds,
             )
             apply_tools = _merge_tools(base_tools, nested_skill_tools)
             try:
-                result = await apply_skill_collect(
-                    provider=resolved_provider,
-                    db=db,
-                    workspace_dir=workspace_dir,
-                    skill=_config,
-                    skill_id=_skill_id,
-                    input_doc_ids=[],
-                    base_tools=apply_tools,
-                    session_id=session_id,
-                    input_texts=input_texts,
-                    persist=False,
-                    parent_run_id=SESSION_TOOL_PARENT_RUN_ID,
-                    fallback_model=fallback_model,
-                    providers=providers,
-                    call_context=nested,
-                )
+                with nested_skill_hold(hold):
+                    result = await apply_skill_collect(
+                        provider=resolved_provider,
+                        db=db,
+                        workspace_dir=workspace_dir,
+                        skill=_config,
+                        skill_id=_skill_id,
+                        input_doc_ids=[],
+                        base_tools=apply_tools,
+                        session_id=session_id,
+                        input_texts=input_texts,
+                        persist=False,
+                        parent_run_id=SESSION_TOOL_PARENT_RUN_ID,
+                        fallback_model=fallback_model,
+                        providers=providers,
+                        call_context=nested,
+                    )
             except Exception as exc:
                 return {
                     "ok": False,
@@ -214,6 +285,9 @@ def build_session_skill_tools(
                     "config_hash": _hash,
                     "depth": nested.depth,
                 }
+            finally:
+                if _budget is not None and hold is not None:
+                    _budget.release(hold)
             verify_failures: list[str] = []
             for entry in result.trace.entries:
                 if entry.kind == "verify" and not entry.data.get("passed", True):

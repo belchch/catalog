@@ -98,6 +98,9 @@ async def _run_agent_core(
         yield step_event
         log_agent_event(step_event)
         trace.entries.append(TraceEntry("llm", i, {}))
+        from catalog.skills.budget import charge_nested_skill_llm
+
+        charge_nested_skill_llm()
         # Bind the iteration to the prompt-log context for this turn. The
         # session_id/run_id/purpose are set by the API layer; only iteration
         # changes per turn, so it is set directly rather than via the manager.

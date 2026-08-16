@@ -59,6 +59,8 @@ class Settings:
     prompt_log_dir: str = PROMPT_LOG_DIR
     log_level: str = LOG_LEVEL
     max_skill_depth: int = 2
+    skill_budget_llm_calls: int = 60
+    skill_budget_nested_runs: int = 20
 
 
 def resolve_provider_keys(
@@ -122,4 +124,21 @@ def get_settings() -> Settings:
         prompt_log_dir=str(prompt_log_dir),
         log_level=os.getenv("LOG_LEVEL", "INFO").upper(),
         max_skill_depth=_env_int("APP_MAX_SKILL_DEPTH", 2),
+        skill_budget_llm_calls=_env_int("APP_SKILL_BUDGET_LLM_CALLS", 60, minimum=0),
+        skill_budget_nested_runs=_env_int("APP_SKILL_BUDGET_NESTED_RUNS", 20, minimum=0),
     )
+
+
+def with_persisted_skill_budget(
+    settings: Settings,
+    *,
+    persisted_llm_calls: int,
+    persisted_nested_runs: int,
+) -> Settings:
+    llm = settings.skill_budget_llm_calls
+    runs = settings.skill_budget_nested_runs
+    if not os.getenv("APP_SKILL_BUDGET_LLM_CALLS", "").strip():
+        llm = persisted_llm_calls
+    if not os.getenv("APP_SKILL_BUDGET_NESTED_RUNS", "").strip():
+        runs = persisted_nested_runs
+    return replace(settings, skill_budget_llm_calls=llm, skill_budget_nested_runs=runs)

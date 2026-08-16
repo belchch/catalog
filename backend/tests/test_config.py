@@ -14,7 +14,7 @@ from pathlib import Path
 
 import pytest
 
-from catalog.config import get_settings
+from catalog.config import get_settings, with_persisted_skill_budget
 from catalog.storage.paths import os_default_data_dir, resolve_data_dir
 
 _DATA_ROOT_ENV_VARS = ("APP_DATA_DIR", "APP_WORKSPACE", "APP_DB_PATH", "PROMPT_LOG_DIR")
@@ -86,3 +86,29 @@ def test_app_data_dir_expands_user(monkeypatch: pytest.MonkeyPatch) -> None:
     data_dir = resolve_data_dir()
 
     assert data_dir == Path.home() / "catalog-data-root-test"
+
+
+def test_skill_budget_defaults_and_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("APP_SKILL_BUDGET_LLM_CALLS", raising=False)
+    monkeypatch.delenv("APP_SKILL_BUDGET_NESTED_RUNS", raising=False)
+    settings = get_settings()
+    assert settings.skill_budget_llm_calls == 60
+    assert settings.skill_budget_nested_runs == 20
+    monkeypatch.setenv("APP_SKILL_BUDGET_LLM_CALLS", "12")
+    monkeypatch.setenv("APP_SKILL_BUDGET_NESTED_RUNS", "3")
+    settings = get_settings()
+    assert settings.skill_budget_llm_calls == 12
+    assert settings.skill_budget_nested_runs == 3
+    merged = with_persisted_skill_budget(
+        settings, persisted_llm_calls=99, persisted_nested_runs=7
+    )
+    assert merged.skill_budget_llm_calls == 12
+    assert merged.skill_budget_nested_runs == 3
+    monkeypatch.delenv("APP_SKILL_BUDGET_LLM_CALLS", raising=False)
+    monkeypatch.delenv("APP_SKILL_BUDGET_NESTED_RUNS", raising=False)
+    settings = get_settings()
+    merged = with_persisted_skill_budget(
+        settings, persisted_llm_calls=99, persisted_nested_runs=7
+    )
+    assert merged.skill_budget_llm_calls == 99
+    assert merged.skill_budget_nested_runs == 7
