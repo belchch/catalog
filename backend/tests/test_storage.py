@@ -48,6 +48,7 @@ def test_schema_creates_all_tables(db: Database) -> None:
         "document",
         "session",
         "session_document",
+        "session_skill",
         "message",
         "skill",
         "skill_run",
@@ -61,6 +62,7 @@ def test_init_schema_is_idempotent(db: Database) -> None:
         "document",
         "session",
         "session_document",
+        "session_skill",
         "message",
         "skill",
         "skill_run",
@@ -339,6 +341,12 @@ def test_document_schema_has_extracted_text_column(db: Database) -> None:
     assert "size" in cols
     assert "content_hash" in cols
     assert fts == []
+
+
+def test_skill_run_schema_has_parent_run_id(db: Database) -> None:
+    with db.connect() as conn:
+        cols = {row["name"] for row in conn.execute("PRAGMA table_info(skill_run)")}
+    assert "parent_run_id" in cols
 
 
 def test_delete_document_nullifies_skill_run_refs(db: Database, tmp_path: Path) -> None:

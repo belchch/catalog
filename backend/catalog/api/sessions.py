@@ -38,8 +38,11 @@ from catalog.api.schemas import (
     SessionCreated,
     SessionCreateRequest,
     SessionOut,
+    SessionToolsAttachRequest,
+    SessionToolsAttachResult,
     SessionUpdate,
     SkillMetaPatchRequest,
+    SkillOut,
 )
 from catalog.config import Settings
 from catalog.documents.tools import build_document_tools
@@ -52,7 +55,8 @@ from catalog.skills.artifact_tools import (
     parse_steps_content,
     validate_pipeline_steps,
 )
-from catalog.skills.config import SKILL_KINDS, pipeline_step_to_dict
+from catalog.skills.config import SKILL_KINDS, compute_tags, pipeline_step_to_dict
+from catalog.skills.skill_tools import build_session_skill_tools
 from catalog.skills.script_runner import (
     SCRIPT_CODE_CONTRACT_RU,
     ScriptValidationError,
@@ -78,6 +82,11 @@ from catalog.storage.repo_session_document import (
     detach_documents,
     list_session_documents,
 )
+from catalog.storage.repo_session_skill import (
+    attach_skills,
+    detach_skills,
+    list_session_skills,
+)
 
 
 router = APIRouter()
@@ -89,6 +98,9 @@ PLANNER_SYSTEM_PROMPT = (
     "доступные документы. Тебе доступны только документы, явно добавленные "
     "пользователем в эту сессию. Если нужного документа нет в list_documents, "
     "попроси пользователя добавить его — глобальное хранилище тебе недоступно. "
+    "Если в сессии прикреплены скиллы-инструменты (имена skill_*), вызывай их "
+    "для заранее определённых операций над текстом — они заморожены и проходят "
+    "свои verify_checks. "
     "Задавай уточняющие вопросы и формулируй чёткое задание для скилла.\n\n"
     "Когда задача прояснилась — определи kind (agent, script или pipeline) и "
     "материализуй черновик инструментами: set_skill_meta, затем "
@@ -326,6 +338,61 @@ async def detach_session_document_endpoint(
     removed = detach_documents(db, session_id, [doc_id])
     if removed == 0:
         raise HTTPException(status_code=404, detail="document not attached")
+    return Response(status_code=204)
+
+
+def _session_skill_out(row) -> SkillOut:
+    return SkillOut(
+        id=row.id,
+        name=row.name,
+        description=row.description,
+        status=row.status,
+        created_at=row.created_at,
+        kind=row.config.kind,
+        tags=compute_tags(row.config),
+        input_arity=row.config.input_arity,
+        provider=row.config.provider or None,
+        model=row.config.model or None,
+        reasoning=row.config.reasoning or None,
+    )
+
+
+@router.get("/sessions/{session_id}/tools", response_model=list[SkillOut])
+async def list_session_tools_endpoint(
+    session_id: str,
+    db: Database = Depends(get_workspace_db),
+) -> list[SkillOut]:
+    if get_session(db, session_id) is None:
+        raise HTTPException(status_code=404, detail="session not found")
+    return [_session_skill_out(s) for s in list_session_skills(db, session_id)]
+
+
+@router.post("/sessions/{session_id}/tools", response_model=SessionToolsAttachResult)
+async def attach_session_tools_endpoint(
+    session_id: str,
+    body: SessionToolsAttachRequest,
+    db: Database = Depends(get_workspace_db),
+) -> SessionToolsAttachResult:
+    if get_session(db, session_id) is None:
+        raise HTTPException(status_code=404, detail="session not found")
+    skipped = attach_skills(db, session_id, body.skill_ids)
+    return SessionToolsAttachResult(
+        skipped_skill_ids=skipped,
+        skills=[_session_skill_out(s) for s in list_session_skills(db, session_id)],
+    )
+
+
+@router.delete("/sessions/{session_id}/tools/{skill_id}", status_code=204)
+async def detach_session_tool_endpoint(
+    session_id: str,
+    skill_id: str,
+    db: Database = Depends(get_workspace_db),
+) -> Response:
+    if get_session(db, session_id) is None:
+        raise HTTPException(status_code=404, detail="session not found")
+    removed = detach_skills(db, session_id, [skill_id])
+    if removed == 0:
+        raise HTTPException(status_code=404, detail="skill not attached")
     return Response(status_code=204)
 
 
@@ -657,6 +724,17 @@ def _ws_session_tools(
     )
     for name in artifact_tools.names():
         entry = artifact_tools.get(name)
+        if entry is not None:
+            tools.register(entry[0], entry[1])
+    skill_tools = build_session_skill_tools(
+        db,
+        session_id,
+        workspace_dir=workspace,
+        base_tools=base_tools,
+        reserved=set(tools.names()),
+    )
+    for name in skill_tools.names():
+        entry = skill_tools.get(name)
         if entry is not None:
             tools.register(entry[0], entry[1])
     return tools

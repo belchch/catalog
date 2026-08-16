@@ -131,6 +131,23 @@ class SessionCreateRequest(BaseModel):
     doc_ids: list[str] = Field(default_factory=list)
 
 
+class SessionToolsAttachRequest(BaseModel):
+    skill_ids: list[str] = Field(min_length=1)
+
+    @field_validator("skill_ids")
+    @classmethod
+    def _non_empty_skill_ids(cls, value: list[str]) -> list[str]:
+        cleaned = [str(item).strip() for item in value if str(item).strip()]
+        if not cleaned:
+            raise ValueError("skill_ids must be a non-empty list")
+        return cleaned
+
+
+class SessionToolsAttachResult(BaseModel):
+    skipped_skill_ids: list[str] = Field(default_factory=list)
+    skills: list[SkillOut] = Field(default_factory=list)
+
+
 class SessionCreated(BaseModel):
     id: str
     skipped_doc_ids: list[str] = Field(default_factory=list)

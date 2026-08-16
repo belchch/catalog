@@ -24,6 +24,7 @@
 | [0016](0016-workspace-as-folder.md) | Workspace-as-folder: воркспейс = папка; `.catalog/index.db` + глобальный реестр | Accepted |
 | [0017](0017-folder-picker-via-backend-browse.md) | Folder-picker — серверный обзор ФС (`/fs/browse` в пределах `APP_FS_ROOT`), не системный диалог | Accepted |
 | [0018](0018-pipeline-skills.md) | Pipeline-скилы (kind=pipeline): python + LLM в одном скиле | Accepted |
+| [0019](0019-skill-as-session-tool.md) | Пользовательский script-скилл как вызываемый тул сессии | Accepted |
 
 ## Связанные материалы
 - Исходные транскрипции: `../pre-design/` (`opus-chat.json` — фундаментальные решения; `fable-review.json` — критика и уточнения).
