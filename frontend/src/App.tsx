@@ -743,7 +743,7 @@ export default function App() {
       <header className="catalog-header flex shrink-0 items-center justify-between px-5">
         <div className="flex min-w-0 items-center gap-3">
           <FolderIcon className="catalog-header__folder size-5 shrink-0" />
-          <h1 className="truncate text-base font-semibold">Catalog — планировщик скиллов</h1>
+          <h1 className="truncate text-base font-semibold">Catalogue — планировщик скиллов</h1>
           {gitSha ? (
             <span className="shrink-0 font-mono text-xs text-ink-faint" title="git sha">
               {gitSha}

@@ -62,4 +62,43 @@ describe('useRunStream', () => {
     })
     expect(result.current.resultText).toBe('# Summary\n\nFixed version.')
   })
+
+  it('keeps a live pipeline skill step in its own group with a child run', () => {
+    const child = '7c1f0ab2deadbeef0123456789abcdef'
+    const { result } = renderHook(() => useRunStream('run-1'))
+
+    act(() => {
+      captured.onEvent?.({
+        type: 'tool_call',
+        id: 'step-call',
+        name: 'Сводка',
+        arguments: { text: 'source text' },
+        step_id: 'call',
+      })
+      captured.onEvent?.({
+        type: 'tool_result',
+        id: 'step-call',
+        name: 'Сводка',
+        ok: true,
+        result: JSON.stringify({
+          ok: true,
+          status: 'ok',
+          run_id: child,
+          skill_id: 'sk_7f3',
+          skill_name: 'Сводка',
+          config_hash: '1a2b3c4dffff',
+          depth: 1,
+        }),
+        step_id: 'call',
+      })
+    })
+
+    expect(result.current.steps.map((s) => s.stepId)).toEqual(['call', 'call'])
+    expect(result.current.steps[1]).toMatchObject({
+      kind: 'tool_result',
+      toolName: 'Сводка',
+      childRunId: child,
+      skillDepth: 1,
+    })
+  })
 })

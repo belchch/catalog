@@ -35,6 +35,8 @@ from catalog.agent.events import (
     RunMetaEvent,
     ScriptEvent,
     TokenEvent,
+    ToolCallEvent,
+    ToolResultEvent,
     VerifyEvent,
 )
 from catalog.agent.logging import log_agent_event
@@ -126,6 +128,37 @@ def _with_step_id(event: AgentEvent, step_id: str) -> AgentEvent:
     if hasattr(event, "step_id"):
         return replace(event, step_id=step_id)
     return event
+
+
+# A skill step runs a whole nested skill, so the live stream carries only the
+# bookends (call → result); the nested run has its own trace behind ``run_id``.
+_SKILL_STEP_INPUT_PREVIEW = 400
+
+
+def _skill_step_call_event(
+    step: PipelineStep, name: str, step_input: PipelineValue
+) -> ToolCallEvent:
+    preview = _value_as_text(step_input)
+    if len(preview) > _SKILL_STEP_INPUT_PREVIEW:
+        preview = preview[:_SKILL_STEP_INPUT_PREVIEW] + "…"
+    return ToolCallEvent(
+        id=f"step-{step.id}",
+        name=name,
+        arguments={"text": preview},
+        step_id=step.id,
+    )
+
+
+def _skill_step_result_event(
+    step: PipelineStep, name: str, ok: bool, payload: dict
+) -> ToolResultEvent:
+    return ToolResultEvent(
+        id=f"step-{step.id}",
+        name=name,
+        ok=ok,
+        result=payload,
+        step_id=step.id,
+    )
 
 
 def _pipeline_step_input(
@@ -585,6 +618,11 @@ async def _apply_core(
                     nested_ctx = (call_context or SkillCallContext()).nested(
                         nested_id
                     )
+                    call_event = _skill_step_call_event(
+                        step, nested_name, step_input
+                    )
+                    yield call_event
+                    log_agent_event(call_event)
                     if current_depth >= max_skill_depth:
                         message = (
                             f"pipeline step {step.id!r}: max skill depth "
@@ -603,6 +641,20 @@ async def _apply_core(
                                 },
                             )
                         )
+                        depth_event = _skill_step_result_event(
+                            step,
+                            nested_name,
+                            False,
+                            {
+                                "error": message,
+                                "skill_id": nested_id,
+                                "skill_name": nested_name,
+                                "config_hash": nested_hash,
+                                "depth": nested_ctx.depth,
+                            },
+                        )
+                        yield depth_event
+                        log_agent_event(depth_event)
                         raise PipelineStepError(message)
                     step_budget = current_skill_budget(budget)
                     already_held = skill_hold_active()
@@ -621,6 +673,19 @@ async def _apply_core(
                                     },
                                 )
                             )
+                            deadline_event = _skill_step_result_event(
+                                step,
+                                nested_name,
+                                False,
+                                {
+                                    "error": "deadline exceeded",
+                                    "skill_id": nested_id,
+                                    "skill_name": nested_name,
+                                    "depth": nested_ctx.depth,
+                                },
+                            )
+                            yield deadline_event
+                            log_agent_event(deadline_event)
                             deadline_stopped = True
                             last_capped = True
                             break
@@ -649,6 +714,28 @@ async def _apply_core(
                                     },
                                 )
                             )
+                            budget_event = _skill_step_result_event(
+                                step,
+                                nested_name,
+                                False,
+                                {
+                                    "error": "budget exhausted",
+                                    "skill_id": nested_id,
+                                    "skill_name": nested_name,
+                                    "config_hash": nested_hash,
+                                    "depth": nested_ctx.depth,
+                                    "budget": {
+                                        "llm_calls_left": step_budget.llm_calls_left,
+                                        "nested_runs_left": (
+                                            step_budget.nested_runs_left
+                                        ),
+                                        "needed_llm_calls": needed_llm,
+                                        "needed_nested_runs": needed_runs,
+                                    },
+                                },
+                            )
+                            yield budget_event
+                            log_agent_event(budget_event)
                             last_capped = True
                             pipeline_halted = True
                             break
@@ -690,6 +777,19 @@ async def _apply_core(
                                 },
                             )
                         )
+                        failed_event = _skill_step_result_event(
+                            step,
+                            nested_name,
+                            False,
+                            {
+                                "error": str(exc),
+                                "skill_id": nested_id,
+                                "skill_name": nested_name,
+                                "depth": nested_ctx.depth,
+                            },
+                        )
+                        yield failed_event
+                        log_agent_event(failed_event)
                         raise
                     finally:
                         if step_budget is not None and hold is not None:
@@ -697,13 +797,23 @@ async def _apply_core(
                     verify_failures = _nested_verify_failures(
                         nested_result.trace
                     )
+                    nested_ok = nested_result.status == "ok"
+                    step_payload = {
+                        "ok": nested_ok,
+                        "status": nested_result.status,
+                        "run_id": nested_result.run_id,
+                        "skill_id": nested_id,
+                        "skill_name": nested_name,
+                        "config_hash": nested_hash,
+                        "depth": nested_ctx.depth,
+                    }
                     trace.entries.append(
                         TraceEntry(
                             kind="tool_result",
                             iteration=index + 1,
                             data={
                                 "name": nested_name,
-                                "ok": nested_result.status == "ok",
+                                "ok": nested_ok,
                                 "step_id": step.id,
                                 "run_id": nested_result.run_id,
                                 "skill_id": nested_id,
@@ -712,18 +822,17 @@ async def _apply_core(
                                 "depth": nested_ctx.depth,
                                 "failures": verify_failures,
                                 "result": {
-                                    "ok": nested_result.status == "ok",
-                                    "status": nested_result.status,
-                                    "run_id": nested_result.run_id,
-                                    "skill_id": nested_id,
-                                    "skill_name": nested_name,
-                                    "config_hash": nested_hash,
-                                    "depth": nested_ctx.depth,
+                                    **step_payload,
                                     "verify_failures": verify_failures,
                                 },
                             },
                         )
                     )
+                    result_event = _skill_step_result_event(
+                        step, nested_name, nested_ok, step_payload
+                    )
+                    yield result_event
+                    log_agent_event(result_event)
                     current = nested_result.result_text or ""
                     last_text = current
                     if nested_result.status != "ok":

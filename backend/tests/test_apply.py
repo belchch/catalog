@@ -13,6 +13,8 @@ from catalog.agent.events import (
     ScriptEvent,
     StepEvent,
     TokenEvent,
+    ToolCallEvent,
+    ToolResultEvent,
     VerifyEvent,
 )
 from catalog.agent.registry import ToolRegistry
@@ -1749,6 +1751,81 @@ def test_apply_pipeline_skill_step_creates_nested_run(
     assert child["persist"] is False
     assert child["result_text"] == "SOURCE TEXT"
     assert child["status"] == "ok"
+
+
+def test_apply_pipeline_skill_step_streams_call_and_result(
+    db: Database, workspace: Path
+) -> None:
+    inner = _inner_script()
+    skill = _pipeline_with_skill_step(inner)
+    skill_id = create_skill(
+        db, name=skill.name, description=skill.description, config=skill
+    )
+    input_doc_id = _ingest_input(db, workspace)
+    events = asyncio.run(
+        _collect_events(
+            apply_skill(
+                provider=ScriptProvider([]),
+                db=db,
+                workspace_dir=str(workspace),
+                skill=skill,
+                skill_id=skill_id,
+                input_doc_ids=[input_doc_id],
+                base_tools=build_document_tools(db, workspace),
+                persist=False,
+            )
+        )
+    )
+
+    calls = [e for e in events if isinstance(e, ToolCallEvent)]
+    assert [(e.name, e.step_id) for e in calls] == [("Inner", "call")]
+    assert calls[0].arguments["text"] == "source text"
+    results = [e for e in events if isinstance(e, ToolResultEvent)]
+    assert len(results) == 1
+    assert results[0].step_id == "call"
+    assert results[0].name == "Inner"
+    assert results[0].ok is True
+    payload = results[0].result
+    assert payload["status"] == "ok"
+    assert payload["config_hash"] == "deadbeef"
+    assert payload["depth"] == 1
+    child = get_run(db, payload["run_id"])
+    assert child is not None
+    assert child["result_text"] == "SOURCE TEXT"
+
+
+def test_apply_pipeline_skill_step_streams_budget_limiter(
+    db: Database, workspace: Path
+) -> None:
+    inner = _inner_script()
+    skill = _pipeline_with_skill_step(inner)
+    skill_id = create_skill(
+        db, name=skill.name, description=skill.description, config=skill
+    )
+    input_doc_id = _ingest_input(db, workspace)
+    events = asyncio.run(
+        _collect_events(
+            apply_skill(
+                provider=ScriptProvider([]),
+                db=db,
+                workspace_dir=str(workspace),
+                skill=skill,
+                skill_id=skill_id,
+                input_doc_ids=[input_doc_id],
+                base_tools=build_document_tools(db, workspace),
+                budget=SkillBudget(llm_calls_left=60, nested_runs_left=0),
+            )
+        )
+    )
+
+    results = [e for e in events if isinstance(e, ToolResultEvent)]
+    assert len(results) == 1
+    assert results[0].ok is False
+    assert results[0].step_id == "call"
+    payload = results[0].result
+    assert payload["error"] == "budget exhausted"
+    assert payload["budget"]["nested_runs_left"] == 0
+    assert payload["budget"]["needed_nested_runs"] >= 1
 
 
 def test_apply_pipeline_skill_step_feeds_next_step(

@@ -74,7 +74,7 @@ export function SetupKeyScreen({ onConfigured }: SetupKeyScreenProps) {
           </span>
           <div>
             <h1 id={titleId} className="text-base font-semibold text-ink">
-              Настройка Catalog
+              Настройка Catalogue
             </h1>
             <p className="text-xs text-ink-faint">
               Добавьте ключ LLM-провайдера, чтобы начать работу
@@ -83,7 +83,7 @@ export function SetupKeyScreen({ onConfigured }: SetupKeyScreenProps) {
         </div>
 
         <p className="text-xs text-ink-faint">
-          Catalog обращается к LLM-провайдеру. Вставьте API-ключ — он сохранится
+          Catalogue обращается к LLM-провайдеру. Вставьте API-ключ — он сохранится
           локально и не показывается обратно.
         </p>
 
