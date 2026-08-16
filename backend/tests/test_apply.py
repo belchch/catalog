@@ -1769,9 +1769,9 @@ def test_apply_pipeline_skill_step_verify_fail_stops(
         db, name=skill.name, description=skill.description, config=skill
     )
     input_doc_id = _ingest_input(db, workspace)
-    with pytest.raises(PipelineStepError, match="nested skill failed"):
-        asyncio.run(
-            apply_skill_collect(
+    events = asyncio.run(
+        _collect_events(
+            apply_skill(
                 provider=ScriptProvider([]),
                 db=db,
                 workspace_dir=str(workspace),
@@ -1781,6 +1781,10 @@ def test_apply_pipeline_skill_step_verify_fail_stops(
                 base_tools=build_document_tools(db, workspace),
             )
         )
+    )
+    finish_events = [e for e in events if isinstance(e, FinishEvent)]
+    assert finish_events
+    assert finish_events[-1].finish_reason == "verify_failed"
     saved = _saved_trace(db, skill_id)
     nested = [
         e
@@ -1797,6 +1801,13 @@ def test_apply_pipeline_skill_step_verify_fail_stops(
     assert child is not None
     assert child["status"] == "failed"
     assert child["parent_run_id"]
+    with db.connect() as conn:
+        parent = conn.execute(
+            "SELECT status FROM skill_run WHERE skill_id = ?",
+            (skill_id,),
+        ).fetchone()
+    assert parent is not None
+    assert parent["status"] == "failed"
 
 
 def test_apply_pipeline_skill_step_top_level_budget_none(

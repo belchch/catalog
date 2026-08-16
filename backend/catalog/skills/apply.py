@@ -724,18 +724,11 @@ async def _apply_core(
                             },
                         )
                     )
-                    if nested_result.status != "ok":
-                        reason = (
-                            "; ".join(verify_failures)
-                            if verify_failures
-                            else (nested_result.status or "failed")
-                        )
-                        raise PipelineStepError(
-                            f"pipeline step {step.id!r}: "
-                            f"nested skill failed: {reason}"
-                        )
                     current = nested_result.result_text or ""
                     last_text = current
+                    if nested_result.status != "ok":
+                        pipeline_halted = True
+                        break
                 else:
                     raise ValueError(
                         f"unknown pipeline step type: {step.type!r}"
