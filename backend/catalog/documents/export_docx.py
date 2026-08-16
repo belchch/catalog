@@ -118,24 +118,40 @@ def count_docx_headings(path: str | Path) -> int:
     return count
 
 
+def _path_in_workspace(workspace: Path, raw: str) -> Path:
+    root = workspace.resolve()
+    candidate = Path(raw).expanduser()
+    if not candidate.is_absolute():
+        candidate = root / candidate
+    try:
+        resolved = candidate.resolve()
+    except OSError as exc:
+        raise FileNotFoundError(raw) from exc
+    try:
+        resolved.relative_to(root)
+    except ValueError as exc:
+        raise FileNotFoundError(raw) from exc
+    return resolved
+
+
 def _resolve_template(workspace: Path, template: str) -> Path | None:
     explicit = (template or "").strip()
     if explicit:
-        path = Path(explicit)
-        if not path.is_absolute():
-            path = workspace / path
+        path = _path_in_workspace(workspace, explicit)
         if not path.is_file():
-            raise FileNotFoundError(str(path))
+            raise FileNotFoundError(explicit)
         return path
     raw = (get_settings().docx_template or "").strip()
     if not raw:
         return None
-    path = Path(raw)
-    if not path.is_absolute():
-        path = workspace / path
-    if path.is_file():
-        return path
-    return None
+    configured = Path(raw).expanduser()
+    if configured.is_absolute():
+        return configured if configured.is_file() else None
+    try:
+        path = _path_in_workspace(workspace, raw)
+    except FileNotFoundError:
+        return None
+    return path if path.is_file() else None
 
 
 def write_export_docx(

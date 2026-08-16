@@ -242,6 +242,65 @@ def test_write_export_docx_self_check_fails_on_mismatch(
     assert (tmp_path / result["path"]).is_file()
 
 
+def test_write_export_docx_rejects_template_outside_workspace(
+    tmp_path: Path,
+) -> None:
+    db = Database(":memory:")
+    db.init_schema()
+    row = ingest_file(db, tmp_path, filename="note.md", content=b"# Title\n\nbody")
+    outside = tmp_path.parent / "outside-template.docx"
+    docx.Document().save(str(outside))
+    escaped = write_export_docx(
+        db, tmp_path, [row.id], title="Nope", template=f"../{outside.name}"
+    )
+    assert escaped == {"error": "template not found"}
+    absolute = write_export_docx(
+        db, tmp_path, [row.id], title="Nope", template=str(outside)
+    )
+    assert absolute == {"error": "template not found"}
+
+
+def test_write_export_docx_uses_workspace_relative_template(
+    tmp_path: Path,
+) -> None:
+    db = Database(":memory:")
+    db.init_schema()
+    row = ingest_file(db, tmp_path, filename="note.md", content=b"# Title\n\nHello")
+    template_path = tmp_path / "brand.docx"
+    template = docx.Document()
+    template.styles["Normal"].font.name = "Times New Roman"
+    template.save(str(template_path))
+    result = write_export_docx(
+        db, tmp_path, [row.id], title="Branded", template="brand.docx"
+    )
+    assert result["ok"] is True
+    document = docx.Document(str(tmp_path / result["path"]))
+    assert document.styles["Normal"].font.name == "Times New Roman"
+
+
+def test_write_export_docx_settings_absolute_template(
+    tmp_path: Path, monkeypatch
+) -> None:
+    db = Database(":memory:")
+    db.init_schema()
+    row = ingest_file(db, tmp_path, filename="note.md", content=b"# Title\n\nHello")
+    outside = tmp_path.parent / "admin-template.docx"
+    template = docx.Document()
+    template.styles["Normal"].font.name = "Times New Roman"
+    template.save(str(outside))
+
+    class _Settings:
+        docx_template = str(outside)
+
+    monkeypatch.setattr(
+        "catalog.documents.export_docx.get_settings", lambda: _Settings()
+    )
+    result = write_export_docx(db, tmp_path, [row.id], title="Admin")
+    assert result["ok"] is True
+    document = docx.Document(str(tmp_path / result["path"]))
+    assert document.styles["Normal"].font.name == "Times New Roman"
+
+
 def test_export_docx_tool_registered_as_write(tmp_path: Path) -> None:
     db = Database(":memory:")
     db.init_schema()
