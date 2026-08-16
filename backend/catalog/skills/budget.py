@@ -93,11 +93,22 @@ _active_budget: ContextVar[SkillBudget | None] = ContextVar(
 
 
 def estimate_skill_llm_calls(skill: SkillConfig) -> int:
+    from catalog.skills.verify import is_custom_check_id
+
     if skill.kind == "script":
-        return 0
-    if skill.kind == "pipeline":
-        return len(skill.steps) * skill.max_iterations
-    return skill.max_iterations * (skill.max_retries + 1)
+        base = 0
+    elif skill.kind == "pipeline":
+        base = len(skill.steps) * skill.max_iterations
+    else:
+        base = skill.max_iterations * (skill.max_retries + 1)
+    n_custom = sum(
+        1 for check in skill.verify_checks if is_custom_check_id(check.check)
+    )
+    if n_custom == 0:
+        return base
+    if skill.kind == "agent":
+        return base + n_custom * (skill.max_retries + 1)
+    return base + n_custom
 
 
 def estimate_skill_budget(skill: SkillConfig) -> tuple[int, int]:

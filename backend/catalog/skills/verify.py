@@ -263,6 +263,9 @@ async def run_custom_judge(
     if not model:
         return f"custom:{label}: missing model"
     try:
+        from catalog.skills.budget import charge_nested_skill_llm
+
+        charge_nested_skill_llm()
         resp = await provider.complete(
             model,
             [Message(role="user", content=_judge_user_message(criterion, text))],

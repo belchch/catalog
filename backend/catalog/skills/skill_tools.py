@@ -24,6 +24,7 @@ from catalog.skills.budget import (
     nested_skill_hold,
 )
 from catalog.skills.config import SKILL_KINDS
+from catalog.skills.verify import is_custom_check_id
 from catalog.skills.repo_run import create_run, finish_run
 from catalog.skills.repo_skill import SkillRecord
 from catalog.storage.db import Database
@@ -221,7 +222,7 @@ def build_session_skill_tools(
         skill_config = skill.config
         skill_kind = skill_config.kind
         has_custom_verify = any(
-            check.check.startswith("custom:") for check in skill_config.verify_checks
+            is_custom_check_id(check.check) for check in skill_config.verify_checks
         )
         if skill_kind == "script" and not has_custom_verify:
             skill_provider: LLMProvider = _UnusedProvider()
@@ -346,16 +347,6 @@ def build_session_skill_tools(
             finally:
                 if _budget is not None and hold is not None:
                     _budget.release(hold)
-            if _budget is not None and _budget.deadline_hit:
-                return _deadline_exceeded_result(
-                    db=db,
-                    session_id=session_id,
-                    skill_id=_skill_id,
-                    skill_name=_name,
-                    pinned_hash=_hash,
-                    depth=nested.depth,
-                    run_id=result.run_id,
-                )
             verify_failures: list[str] = []
             for entry in result.trace.entries:
                 if entry.kind == "verify" and not entry.data.get("passed", True):

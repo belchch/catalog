@@ -527,6 +527,38 @@ def test_session_skill_tool_custom_verify_uses_pinned_provider(
     assert workspace.requests == []
 
 
+def test_session_skill_tool_custom_verify_params_id_uses_provider(
+    db: Database,
+) -> None:
+    row = create_custom_check(db, name="Has Hello", prompt="contains hello")
+    sid = create_session(db)
+    skill_id = _script_skill(
+        db,
+        model="",
+        verify_checks=[VerifyCheck(check="custom", params={"id": row.id})],
+    )
+    attach_skills(db, sid, [skill_id])
+    record = get_skill(db, skill_id)
+    assert record is not None
+    name = skill_tool_name(record, used=set())
+    provider = _JudgeProvider(["PASS"])
+    tools = build_session_skill_tools(
+        db,
+        sid,
+        workspace_dir="/tmp",
+        base_tools=ToolRegistry(),
+        provider=provider,
+        fallback_model="workspace/model",
+    )
+    _, fn = tools.get(name)
+    assert fn is not None
+    out = asyncio.run(fn(text="hello"))
+    assert out["ok"] is True
+    assert out["verify_failures"] == []
+    assert len(provider.requests) == 1
+    assert provider.requests[0]["model"] == "workspace/model"
+
+
 def test_session_skill_tool_custom_verify_without_provider_fails(
     db: Database,
 ) -> None:
@@ -905,6 +937,30 @@ def test_estimate_skill_budget_by_kind() -> None:
     assert estimate_skill_budget(script) == (0, 1)
     assert estimate_skill_budget(agent) == (24, 1)
     assert estimate_skill_budget(pipeline) == (15, 1)
+    script_custom = replace(
+        script,
+        verify_checks=[VerifyCheck(check="custom:abc")],
+    )
+    script_custom_params = replace(
+        script,
+        verify_checks=[VerifyCheck(check="custom", params={"id": "abc"})],
+    )
+    agent_custom = replace(
+        agent,
+        verify_checks=[VerifyCheck(check="custom:abc")],
+    )
+    pipeline_custom = replace(
+        pipeline,
+        verify_checks=[
+            VerifyCheck(check="custom:abc"),
+            VerifyCheck(check="custom", params={"id": "def"}),
+        ],
+    )
+    assert estimate_skill_llm_calls(script_custom) == 1
+    assert estimate_skill_llm_calls(script_custom_params) == 1
+    assert estimate_skill_llm_calls(agent_custom) == 27
+    assert estimate_skill_llm_calls(pipeline_custom) == 17
+    assert estimate_skill_budget(script_custom) == (1, 1)
 
 
 def test_budget_reserve_release_two_of_twenty_four() -> None:
@@ -918,6 +974,72 @@ def test_budget_reserve_release_two_of_twenty_four() -> None:
     assert hold.llm_used == 2
     assert budget.llm_calls_left == 58
     assert budget.nested_runs_left == 19
+
+
+def test_script_custom_verify_charges_turn_budget(db: Database) -> None:
+    row = create_custom_check(db, name="Has Hello", prompt="contains hello")
+    sid = create_session(db)
+    skill_id = _script_skill(
+        db,
+        model="",
+        verify_checks=[VerifyCheck(check=f"custom:{row.id}")],
+    )
+    attach_skills(db, sid, [skill_id])
+    record = get_skill(db, skill_id)
+    assert record is not None
+    name = skill_tool_name(record, used=set())
+    provider = _JudgeProvider(["PASS"])
+    budget = SkillBudget(llm_calls_left=60, nested_runs_left=20)
+    tools = build_session_skill_tools(
+        db,
+        sid,
+        workspace_dir="/tmp",
+        base_tools=ToolRegistry(),
+        provider=provider,
+        fallback_model="workspace/model",
+        budget=budget,
+    )
+    _, fn = tools.get(name)
+    assert fn is not None
+    out = asyncio.run(fn(text="hello"))
+    assert out["ok"] is True
+    assert len(provider.requests) == 1
+    assert budget.llm_calls_left == 59
+    assert budget.nested_runs_left == 19
+
+
+def test_script_custom_verify_blocked_when_llm_budget_empty(db: Database) -> None:
+    row = create_custom_check(db, name="Has Hello", prompt="contains hello")
+    sid = create_session(db)
+    skill_id = _script_skill(
+        db,
+        model="",
+        verify_checks=[VerifyCheck(check="custom", params={"id": row.id})],
+    )
+    attach_skills(db, sid, [skill_id])
+    record = get_skill(db, skill_id)
+    assert record is not None
+    name = skill_tool_name(record, used=set())
+    provider = _JudgeProvider(["SHOULD NOT RUN"])
+    budget = SkillBudget(llm_calls_left=0, nested_runs_left=20)
+    tools = build_session_skill_tools(
+        db,
+        sid,
+        workspace_dir="/tmp",
+        base_tools=ToolRegistry(),
+        provider=provider,
+        fallback_model="workspace/model",
+        budget=budget,
+    )
+    _, fn = tools.get(name)
+    assert fn is not None
+    out = asyncio.run(fn(text="hello"))
+    assert out["ok"] is False
+    assert out["error"] == "budget exhausted"
+    assert out["budget"]["needed_llm_calls"] == 1
+    assert provider.requests == []
+    assert budget.llm_calls_left == 0
+    assert budget.nested_runs_left == 20
 
 
 def test_agent_skill_does_not_start_when_budget_short(db: Database) -> None:
@@ -1224,6 +1346,54 @@ def test_expired_deadline_does_not_start_nested_run(db: Database) -> None:
     nodes = [e for e in entries if e["kind"] == "deadline"]
     assert nodes
     assert nodes[0]["data"]["error"] == "deadline exceeded"
+
+
+def test_completed_nested_run_keeps_result_when_deadline_hit(
+    db: Database,
+) -> None:
+    row = create_custom_check(db, name="Has Hello", prompt="contains hello")
+    sid = create_session(db)
+    skill_id = _script_skill(
+        db,
+        model="",
+        verify_checks=[VerifyCheck(check=f"custom:{row.id}")],
+    )
+    attach_skills(db, sid, [skill_id])
+    record = get_skill(db, skill_id)
+    assert record is not None
+    name = skill_tool_name(record, used=set())
+    budget = SkillBudget(
+        llm_calls_left=60,
+        nested_runs_left=20,
+        deadline_monotonic=time.monotonic() + 900,
+    )
+
+    class _MarkDeadline(_JudgeProvider):
+        async def complete(self, model, messages, tools=None, temperature=0.0, **kwargs):
+            budget.deadline_hit = True
+            return await super().complete(
+                model, messages, tools=tools, temperature=temperature, **kwargs
+            )
+
+    provider = _MarkDeadline(["PASS"])
+    tools = build_session_skill_tools(
+        db,
+        sid,
+        workspace_dir="/tmp",
+        base_tools=ToolRegistry(),
+        provider=provider,
+        fallback_model="workspace/model",
+        budget=budget,
+    )
+    _, fn = tools.get(name)
+    assert fn is not None
+    out = asyncio.run(fn(text="hello"))
+    assert out["ok"] is True
+    assert out["status"] == "ok"
+    assert out["text"] == "HELLO"
+    assert out["verify_failures"] == []
+    assert out.get("error") != "deadline exceeded"
+    assert budget.deadline_hit is True
 
 
 def test_budget_exhausted_when_deadline_still_open(db: Database) -> None:
