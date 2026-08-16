@@ -139,3 +139,11 @@ export function WrenchIcon({ className }: IconProps) {
     </svg>
   )
 }
+
+export function ChevronRightIcon({ className }: IconProps) {
+  return (
+    <svg {...iconBase} className={className}>
+      <polyline points="9 18 15 12 9 6" />
+    </svg>
+  )
+}

@@ -104,7 +104,7 @@ describe('Chat composer', () => {
     expect(screen.queryByText('DOCX · к отправке')).toBeNull()
   })
 
-  it('exposes the document picker on + and the tools slot without a popover', () => {
+  it('exposes the document picker on + and a closed tools trigger', () => {
     const onOpenTools = vi.fn()
     renderChat({ onOpenTools, attachedSkillCount: 2 })
     expect(screen.getByRole('combobox', { name: 'Добавить документ' })).toBeTruthy()
@@ -116,9 +116,11 @@ describe('Chat composer', () => {
     )
 
     const tools = screen.getByRole('button', { name: 'Инструменты, включено 2' })
-    expect(tools.getAttribute('aria-expanded')).toBeNull()
-    expect(tools.getAttribute('aria-haspopup')).toBeNull()
+    expect(tools.getAttribute('aria-expanded')).toBe('false')
+    expect(tools.getAttribute('aria-haspopup')).toBe('dialog')
+    expect(tools.getAttribute('aria-controls')).toBeTruthy()
     expect(tools.textContent).toContain('2')
+    expect(screen.queryByRole('dialog', { name: 'Инструменты сессии' })).toBeNull()
     fireEvent.click(tools)
     expect(onOpenTools).toHaveBeenCalledTimes(1)
   })
@@ -127,5 +129,41 @@ describe('Chat composer', () => {
     renderChat({ attachedSkillCount: 0 })
     const tools = screen.getByRole('button', { name: 'Инструменты' })
     expect(tools.textContent).not.toMatch(/\d/)
+  })
+
+  it('opens the tools popover and closes it on Escape', () => {
+    const onCloseTools = vi.fn()
+    renderChat({
+      toolsOpen: true,
+      onCloseTools,
+      availableSkills: [
+        {
+          id: 'sk1',
+          name: 'Extract',
+          description: 'Тезисы',
+          status: 'committed',
+          created_at: '2026-01-01T00:00:00Z',
+          kind: 'script',
+          tags: ['python'],
+          input_arity: 1,
+          provider: null,
+          model: null,
+          reasoning: null,
+        },
+      ],
+      attachedSkillIds: ['sk1'],
+      attachedSkillCount: 1,
+    })
+    expect(screen.getByRole('dialog', { name: 'Инструменты сессии' })).toBeTruthy()
+    const tools = screen.getByRole('button', { name: 'Инструменты, включено 1' })
+    expect(tools.getAttribute('aria-expanded')).toBe('true')
+    fireEvent.keyDown(document, { key: 'Escape' })
+    expect(onCloseTools).toHaveBeenCalledTimes(1)
+  })
+
+  it('closes the tools popover when generation starts', () => {
+    const onCloseTools = vi.fn()
+    renderChat({ toolsOpen: true, onCloseTools, streaming: true })
+    expect(onCloseTools).toHaveBeenCalled()
   })
 })

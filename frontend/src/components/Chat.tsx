@@ -1,9 +1,10 @@
-import { useEffect, useRef, useState } from 'react'
-import type { DocumentOut } from '../api.ts'
+import { useEffect, useId, useRef, useState } from 'react'
+import type { DocumentOut, SkillOut } from '../api.ts'
 import type { PlannerMessage } from '../hooks/usePlannerSession.ts'
 import { ChatMessage } from './ChatMessage.tsx'
 import { DocumentCombobox } from './DocumentCombobox.tsx'
 import { FileTextIcon, PlusIcon, WrenchIcon } from './icons.tsx'
+import { ToolsPopover } from './ToolsPopover.tsx'
 
 const STARTER_SUGGESTIONS = [
   'Изучи доступные документы',
@@ -37,6 +38,15 @@ interface ChatProps {
   onDismissBuildError: () => void
   attachedSkillCount?: number
   onOpenTools?: () => void
+  toolsOpen?: boolean
+  onCloseTools?: () => void
+  availableSkills?: SkillOut[]
+  attachedSkillIds?: string[]
+  pendingToolIds?: string[]
+  onToggleTool?: (skillId: string, enabled: boolean) => void
+  toolsLoading?: boolean
+  toolsError?: string | null
+  onOpenSkillCard?: (skillId: string) => void
 }
 
 export function Chat({
@@ -65,12 +75,24 @@ export function Chat({
   onDismissBuildError,
   attachedSkillCount = 0,
   onOpenTools,
+  toolsOpen = false,
+  onCloseTools,
+  availableSkills = [],
+  attachedSkillIds = [],
+  pendingToolIds = [],
+  onToggleTool,
+  toolsLoading = false,
+  toolsError = null,
+  onOpenSkillCard,
 }: ChatProps) {
   const [input, setInput] = useState('')
   const [selectedDocIds, setSelectedDocIds] = useState<string[]>([])
   const [pickerEpoch, setPickerEpoch] = useState(0)
   const scrollRef = useRef<HTMLDivElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
+  const toolsRootRef = useRef<HTMLDivElement>(null)
+  const toolsButtonRef = useRef<HTMLButtonElement>(null)
+  const toolsPopoverId = useId()
 
   useEffect(() => {
     if (messages.length === 0) return
@@ -90,6 +112,36 @@ export function Chat({
     el.style.height = 'auto'
     el.style.height = `${el.scrollHeight}px`
   }, [input])
+
+  const closeTools = (restoreFocus: boolean) => {
+    onCloseTools?.()
+    if (restoreFocus) toolsButtonRef.current?.focus()
+  }
+
+  useEffect(() => {
+    if (!toolsOpen) return
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return
+      e.preventDefault()
+      onCloseTools?.()
+      toolsButtonRef.current?.focus()
+    }
+    const onPointer = (e: MouseEvent) => {
+      if (!toolsRootRef.current?.contains(e.target as Node)) {
+        onCloseTools?.()
+      }
+    }
+    document.addEventListener('keydown', onKey)
+    document.addEventListener('mousedown', onPointer)
+    return () => {
+      document.removeEventListener('keydown', onKey)
+      document.removeEventListener('mousedown', onPointer)
+    }
+  }, [toolsOpen, onCloseTools])
+
+  useEffect(() => {
+    if (streaming && toolsOpen) onCloseTools?.()
+  }, [streaming, toolsOpen, onCloseTools])
 
   const selectedDocs = selectedDocIds
     .map((id) => documents.find((d) => d.id === id))
@@ -348,24 +400,44 @@ export function Chat({
             triggerContent={<PlusIcon />}
             triggerClassName="btn-icon-ghost"
           />
-          <button
-            type="button"
-            className="btn-icon-ghost relative"
-            onClick={() => onOpenTools?.()}
-            disabled={streaming || !sessionId}
-            aria-label={toolsLabel}
-            title="Инструменты"
-          >
-            <WrenchIcon />
-            {attachedSkillCount > 0 && (
-              <span
-                className="absolute -right-0.5 -top-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-brand px-1 text-[10px] font-medium text-white"
-                aria-hidden
-              >
-                {attachedSkillCount}
-              </span>
-            )}
-          </button>
+          <div className="relative" ref={toolsRootRef}>
+            <button
+              ref={toolsButtonRef}
+              type="button"
+              className="btn-icon-ghost relative"
+              onClick={() => onOpenTools?.()}
+              disabled={streaming || !sessionId}
+              aria-label={toolsLabel}
+              title="Инструменты"
+              aria-haspopup="dialog"
+              aria-expanded={toolsOpen}
+              aria-controls={toolsPopoverId}
+            >
+              <WrenchIcon />
+              {attachedSkillCount > 0 && (
+                <span
+                  className="absolute -right-0.5 -top-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-brand px-1 text-[10px] font-medium text-white"
+                  aria-hidden
+                >
+                  {attachedSkillCount}
+                </span>
+              )}
+            </button>
+            <ToolsPopover
+              id={toolsPopoverId}
+              open={toolsOpen}
+              onClose={() => closeTools(true)}
+              skills={availableSkills}
+              attachedIds={attachedSkillIds}
+              pendingIds={pendingToolIds}
+              onToggle={(skillId, enabled) => onToggleTool?.(skillId, enabled)}
+              onCreateSkill={onCreateSkill}
+              createDisabled={skillBusy || messages.length === 0}
+              onOpenSkillCard={onOpenSkillCard}
+              loading={toolsLoading}
+              error={toolsError}
+            />
+          </div>
           {sessionId && (
             <div className="ml-auto text-[11px] text-ink-faint">
               Timeout: {sessionTimeoutSeconds}s

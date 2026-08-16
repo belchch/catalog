@@ -1,13 +1,16 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   ApiError,
+  attachSessionTools,
   buildSkill,
   createSession,
   extractApiDetail,
   getHealth,
   getSession,
+  getSessionTools,
   isBuildTimeoutError,
   proposeSkillTracks,
+  removeSessionTool,
   saveRunResult,
   selectSkillTrack,
   startEditSession,
@@ -16,6 +19,7 @@ import {
   type ArtifactType,
   type DocumentOut,
   type ScanReport,
+  type SkillOut,
   type SkillPreview,
   type SkillTrack,
 } from './api.ts'
@@ -140,7 +144,15 @@ export default function App() {
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [rescanning, setRescanning] = useState(false)
   const [rescanReport, setRescanReport] = useState<ScanReport | null>(null)
+  const [toolsOpen, setToolsOpen] = useState(false)
+  const [sessionTools, setSessionTools] = useState<SkillOut[]>([])
+  const [pendingToolIds, setPendingToolIds] = useState<string[]>([])
+  const [toolsLoading, setToolsLoading] = useState(false)
+  const [toolsError, setToolsError] = useState<string | null>(null)
+  const [focusSkillId, setFocusSkillId] = useState<string | null>(null)
   const workspacePathRef = useRef<string | null>(null)
+  const pendingToolIdsRef = useRef<string[]>([])
+  const toolsEpochRef = useRef(0)
   const settingsButtonRef = useRef<HTMLButtonElement>(null)
   const sessionIdRef = useRef<string | null>(sessionId)
   const creatingSessionRef = useRef<Promise<{
@@ -275,7 +287,41 @@ export default function App() {
     setBuildError(null)
     setBuildErrorIsTimeout(false)
     setTimeoutModalOpen(false)
+    setToolsOpen(false)
   }, [sessionId])
+
+  useEffect(() => {
+    if (planner.streaming) setToolsOpen(false)
+  }, [planner.streaming])
+
+  useEffect(() => {
+    const epoch = ++toolsEpochRef.current
+    setPendingToolIds([])
+    pendingToolIdsRef.current = []
+    setToolsError(null)
+    if (!sessionId || !hasWorkspace) {
+      setSessionTools([])
+      setToolsLoading(false)
+      return
+    }
+    let cancelled = false
+    setToolsLoading(true)
+    void getSessionTools(sessionId)
+      .then((tools) => {
+        if (cancelled || toolsEpochRef.current !== epoch) return
+        setSessionTools(tools)
+        setToolsLoading(false)
+      })
+      .catch((e) => {
+        if (cancelled || toolsEpochRef.current !== epoch) return
+        setToolsError(extractApiDetail(e))
+        setSessionTools([])
+        setToolsLoading(false)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [sessionId, hasWorkspace])
 
   useEffect(() => {
     if (!sessionId || !hasWorkspace) {
@@ -487,6 +533,66 @@ export default function App() {
       setBuildingSkill(false)
     }
   }, [])
+
+  const handleToggleTool = useCallback(
+    async (skillId: string, enabled: boolean) => {
+      if (!sessionId) return
+      if (pendingToolIdsRef.current.includes(skillId)) return
+      const epoch = toolsEpochRef.current
+      pendingToolIdsRef.current = [...pendingToolIdsRef.current, skillId]
+      setPendingToolIds(pendingToolIdsRef.current)
+      setToolsError(null)
+      let snapshot: SkillOut[] = []
+      setSessionTools((cur) => {
+        snapshot = cur
+        if (enabled) {
+          if (cur.some((s) => s.id === skillId)) return cur
+          const skill = skillsHook.skills.find((s) => s.id === skillId)
+          return skill ? [...cur, skill] : cur
+        }
+        return cur.filter((s) => s.id !== skillId)
+      })
+      try {
+        if (enabled) {
+          const result = await attachSessionTools(sessionId, [skillId])
+          if (toolsEpochRef.current !== epoch) return
+          if (result.skipped_skill_ids.includes(skillId)) {
+            setSessionTools(snapshot)
+            setToolsError('Скилл не найден — обновите список скиллов')
+            void skillsRefresh()
+          } else {
+            setSessionTools(result.skills)
+          }
+        } else {
+          await removeSessionTool(sessionId, skillId)
+        }
+      } catch (e) {
+        if (toolsEpochRef.current !== epoch) return
+        setSessionTools(snapshot)
+        setToolsError(extractApiDetail(e))
+      } finally {
+        if (toolsEpochRef.current === epoch) {
+          pendingToolIdsRef.current = pendingToolIdsRef.current.filter((id) => id !== skillId)
+          setPendingToolIds(pendingToolIdsRef.current)
+        }
+      }
+    },
+    [sessionId, skillsHook.skills, skillsRefresh],
+  )
+
+  const handleOpenSkillCard = useCallback((skillId: string) => {
+    setToolsOpen(false)
+    setOpenSkills(true)
+    setFocusSkillId(skillId)
+  }, [])
+
+  const handleFocusSkillHandled = useCallback(() => {
+    setFocusSkillId(null)
+  }, [])
+
+  const attachedSkillIds = sessionTools
+    .map((s) => s.id)
+    .filter((id) => skillsHook.skills.some((s) => s.id === id))
 
   const handleCreateSkill = useCallback(async () => {
     if (!sessionId || buildingSkill || proposingTracks || trackChoice) return
@@ -781,6 +887,8 @@ export default function App() {
               onEdit={handleEditSkill}
               onDelete={(id) => void handleDeleteSkill(id)}
               onRename={(id, name) => skillsHook.rename(id, name)}
+              focusSkillId={focusSkillId}
+              onFocusHandled={handleFocusSkillHandled}
             />
           </CollapsibleSection>
           </div>
@@ -894,6 +1002,19 @@ export default function App() {
                         setBuildError(null)
                         setBuildErrorIsTimeout(false)
                       }}
+                      attachedSkillCount={attachedSkillIds.length}
+                      onOpenTools={() => setToolsOpen((open) => !open)}
+                      toolsOpen={toolsOpen}
+                      onCloseTools={() => setToolsOpen(false)}
+                      availableSkills={skillsHook.skills}
+                      attachedSkillIds={attachedSkillIds}
+                      pendingToolIds={pendingToolIds}
+                      onToggleTool={(skillId, enabled) => {
+                        void handleToggleTool(skillId, enabled)
+                      }}
+                      toolsLoading={toolsLoading}
+                      toolsError={toolsError}
+                      onOpenSkillCard={isLg ? handleOpenSkillCard : undefined}
                     />
                   </div>
                 </div>
