@@ -12,10 +12,16 @@ import {
   foldNestedRuns,
   formatCheckParams,
   joinCheckParams,
+  limiterExplanation,
+  limiterRemainder,
+  limiterTitle,
+  llmCostLabel,
+  nestedRunCost,
   runTraceToSteps,
   segmentTraceSteps,
   toCheckOutcomes,
   traceGroupStatus,
+  traceSkillDepth,
   type TraceGroupStatus,
   type TraceItemNode,
 } from '../lib/traceSegments.ts'
@@ -176,6 +182,9 @@ function TraceItem({ s }: { s: RunStep }) {
       <span className="mr-1 text-ink-faint">›</span>
       {s.text}
       {s.kind === 'tool_result' && (s.ok ? ' ✓' : ' ✗')}
+      {s.kind === 'tool_result' && s.skillDepth != null && (
+        <span className="text-ink-faint"> · глубина {s.skillDepth}</span>
+      )}
       {s.kind === 'tool_result' && s.result && (
         <details className="mt-0.5 pl-3">
           <summary className="cursor-pointer text-ink-faint">результат</summary>
@@ -201,8 +210,52 @@ function TraceItem({ s }: { s: RunStep }) {
 }
 
 function nodeList(items: RunStep[], depth: number): TraceItemNode[] {
-  if (depth === 0) return foldNestedRuns(items)
-  return items.map((item) => ({ kind: 'item' as const, item }))
+  return foldNestedRuns(items, { foldRuns: depth === 0 })
+}
+
+function nodeKey(node: TraceItemNode): string {
+  if (node.kind === 'item') return node.item.id
+  return node.result.id
+}
+
+function TraceLimiterNode({
+  node,
+  depth,
+}: {
+  node: Extract<TraceItemNode, { kind: 'limiter' }>
+  depth: number
+}) {
+  const { limiter, input } = node
+  const hard = limiter.reason !== 'unavailable'
+  const remainder = limiterRemainder(limiter)
+  return (
+    <li
+      className={
+        hard
+          ? 'flex flex-col gap-1.5 rounded border border-warning-line bg-warning-soft p-1.5 font-mono text-[11px] text-warning-ink'
+          : 'flex flex-col gap-1.5 rounded border border-line bg-surface-muted p-1.5 font-mono text-[11px] text-ink-muted'
+      }
+    >
+      <p>
+        <span aria-hidden="true">{hard ? '⚠' : '–'}</span>
+        <span className="sr-only">{hard ? 'ограничитель' : 'пометка'}</span>
+        {' '}
+        {limiterTitle(limiter.reason)}
+      </p>
+      <p>{limiterExplanation(limiter)}</p>
+      {remainder ? <p className="text-ink-muted">{remainder}</p> : null}
+      {limiter.runId ? (
+        <TraceRunNode
+          runId={limiter.runId}
+          toolName={limiter.toolName}
+          input={input}
+          ok={false}
+          depth={depth}
+          skillDepth={limiter.depth}
+        />
+      ) : null}
+    </li>
+  )
 }
 
 function TraceNodeView({ node, depth }: { node: TraceItemNode; depth: number }) {
@@ -215,9 +268,13 @@ function TraceNodeView({ node, depth }: { node: TraceItemNode; depth: number }) 
           input={node.input}
           ok={node.ok}
           depth={depth}
+          skillDepth={node.result.skillDepth}
         />
       </li>
     )
+  }
+  if (node.kind === 'limiter') {
+    return <TraceLimiterNode node={node} depth={depth} />
   }
   return <TraceItem s={node.item} />
 }
@@ -267,7 +324,7 @@ function TraceStepGroup({
         <ol className="mt-1 flex flex-col gap-1.5 border-l border-line pl-3">
           {nodes.map((node) => (
             <TraceNodeView
-              key={node.kind === 'run' ? node.result.id : node.item.id}
+              key={nodeKey(node)}
               node={node}
               depth={depth}
             />
@@ -350,6 +407,7 @@ export function TraceRunNode({
   input,
   ok,
   depth = 0,
+  skillDepth,
   className,
 }: {
   runId: string
@@ -357,6 +415,7 @@ export function TraceRunNode({
   input?: string
   ok?: boolean
   depth?: number
+  skillDepth?: number
   className?: string
 }) {
   const [run, setRun] = useState<RunOut | null>(null)
@@ -417,6 +476,10 @@ export function TraceRunNode({
   const childSteps = run ? runTraceToSteps(run.trace, runId) : []
   const inFlight = run?.status === 'pending' || run?.status === 'running'
   const failed = run?.status === 'failed' || run?.status === 'cancelled'
+  const shownDepth = skillDepth ?? (run ? traceSkillDepth(run.trace) : undefined)
+  const cost =
+    run && !inFlight && run.trace != null ? nestedRunCost(run.trace) : null
+  const costLabel = cost != null ? llmCostLabel(cost) : null
   const caption =
     run == null
       ? null
@@ -438,6 +501,8 @@ export function TraceRunNode({
             <span aria-hidden="true" className={cls}>
               {glyph}
             </span>
+            {shownDepth != null && <span>· глубина {shownDepth}</span>}
+            {costLabel && <span>· {costLabel}</span>}
             <span>· запуск {runId.slice(0, 8)}</span>
           </span>
           <span className="sr-only">{word}</span>
@@ -574,7 +639,7 @@ export function TraceSteps({
     for (const node of nodeList(flats, depth)) {
       children.push(
         <TraceNodeView
-          key={node.kind === 'run' ? node.result.id : node.item.id}
+          key={nodeKey(node)}
           node={node}
           depth={depth}
         />,

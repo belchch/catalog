@@ -1,5 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { extractChildRunId, extractToolInput, toCheckOutcomes } from '../lib/traceSegments.ts'
+import {
+  attachSkillToolFields,
+  extractToolInput,
+  toCheckOutcomes,
+  type LimiterInfo,
+} from '../lib/traceSegments.ts'
 import {
   connectRun,
   formatToolArgs,
@@ -43,6 +48,8 @@ export interface RunStep {
   toolName?: string
   childRunId?: string
   input?: string
+  skillDepth?: number
+  limiter?: LimiterInfo
 }
 
 export interface UseRunStreamResult {
@@ -119,9 +126,8 @@ export function useRunStream(runId: string | null): UseRunStreamResult {
           },
         ])
         break
-      case 'tool_result':
-        // CATALOG-16: keep the result payload so the trace can show what the
-        // tool returned, not just its name + ok flag.
+      case 'tool_result': {
+        const fields = attachSkillToolFields(e.name, e.ok, e.result)
         setSteps((prev) => [
           ...prev,
           {
@@ -131,11 +137,14 @@ export function useRunStream(runId: string | null): UseRunStreamResult {
             ok: e.ok,
             result: formatToolResult(e.result),
             toolName: e.name,
-            childRunId: extractChildRunId(e.name, e.result) ?? undefined,
+            childRunId: fields.childRunId,
+            skillDepth: fields.skillDepth,
+            limiter: fields.limiter,
             stepId: e.step_id,
           },
         ])
         break
+      }
       case 'verify':
         setSteps((prev) => [
           ...prev,

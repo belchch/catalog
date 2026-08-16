@@ -370,3 +370,271 @@ describe('verify check list', () => {
     expect(screen.queryByText(/из /)).toBeNull()
   })
 })
+
+const CHILD_RUN = '7c1f0ab2deadbeef0123456789abcdef'
+
+function skillResultStep(partial: Partial<RunStep> = {}): RunStep {
+  return {
+    id: 'r',
+    kind: 'tool_result',
+    text: '← skill_summary',
+    toolName: 'skill_summary',
+    ok: true,
+    childRunId: RUN_ID,
+    skillDepth: 2,
+    result: JSON.stringify({
+      ok: true,
+      run_id: RUN_ID,
+      skill_name: 'Сводка',
+      depth: 2,
+    }),
+    ...partial,
+  }
+}
+
+describe('nested run header and limiter nodes', () => {
+  it('shows depth in the run header before the child run is loaded', () => {
+    render(
+      <TraceSteps
+        steps={[
+          {
+            id: 'c',
+            kind: 'tool_call',
+            text: '→ skill_summary({})',
+            toolName: 'skill_summary',
+            input: 'hello',
+          },
+          skillResultStep(),
+        ]}
+      />,
+    )
+    expect(screen.getByText('· глубина 2')).toBeTruthy()
+    expect(screen.queryByText(/LLM-вызов/)).toBeNull()
+    expect(screen.queryByText('без LLM-вызовов')).toBeNull()
+    expect(getRun).not.toHaveBeenCalled()
+  })
+
+  it('adds the actual LLM cost after the child run loads', async () => {
+    vi.mocked(getRun).mockResolvedValueOnce(
+      runOut({
+        trace: [
+          { kind: 'llm', iteration: 1, data: {} },
+          { kind: 'llm', iteration: 2, data: {} },
+          { kind: 'llm', iteration: 3, data: {} },
+        ],
+      }),
+    )
+    render(
+      <TraceSteps
+        steps={[
+          {
+            id: 'c',
+            kind: 'tool_call',
+            text: '→ skill_summary({})',
+            toolName: 'skill_summary',
+          },
+          skillResultStep(),
+        ]}
+      />,
+    )
+    fireEvent.click(screen.getByText('skill_summary'))
+    await waitFor(() => {
+      expect(screen.getByText('· 3 LLM-вызова')).toBeTruthy()
+    })
+    expect(screen.getByText('· глубина 2')).toBeTruthy()
+  })
+
+  it('shows без LLM-вызовов for a loaded script run and hides cost while in flight', async () => {
+    vi.mocked(getRun).mockResolvedValueOnce(
+      runOut({ status: 'running', result_text: null, trace: [] }),
+    )
+    render(
+      <TraceSteps
+        steps={[
+          {
+            id: 'c',
+            kind: 'tool_call',
+            text: '→ skill_summary({})',
+            toolName: 'skill_summary',
+          },
+          skillResultStep(),
+        ]}
+      />,
+    )
+    fireEvent.click(screen.getByText('skill_summary'))
+    await waitFor(() => {
+      expect(screen.getByText('Запуск ещё выполняется')).toBeTruthy()
+    })
+    expect(screen.queryByText('без LLM-вызовов')).toBeNull()
+    expect(screen.queryByText(/LLM-вызов/)).toBeNull()
+
+    vi.mocked(getRun).mockResolvedValueOnce(runOut({ trace: [{ kind: 'script', data: { ok: true } }] }))
+    fireEvent.click(screen.getByRole('button', { name: 'Обновить' }))
+    await waitFor(() => {
+      expect(screen.getByText('· без LLM-вызовов')).toBeTruthy()
+    })
+  })
+
+  it('renders the four limiter reasons with human copy', () => {
+    const budget = {
+      llm_calls_left: 6,
+      nested_runs_left: 4,
+      needed_llm_calls: 24,
+      needed_nested_runs: 1,
+    }
+    render(
+      <TraceSteps
+        steps={[
+          {
+            id: 'c1',
+            kind: 'tool_call',
+            text: '→ skill_summary({})',
+            toolName: 'skill_summary',
+          },
+          skillResultStep({
+            id: 'llm',
+            ok: false,
+            childRunId: undefined,
+            result: JSON.stringify({
+              ok: false,
+              error: 'budget exhausted',
+              budget,
+              skill_name: 'Сводка',
+              depth: 2,
+              run_id: CHILD_RUN,
+            }),
+          }),
+          {
+            id: 'c2',
+            kind: 'tool_call',
+            text: '→ skill_summary({})',
+            toolName: 'skill_summary',
+          },
+          skillResultStep({
+            id: 'runs',
+            ok: false,
+            childRunId: undefined,
+            result: JSON.stringify({
+              ok: false,
+              error: 'budget exhausted',
+              budget: { ...budget, llm_calls_left: 0, nested_runs_left: 0 },
+              skill_name: 'Сводка',
+              depth: 2,
+              run_id: CHILD_RUN,
+            }),
+          }),
+          {
+            id: 'c3',
+            kind: 'tool_call',
+            text: '→ skill_summary({})',
+            toolName: 'skill_summary',
+          },
+          skillResultStep({
+            id: 'dl',
+            ok: false,
+            childRunId: undefined,
+            result: JSON.stringify({
+              ok: false,
+              error: 'deadline exceeded',
+              skill_name: 'Сводка',
+              depth: 1,
+              run_id: CHILD_RUN,
+            }),
+          }),
+          {
+            id: 'c4',
+            kind: 'tool_call',
+            text: '→ skill_hidden({})',
+            toolName: 'skill_hidden',
+          },
+          {
+            id: 'un',
+            kind: 'tool_result',
+            text: '← skill_hidden',
+            toolName: 'skill_hidden',
+            ok: false,
+            result: "error: unknown tool 'skill_hidden'",
+          },
+        ]}
+      />,
+    )
+    expect(screen.getByText('Бюджет LLM-вызовов на ход исчерпан')).toBeTruthy()
+    expect(screen.getByText('Лимит вложенных запусков на ход исчерпан')).toBeTruthy()
+    expect(screen.getByText('Время хода вышло')).toBeTruthy()
+    expect(screen.getByText('Скилл не предлагался модели')).toBeTruthy()
+    expect(screen.getByText(/нужно до 24 вызова, а на ход осталось 6/)).toBeTruthy()
+    expect(
+      screen.getByText(/Ход уже израсходовал все вложенные запуски скиллов/),
+    ).toBeTruthy()
+    expect(
+      screen.getByText(/новые запуски скиллов остановлены/),
+    ).toBeTruthy()
+    expect(
+      screen.getByText(/на такой глубине вложенные скиллы не подключаются/),
+    ).toBeTruthy()
+    expect(screen.getAllByText('ограничитель')).toHaveLength(3)
+    expect(screen.getByText('пометка')).toBeTruthy()
+    expect(document.body.textContent).not.toMatch(
+      /budget exhausted|deadline exceeded|unknown tool/,
+    )
+    expect(screen.queryByText(/→ skill_summary/)).toBeNull()
+    expect(screen.getAllByText(`· запуск ${CHILD_RUN.slice(0, 8)}`)).toHaveLength(3)
+  })
+
+  it('keeps a depth suffix on an unfolded nested tool_result and still folds a limiter', () => {
+    render(
+      <TraceSteps
+        depth={1}
+        steps={[
+          {
+            id: 'c',
+            kind: 'tool_call',
+            text: '→ skill_summary({})',
+            toolName: 'skill_summary',
+          },
+          skillResultStep(),
+          {
+            id: 'c2',
+            kind: 'tool_call',
+            text: '→ skill_hidden({})',
+            toolName: 'skill_hidden',
+          },
+          {
+            id: 'un',
+            kind: 'tool_result',
+            text: '← skill_hidden',
+            toolName: 'skill_hidden',
+            ok: false,
+            result: "error: unknown tool 'skill_hidden'",
+          },
+        ]}
+      />,
+    )
+    expect(screen.getByText('→ skill_summary({})')).toBeTruthy()
+    expect(
+      screen.getByText((_, node) => {
+        return node?.tagName === 'LI' && (node.textContent ?? '').includes('← skill_summary')
+      }),
+    ).toBeTruthy()
+    expect(screen.getByText('· глубина 2')).toBeTruthy()
+    expect(screen.queryByText('⤷')).toBeNull()
+    expect(screen.getByText('Скилл не предлагался модели')).toBeTruthy()
+    expect(screen.queryByText('← skill_hidden')).toBeNull()
+  })
+
+  it('reads depth from skill_pin after the child run loads', async () => {
+    vi.mocked(getRun).mockResolvedValueOnce(
+      runOut({
+        trace: [
+          { kind: 'skill_pin', data: { config_hash: 'deadbeef', depth: 1 } },
+          { kind: 'script', data: { ok: true, chars: 3 } },
+        ],
+      }),
+    )
+    renderNode({ skillDepth: undefined, toolName: 'skill_extract_terms' })
+    fireEvent.click(screen.getByText('skill_extract_terms'))
+    await waitFor(() => {
+      expect(screen.getByText('· глубина 1')).toBeTruthy()
+    })
+  })
+})
