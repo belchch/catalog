@@ -1628,6 +1628,181 @@ def test_pipeline_deadline_skips_later_steps_and_verify(
     assert not any(entry.data.get("step_id") == "two" for entry in result.trace.entries)
 
 
+def test_agent_skips_verify_when_last_complete_overruns_deadline(
+    db: Database, client
+) -> None:
+    workspace = Path(client.app.state.workspace_manager.root)
+    doc_id = ingest_file(db, workspace, filename="in.md", content=b"hello").id
+    row = create_custom_check(db, name="Has Hello", prompt="contains hello")
+    skill_id = _agent_skill(
+        db,
+        max_retries=2,
+        verify_checks=[VerifyCheck(check=f"custom:{row.id}")],
+    )
+    record = get_skill(db, skill_id)
+    assert record is not None
+    budget = SkillBudget(
+        llm_calls_left=60,
+        nested_runs_left=20,
+        deadline_monotonic=time.monotonic() + 1000,
+    )
+    hold = budget.reserve(*estimate_skill_budget(record.config))
+    assert hold is not None
+
+    class _ExpireOnStop(_JudgeProvider):
+        def __init__(self) -> None:
+            super().__init__(["SHOULD NOT JUDGE"])
+            self.step = 0
+
+        async def complete(self, model, messages, tools=None, temperature=0.0, **kwargs):
+            self.requests.append({"model": model})
+            self.step += 1
+            budget.deadline_monotonic = time.monotonic() - 1
+            return CompletionResult(
+                content="done",
+                tool_calls=[],
+                finish_reason="stop",
+            )
+
+    provider = _ExpireOnStop()
+    try:
+        with nested_skill_hold(hold, budget):
+            result = asyncio.run(
+                apply_skill_collect(
+                    provider=provider,
+                    db=db,
+                    workspace_dir=str(workspace),
+                    skill=record.config,
+                    skill_id=skill_id,
+                    input_doc_ids=[doc_id],
+                    base_tools=build_document_tools(db, workspace),
+                    persist=False,
+                    fallback_model="workspace/model",
+                )
+            )
+    finally:
+        budget.release(hold)
+    assert provider.step == 1
+    assert result.status == "failed"
+    assert result.result_text == "done"
+    assert not any(entry.kind == "verify" for entry in result.trace.entries)
+    assert any(entry.kind == "deadline" for entry in result.trace.entries)
+
+
+def test_pipeline_single_step_skips_verify_when_complete_overruns_deadline(
+    db: Database, client
+) -> None:
+    workspace = Path(client.app.state.workspace_manager.root)
+    doc_id = ingest_file(db, workspace, filename="in.md", content=b"hello").id
+    row = create_custom_check(db, name="Has Hello", prompt="contains hello")
+    skill_id = _pipeline_skill(
+        db,
+        steps=[
+            PipelineStep(
+                id="one",
+                type="llm",
+                input="documents",
+                system_prompt="first",
+                allowed_tools=["read_document"],
+            ),
+        ],
+        verify_checks=[VerifyCheck(check=f"custom:{row.id}")],
+    )
+    record = get_skill(db, skill_id)
+    assert record is not None
+    budget = SkillBudget(
+        llm_calls_left=60,
+        nested_runs_left=20,
+        deadline_monotonic=time.monotonic() + 1000,
+    )
+    hold = budget.reserve(*estimate_skill_budget(record.config))
+    assert hold is not None
+
+    class _ExpireOnStop(_JudgeProvider):
+        def __init__(self) -> None:
+            super().__init__(["SHOULD NOT JUDGE"])
+            self.step = 0
+
+        async def complete(self, model, messages, tools=None, temperature=0.0, **kwargs):
+            self.requests.append({"model": model})
+            self.step += 1
+            budget.deadline_monotonic = time.monotonic() - 1
+            return CompletionResult(
+                content="step one",
+                tool_calls=[],
+                finish_reason="stop",
+            )
+
+    provider = _ExpireOnStop()
+    try:
+        with nested_skill_hold(hold, budget):
+            result = asyncio.run(
+                apply_skill_collect(
+                    provider=provider,
+                    db=db,
+                    workspace_dir=str(workspace),
+                    skill=record.config,
+                    skill_id=skill_id,
+                    input_doc_ids=[doc_id],
+                    base_tools=build_document_tools(db, workspace),
+                    persist=False,
+                    fallback_model="workspace/model",
+                )
+            )
+    finally:
+        budget.release(hold)
+    assert provider.step == 1
+    assert result.status == "failed"
+    assert result.result_text == "step one"
+    assert not any(entry.kind == "verify" for entry in result.trace.entries)
+    assert any(entry.kind == "deadline" for entry in result.trace.entries)
+
+
+def test_script_skips_custom_judge_when_deadline_hit_before_verify(
+    db: Database,
+) -> None:
+    row = create_custom_check(db, name="Has Hello", prompt="contains hello")
+    skill_id = _script_skill(
+        db,
+        model="",
+        verify_checks=[VerifyCheck(check=f"custom:{row.id}")],
+    )
+    record = get_skill(db, skill_id)
+    assert record is not None
+    budget = SkillBudget(
+        llm_calls_left=60,
+        nested_runs_left=20,
+        deadline_monotonic=time.monotonic() - 1,
+    )
+    hold = budget.reserve(*estimate_skill_budget(record.config))
+    assert hold is not None
+    provider = _JudgeProvider(["SHOULD NOT JUDGE"])
+    try:
+        with nested_skill_hold(hold, budget):
+            result = asyncio.run(
+                apply_skill_collect(
+                    provider=provider,
+                    db=db,
+                    workspace_dir="/tmp",
+                    skill=record.config,
+                    skill_id=skill_id,
+                    input_doc_ids=[],
+                    input_texts=["hello"],
+                    base_tools=ToolRegistry(),
+                    persist=False,
+                    parent_run_id=SESSION_TOOL_PARENT_RUN_ID,
+                    fallback_model="workspace/model",
+                )
+            )
+    finally:
+        budget.release(hold)
+    assert provider.requests == []
+    assert result.status == "failed"
+    assert result.result_text == "HELLO"
+    assert not any(entry.kind == "verify" for entry in result.trace.entries)
+    assert any(entry.kind == "deadline" for entry in result.trace.entries)
+
+
 def test_ws_deadline_uses_session_llm_timeout(
     client, provider, db, monkeypatch
 ) -> None:

@@ -79,6 +79,15 @@ def _value_as_documents(value: PipelineValue) -> list[str]:
     return [value]
 
 
+def _deadline_reached(trace: Trace, iteration: int) -> bool:
+    if not nested_deadline_exceeded():
+        return False
+    trace.entries.append(
+        TraceEntry("deadline", iteration, {"error": "deadline exceeded"})
+    )
+    return True
+
+
 def _with_step_id(event: AgentEvent, step_id: str) -> AgentEvent:
     if hasattr(event, "step_id"):
         return replace(event, step_id=step_id)
@@ -382,38 +391,34 @@ async def _apply_core(
                 )
             )
             last_text = text
-
-            result = await run_verify_async(
-                text or "",
-                skill.verify_checks,
-                db=db,
-                provider=verify_provider,
-                model=verify_model,
-            )
-            verify_event = VerifyEvent(iteration=1, result=result)
-            yield verify_event
-            log_agent_event(verify_event)
-            trace.entries.append(
-                TraceEntry(
-                    kind="verify",
-                    iteration=1,
-                    data=result.as_payload(),
+            if _deadline_reached(trace, 1):
+                deadline_stopped = True
+                last_capped = True
+            else:
+                result = await run_verify_async(
+                    text or "",
+                    skill.verify_checks,
+                    db=db,
+                    provider=verify_provider,
+                    model=verify_model,
                 )
-            )
-            passed = result.passed
+                verify_event = VerifyEvent(iteration=1, result=result)
+                yield verify_event
+                log_agent_event(verify_event)
+                trace.entries.append(
+                    TraceEntry(
+                        kind="verify",
+                        iteration=1,
+                        data=result.as_payload(),
+                    )
+                )
+                passed = result.passed
         elif skill.kind == "pipeline":
             current: PipelineValue | None = None
             for index, step in enumerate(skill.steps):
-                if nested_deadline_exceeded():
+                if _deadline_reached(trace, index + 1):
                     deadline_stopped = True
                     last_capped = True
-                    trace.entries.append(
-                        TraceEntry(
-                            "deadline",
-                            index + 1,
-                            {"error": "deadline exceeded"},
-                        )
-                    )
                     break
                 step_input = _pipeline_step_input(step, current, doc_texts)
                 from_documents = step.input == "documents"
@@ -530,6 +535,11 @@ async def _apply_core(
                     raise ValueError(
                         f"unknown pipeline step type: {step.type!r}"
                     )
+            if not deadline_stopped and _deadline_reached(
+                trace, max(len(skill.steps), 1)
+            ):
+                deadline_stopped = True
+                last_capped = True
             if not deadline_stopped:
                 final_text = last_text or ""
                 result = await run_verify_async(
@@ -634,6 +644,10 @@ async def _apply_core(
                 last_text = text
                 last_capped = capped
                 if deadline_stopped:
+                    break
+                if _deadline_reached(trace, r + 1):
+                    deadline_stopped = True
+                    last_capped = True
                     break
 
                 result = await run_verify_async(
