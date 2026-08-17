@@ -1,42 +1,42 @@
 # Catalog
 
+**English** | [Русский](README.ru.md)
+
 [![CI](https://github.com/belchch/catalog/actions/workflows/ci.yml/badge.svg)](https://github.com/belchch/catalog/actions/workflows/ci.yml)
 [![License: PolyForm Noncommercial](https://img.shields.io/badge/license-PolyForm%20NC%201.0.0-blue)](LICENSE.md)
 
-Локальное приложение для создания и повторного использования процессов обработки документов.
+A local-first app for building reusable document-processing workflows.
 
-Пользователь описывает задачу в чате, уточняет план и сохраняет его как скилл. Скилл можно применять к другим документам, подключать как инструмент в новых сессиях и использовать как шаг более сложного процесса.
+You describe a task in chat, refine the plan, and save it as a skill. A skill can be applied to other documents, plugged into new sessions as a tool, or used as a step in a larger process.
 
-> **In English:** Catalog is a local-first app for building reusable document-processing workflows. You describe a task in chat, refine the plan, and save it as a "skill" — a frozen, reproducible config that can be applied to other documents, plugged into new sessions as a tool, or composed into pipelines. Documents stay in a plain folder on your disk (Obsidian-compatible); DOCX/XLSX/PDF in, verified Markdown/DOCX out. The README is in Russian; the [architecture decision records](docs/adr/README.md) document the design.
+![Catalog main screen](docs/assets/catalog-overview.png)
 
-![Основной экран Catalog](docs/assets/catalog-overview.png)
+[Quick start](#quick-start) · [Run and setup](README-RUN.md) · [Architecture decisions](docs/adr/README.md) · [License](#license)
 
-[Быстрый старт](#быстрый-старт) · [Запуск и настройка](README-RUN.md) · [Архитектурные решения](docs/adr/README.md) · [Лицензия](#лицензия)
+## How it works
 
-## Как это работает
+![From documents to a verified result](docs/assets/workflow.svg)
 
-![Путь от документов к проверенному результату](docs/assets/workflow.svg)
+1. Open a folder with documents.
+2. Describe the desired result in chat.
+3. Catalog builds a plan and the artifacts of the future skill.
+4. After you approve it, the skill is saved as a configuration.
+5. Apply it to a single document or a set of documents.
+6. The result is checked and saved into the working folder.
 
-1. Пользователь открывает папку с документами.
-2. В чате описывает требуемый результат.
-3. Catalog формирует план и артефакты будущего скилла.
-4. После подтверждения скилл сохраняется как конфигурация.
-5. Его можно применить к одному документу или набору документов.
-6. Результат проходит заданные проверки и сохраняется в рабочую папку.
+![Planning a skill in chat](docs/assets/skill-planning.png)
 
-![Планирование скилла в чате](docs/assets/skill-planning.png)
+## Skills
 
-## Скиллы
-
-Скилл хранит инструкцию и параметры выполнения:
+A skill stores the instruction and the execution parameters:
 
 ```yaml
 kind: agent
-name: Выжимка договора
-description: Стороны, предмет, сроки и суммы из договора
+name: Contract brief
+description: Parties, subject, dates, and amounts from a contract
 system_prompt: |
-  Прочитай договор и составь выжимку в Markdown
-  с разделами «Стороны», «Предмет», «Сроки», «Суммы».
+  Read the contract and write a Markdown brief
+  with sections “Parties”, “Subject”, “Dates”, “Amounts”.
 model: google/gemini-3.5-flash
 temperature: 0
 allowed_tools:
@@ -44,201 +44,201 @@ allowed_tools:
 verify_checks:
   - check: non_empty
   - check: has_section
-    params: { heading: "Сроки" }
+    params: { heading: "Dates" }
   - check: no_leftover_placeholders
 ```
 
-Поддерживаются три вида скиллов:
+Three skill kinds are supported:
 
-- `agent` — задача выполняется моделью с разрешёнными инструментами;
-- `script` — детерминированный Python-код без обращения к LLM во время выполнения;
-- `pipeline` — последовательность шагов разных типов.
+- `agent` — the model runs the task with the allowed tools;
+- `script` — deterministic Python with no LLM call at runtime;
+- `pipeline` — a sequence of steps of different kinds.
 
-Pipeline может включать шаги:
+A pipeline can include:
 
-- `script` — выполнение кода;
-- `llm` — обращение к модели;
-- `skill` — вызов другого сохранённого скилла.
+- `script` — run code;
+- `llm` — call a model;
+- `skill` — call another saved skill.
 
-Для каждого LLM-шага можно отдельно выбрать модель, провайдера и доступные инструменты.
+Each LLM step can use its own model, provider, and allowed tools.
 
-![Артефакты и шаги скилла](docs/assets/skill-editor.png)
+![Skill artifacts and steps](docs/assets/skill-editor.png)
 
-## Скилл как инструмент сессии
+## A skill as a session tool
 
-Сохранённый скилл можно подключить к сессии. После этого модель может вызвать его так же, как системный инструмент.
+A saved skill can be attached to a session. The model can then call it the same way it calls a system tool.
 
-![Подключение и вложенный вызов скиллов](docs/assets/skill-composition.svg)
+![Attaching skills and nested skill calls](docs/assets/skill-composition.svg)
 
-При вложенном вызове Catalog:
+On a nested call, Catalog:
 
-- использует зафиксированную конфигурацию скилла;
-- добавляет хеш конфигурации в описание инструмента;
-- создаёт отдельный вложенный прогон;
-- показывает вызов и его результат в трейсе;
-- ограничивает глубину, число LLM-вызовов, число вложенных прогонов и общее время.
+- uses the frozen skill configuration;
+- adds the config hash to the tool description;
+- creates a separate nested run;
+- shows the call and its result in the trace;
+- limits depth, LLM calls, nested runs, and total time.
 
-![Подключение скилла к сессии](docs/assets/session-tools.png)
+![Attaching a skill to a session](docs/assets/session-tools.png)
 
-## Системные инструменты
+## System tools
 
-Сейчас модели доступны три базовых инструмента:
+The model currently has three built-in tools:
 
-- `list_documents` — получить список документов;
-- `read_document` — прочитать содержимое документа;
-- `export_docx` — выгрузить один или несколько документов в DOCX.
+- `list_documents` — list documents;
+- `read_document` — read a document;
+- `export_docx` — export one or more documents to DOCX.
 
-Скилл получает только инструменты из своего `allowed_tools`. Если в конфигурации указан неизвестный инструмент, выполнение не начинается.
+A skill only gets the tools listed in its `allowed_tools`. If the config names an unknown tool, execution does not start.
 
-![Системный реестр и разрешения скилла](docs/assets/tool-registry.svg)
+![System registry and skill permissions](docs/assets/tool-registry.svg)
 
-### Расширение через плагины
+### Extending with plugins
 
-Система плагинов пока является направлением развития. Предполагается, что плагин сможет добавлять связанную возможность:
+The plugin system is still a direction of work. A plugin is expected to add a related capability:
 
-- инструменты модели;
-- проверки результата или экспорта;
-- поддержку нового формата;
-- шаблоны и другие ресурсы.
+- model tools;
+- result or export checks;
+- a new format;
+- templates and other resources.
 
-Включённый плагин будет определять доступное множество возможностей, а `allowed_tools` скилла — разрешённое подмножество. Для сторонних плагинов потребуется изоляция исполняемого кода.
+An enabled plugin will define the available set of capabilities, and the skill's `allowed_tools` will define the allowed subset. Third-party plugins will need isolation for executable code.
 
-## Проверка результата
+## Result verification
 
-После выполнения результат проверяется отдельно от основного вызова модели.
+After a run, the result is checked separately from the main model call.
 
-Встроенные проверки контролируют:
+Built-in checks cover:
 
-- наличие и длину результата;
-- структуру Markdown;
-- обязательные разделы и поля;
-- соответствие регулярному выражению;
-- корректность таблиц;
-- отсутствие незаполненных плейсхолдеров.
+- presence and length of the result;
+- Markdown structure;
+- required sections and fields;
+- regular-expression match;
+- table correctness;
+- leftover placeholders.
 
-Пользователь также может создать смысловую проверку через LLM-судью. В интерфейсе и трейсе она обозначается отдельно от детерминированных проверок.
+You can also add a semantic check through an LLM judge. In the UI and the trace it is shown separately from deterministic checks.
 
-![Цикл проверки результата](docs/assets/verification.svg)
+![Result verification loop](docs/assets/verification.svg)
 
-Трейс показывает шаги скилла, вызовы инструментов, ответы инструментов, reasoning модели, результаты проверок и вложенные прогоны.
+The trace shows skill steps, tool calls, tool responses, model reasoning, check results, and nested runs.
 
-![Трейс выполнения и результат](docs/assets/run-trace.png)
+![Run trace and result](docs/assets/run-trace.png)
 
-## Данные остаются в рабочей папке
+## Data stays in the working folder
 
-Воркспейс Catalog — обычная папка пользователя.
+A Catalog workspace is an ordinary user folder.
 
-- Исходные документы остаются на файловой системе.
-- Результаты сохраняются как Markdown в `results/`.
-- `.catalog/index.db` содержит пересоздаваемый индекс и служебные данные.
-- Результат сохраняет ссылки на исходные документы.
-- Ту же папку можно открыть в Obsidian.
+- Source documents stay on the file system.
+- Results are saved as Markdown in `results/`.
+- `.catalog/index.db` holds a rebuildable index and internal data.
+- The result keeps links to the source documents.
+- The same folder can be opened in Obsidian.
 
-![Устройство рабочей папки и интеграция с Obsidian](docs/assets/workspace.svg)
+![Workspace layout and Obsidian integration](docs/assets/workspace.svg)
 
-В конец результата добавляется секция со ссылками:
+A references section is appended to the result:
 
 ```markdown
-## Ссылки
+## References
 
-- [[Техническое задание]]
-- [[Регламент]]
+- [[Statement of work]]
+- [[Policy]]
 ```
 
-Catalog нормализует wiki-ссылки по именам файлов. Ручные правки Markdown в Obsidian не требуют обратного импорта.
+Catalog normalizes wiki-links by file name. Manual Markdown edits in Obsidian do not need a round-trip import.
 
-Файлы хранятся локально. При использовании внешнего LLM-провайдера текст, необходимый для выполнения задачи, передаётся в настроенный API модели.
+Files stay local. When you use an external LLM provider, the text needed for the task is sent to the configured model API.
 
-![Результаты Catalog в Obsidian](docs/assets/obsidian-graph.png)
+![Catalog results in Obsidian](docs/assets/obsidian-graph.png)
 
-## Документы: Word на входе и на выходе
+## Documents: Word in, Word out
 
-Catalog читает DOCX, XLSX, PDF, CSV и Markdown. При загрузке DOCX, XLSX и PDF формат проверяется по содержимому файла.
+Catalog reads DOCX, XLSX, PDF, CSV, and Markdown. On upload, DOCX, XLSX, and PDF are validated by file content.
 
-DOCX разбирается с сохранением порядка параграфов и таблиц. Результат можно сохранить в Markdown, отредактировать в Catalog или Obsidian, а затем выгрузить обратно в DOCX.
+DOCX is parsed with paragraph and table order preserved. You can save the result as Markdown, edit it in Catalog or Obsidian, then export it back to DOCX.
 
-Экспорт поддерживает:
+Export supports:
 
-- шаблон Word заказчика;
-- объединение нескольких документов с разрывами разделов;
-- заголовки, списки, таблицы и базовое форматирование;
-- преобразование wiki-ссылок в обычный текст;
-- сохранение списка источников;
-- повторное чтение созданного файла и сверку структуры.
+- a customer's Word template;
+- merging several documents with section breaks;
+- headings, lists, tables, and basic formatting;
+- converting wiki-links to plain text;
+- keeping the source list;
+- re-reading the produced file and checking its structure.
 
-![Цикл обработки и экспорта документов](docs/assets/document-loop.svg)
+![Document processing and export loop](docs/assets/document-loop.svg)
 
-![Экспорт результата в DOCX](docs/assets/docx-export.png)
+![Exporting a result to DOCX](docs/assets/docx-export.png)
 
-## Корпоративное использование
+## Corporate use
 
-Архитектура позволяет развивать отдельный сценарий для закрытого контура:
+The architecture leaves room for a closed-loop scenario:
 
-- проектировать скиллы на сильной модели и нечувствительных данных;
-- переносить готовую конфигурацию во внутренний контур;
-- выполнять её на локальной OpenAI-совместимой модели;
-- выбирать маршрут модели по классу чувствительности документа;
-- использовать детерминированные проверки для контроля результата.
+- design skills on a strong model with non-sensitive data;
+- move the finished config into an internal environment;
+- run it on a local OpenAI-compatible model;
+- route the model by document sensitivity class;
+- use deterministic checks to control the result.
 
-Экспорт и импорт скиллов, маршрутизация по чувствительности и псевдонимизация пока не реализованы.
+Skill export/import, sensitivity routing, and pseudonymization are not implemented yet.
 
-## Быстрый старт
+## Quick start
 
-Требуются [uv](https://docs.astral.sh/uv/), Python 3.11+, Node.js и pnpm (Node и pnpm нужны только при установке из git — сборочный hook упаковывает фронтенд в пакет):
+You need [uv](https://docs.astral.sh/uv/), Python 3.11+, Node.js, and pnpm (Node and pnpm are only required for a git install — a build hook packages the frontend):
 
 ```bash
 uv tool install "git+https://github.com/belchch/catalog.git#subdirectory=backend"
 catalog
 ```
 
-При первом запуске Catalog предложит указать ключ OpenRouter или z.ai и выбрать папку-воркспейс.
+On first launch, Catalog will ask for an OpenRouter or z.ai key and a workspace folder.
 
-Подробная установка, настройка провайдеров и запуск для разработки описаны в [`README-RUN.md`](README-RUN.md).
+Full install, provider setup, and a development run are in [`README-RUN.md`](README-RUN.md).
 
-## Архитектурные решения
+## Architecture decisions
 
-Основные решения зафиксированы в ADR:
+The main decisions are recorded as ADRs:
 
-- [один function-calling loop](docs/adr/0001-agent-loop-execution-engine.md);
-- [скилл как замороженный конфиг](docs/adr/0002-skill-as-frozen-config.md);
-- [сборка скилла в момент согласия](docs/adr/0004-build-at-approval-lifecycle.md);
-- [файловая система для контента и SQLite для индекса](docs/adr/0005-storage-split-git-deferred.md);
-- [детерминированный реестр проверок](docs/adr/0007-verify-deterministic-registry.md);
+- [one function-calling loop](docs/adr/0001-agent-loop-execution-engine.md);
+- [skill as a frozen config](docs/adr/0002-skill-as-frozen-config.md);
+- [build the skill at approval](docs/adr/0004-build-at-approval-lifecycle.md);
+- [file system for content, SQLite for the index](docs/adr/0005-storage-split-git-deferred.md);
+- [deterministic check registry](docs/adr/0007-verify-deterministic-registry.md);
 - [workspace-as-folder](docs/adr/0016-workspace-as-folder.md);
-- [pipeline-скиллы](docs/adr/0018-pipeline-skills.md);
-- [скилл как инструмент сессии](docs/adr/0019-skill-as-session-tool.md);
-- [пользовательские проверки через LLM-судью](docs/adr/0020-llm-judge-custom-checks.md);
-- [ограничение вложенных вызовов](docs/adr/0021-skill-tool-budget.md).
+- [pipeline skills](docs/adr/0018-pipeline-skills.md);
+- [skill as a session tool](docs/adr/0019-skill-as-session-tool.md);
+- [custom checks via an LLM judge](docs/adr/0020-llm-judge-custom-checks.md);
+- [nested call limits](docs/adr/0021-skill-tool-budget.md).
 
-Полный список: [`docs/adr/README.md`](docs/adr/README.md).
+Full list: [`docs/adr/README.md`](docs/adr/README.md).
 
-## Статус
+## Status
 
-Работает:
+Working:
 
-- создание и применение agent-, script- и pipeline-скиллов;
-- системные и пользовательские проверки;
-- вложенные вызовы скиллов в сессии;
-- DOCX, XLSX, PDF, CSV и Markdown на входе;
-- Markdown и DOCX на выходе;
-- Obsidian-совместимые ссылки на источники;
-- OpenRouter и z.ai;
-- WebSocket-стриминг и трейс прогонов;
-- нативная установка из Git.
+- create and apply agent, script, and pipeline skills;
+- system and user checks;
+- nested skill calls in a session;
+- DOCX, XLSX, PDF, CSV, and Markdown on input;
+- Markdown and DOCX on output;
+- Obsidian-compatible source links;
+- OpenRouter and z.ai;
+- WebSocket streaming and run traces;
+- native install from Git.
 
-Направления развития:
+Directions of work:
 
-- система плагинов;
-- локальные OpenAI-совместимые провайдеры;
-- перенос скиллов между контурами;
-- маршрутизация по чувствительности;
-- sandbox для стороннего кода;
-- версионирование воркспейса через Git.
+- plugin system;
+- local OpenAI-compatible providers;
+- moving skills between environments;
+- sensitivity routing;
+- sandbox for third-party code;
+- workspace versioning via Git.
 
-Контекст для разработки вынесен в [`AGENTS.md`](AGENTS.md).
+Development context is in [`AGENTS.md`](AGENTS.md).
 
-## Лицензия
+## License
 
 [PolyForm Noncommercial 1.0.0](LICENSE.md).
 
-Код открыт для чтения, изучения и некоммерческого использования: личные проекты, обучение, исследования, некоммерческие организации. Коммерческое использование требует отдельной лицензии — напишите на rbelchenko@gmail.com.
+The code is open to read, study, and use non-commercially: personal projects, education, research, and non-profit organizations. Commercial use requires a separate license — write to rbelchenko@gmail.com.

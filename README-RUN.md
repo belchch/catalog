@@ -1,73 +1,69 @@
-# Catalog — как запустить
+# Catalog — how to run
 
-Основной способ: **нативно** (Python venv / `uv tool install`, Node/pnpm для разработки UI). Docker для локальной работы с документами **не используй** — см. раздел в конце.
+**English** | [Русский](README-RUN.ru.md)
 
-После этих шагов у тебя будут backend, UI и открытая папка-воркспейс с твоими файлами.
+The main path is **native** (Python venv / `uv tool install`, Node/pnpm for UI development). Do **not** use Docker for local document work — see the section at the end.
+
+After these steps you will have a backend, a UI, and an open workspace folder with your files.
 
 ---
 
-## Быстрый путь: `uv tool install` (из git)
+## Fast path: `uv tool install` (from git)
 
-PyPI пока не используем (имя пакета не зафиксировано). Ставится из репозитория; для сборки wheel нужны **uv**, **Node.js** и **pnpm** (hook собирает фронт в пакет).
+PyPI is not used yet (the package name is not finalized). The install is from the repository; building the wheel needs **uv**, **Node.js**, and **pnpm** (a hook packages the frontend).
 
 ```bash
 uv tool install "git+https://github.com/belchch/catalog.git#subdirectory=backend"
 catalog
 ```
 
-Команда `catalog` поднимает uvicorn на `127.0.0.1:8000` и открывает браузер. Ключи можно задать через env (`OPENROUTER_API_KEY` / `ZAI_API_KEY`) или позже через API `/setup` (экран первого запуска — отдельный UI-шаг); persist — в глобальной `app.db`, не в `.env` CWD.
+The `catalog` command starts uvicorn on `127.0.0.1:8000` and opens a browser. Keys can be set via env (`OPENROUTER_API_KEY` / `ZAI_API_KEY`) or later through the `/setup` API (the first-run screen is a separate UI step). Persist goes into the global `app.db`, not a CWD `.env`.
 
 ---
 
+## One-time setup (dev from source)
 
-
-## Что нужно один раз (dev из исходников)
-
-1. **Python 3.11+** (удобнее 3.13) — [https://www.python.org/downloads/](https://www.python.org/downloads/)
-2. **Node.js** и **pnpm** — [https://nodejs.org/](https://nodejs.org/) · затем `npm install -g pnpm`
-3. Ключ LLM-провайдера (env перекрывает persist):
-  - по умолчанию **OpenRouter**: `OPENROUTER_API_KEY` (+ tool-capable `OPENROUTER_DEFAULT_MODEL`);
-  - либо **z.ai** (`APP_PROVIDER=zai`, `ZAI_API_KEY`) — см. `backend/.env.example`.
+1. **Python 3.11+** (3.13 is more convenient) — [https://www.python.org/downloads/](https://www.python.org/downloads/)
+2. **Node.js** and **pnpm** — [https://nodejs.org/](https://nodejs.org/) · then `npm install -g pnpm`
+3. An LLM provider key (env overrides persist):
+  - default is **OpenRouter**: `OPENROUTER_API_KEY` (+ a tool-capable `OPENROUTER_DEFAULT_MODEL`);
+  - or **z.ai** (`APP_PROVIDER=zai`, `ZAI_API_KEY`) — see `backend/.env.example`.
 
 ---
 
+## 1. Backend environment
 
-
-## 1. Окружение backend
-
-Из корня репозитория:
+From the repository root:
 
 ```bash
 cd backend
 cp .env.example .env
 ```
 
-Открой `backend/.env` и задай минимум (для CI/dev; в продукте ключи могут жить в app-db):
+Open `backend/.env` and set at least (for CI/dev; in the product, keys can live in the app db):
 
-- `OPENROUTER_API_KEY=...` (или ключ z.ai при `APP_PROVIDER=zai`)
-- `OPENROUTER_DEFAULT_MODEL=...` — модель с function-calling / tool use
+- `OPENROUTER_API_KEY=...` (or a z.ai key when `APP_PROVIDER=zai`)
+- `OPENROUTER_DEFAULT_MODEL=...` — a model with function-calling / tool use
 
-Остальное можно не трогать. Пути к документам в `.env` не задаются: папку выбираешь в UI.
+Leave the rest as is. Document paths are not set in `.env`: you pick the folder in the UI.
 
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate          # Windows: .venv\Scripts\activate
 pip install -e ".[dev]"
 uvicorn catalog.main:app --reload
-# или: catalog --no-browser
+# or: catalog --no-browser
 ```
 
-Проверка: [http://localhost:8000/health](http://localhost:8000/health)
+Check: [http://localhost:8000/health](http://localhost:8000/health)
 
-Оставь этот терминал запущенным.
+Leave this terminal running.
 
 ---
 
-
-
 ## 2. Frontend
 
-В **другом** терминале:
+In **another** terminal:
 
 ```bash
 cd frontend
@@ -75,78 +71,64 @@ pnpm install
 pnpm run dev
 ```
 
-Открой в браузере: [http://localhost:5173](http://localhost:5173)
+Open in a browser: [http://localhost:5173](http://localhost:5173)
 
 ---
 
+## 3. Open or create a workspace folder
 
+In the UI, pick a folder (“Open workspace” / folder picker):
 
-## 3. Открыть или создать папку-воркспейс
+| Folder | What happens |
+| --- | --- |
+| Empty (no Catalog marker) | Prompt to **create** a workspace → confirm |
+| Ordinary files, no `.catalog` | Index preview → **confirm initialization** |
+| Already a workspace (has `.catalog/index.db`) | Opens immediately; the index is refreshed if needed |
 
-В UI выбери папку («Открыть воркспейс» / пикер папок):
+Documents stay **ordinary files in the chosen folder**. Internal data lives only in `.catalog/` (including `index.db`); you do not need to edit it by hand.
 
-
-| Папка                                    | Что произойдёт                                      |
-| ---------------------------------------- | --------------------------------------------------- |
-| Пустая (без маркера Catalog)             | Предложение **создать** воркспейс → подтверди       |
-| С обычными файлами, без `.catalog`       | Показ превью индекса → **подтверди инициализацию**  |
-| Уже воркспейс (есть `.catalog/index.db`) | Откроется сразу, индекс при необходимости обновится |
-
-
-Документы остаются **обычными файлами в выбранной папке**. Служебное — только `.catalog/` (в т.ч. `index.db`); руками править не нужно.
-
-Глобальные настройки и список известных воркспейсов лежат в каталоге данных ОС (на macOS — `~/Library/Application Support/catalog`, иначе `~/.local/share/catalog`), не рядом с исходниками и не в Docker-томе.
+Global settings and the list of known workspaces live in the OS data directory (on macOS — `~/Library/Application Support/catalog`, otherwise `~/.local/share/catalog`), not next to the source tree and not in a Docker volume.
 
 ---
 
+## Stop
 
-
-## Остановка
-
-В каждом терминале (backend / frontend) — **Ctrl+C**.
+In each terminal (backend / frontend) — **Ctrl+C**.
 
 ---
 
+## End-to-end run (golden path)
 
-
-## Сквозной прогон (golden path)
-
-Нужны настроенный `backend/.env` и samples в корне репо (`samples/golden.docx`, `samples/golden2.docx`). Скрипт сам создаёт временную папку-воркспейс с `.catalog/index.db` и гоняет цикл ingest → план → скилл → apply:
+You need a configured `backend/.env` and the samples at the repo root (`samples/golden.docx`, `samples/golden2.docx`). The script creates a temporary workspace folder with `.catalog/index.db` and runs ingest → plan → skill → apply:
 
 ```bash
 cd backend
-source .venv/bin/activate   # если ещё не активирован
+source .venv/bin/activate   # if not already active
 python scripts/golden_run.py
 ```
 
-Успех: в конце `=== GOLDEN RUN PASSED ===` и JSON-отчёт.
+Success: `=== GOLDEN RUN PASSED ===` at the end, plus a JSON report.
 
 ---
 
+## If something does not work
 
+| Symptom | What to do |
+| --- | --- |
+| Missing key / LLM errors | Check `backend/.env`: the key is set; the model supports tool use |
+| Port **8000** is busy | Stop the other process or `uvicorn ... --port 8001` |
+| Port **5173** is busy | Vite will offer another port, or stop the conflicting process |
+| `pnpm: command not found` | `npm install -g pnpm` |
+| Backend does not start after install | Activate the venv, then from `backend/` run `pip install -e ".[dev]"` again |
+| HTTP **409** `workspace not open` | No folder is open in the UI yet — open a workspace (step 3) |
+| 409 when switching folders | Wait for the active skill run to finish, then switch |
 
-## Если что-то не работает
-
-
-| Симптом                           | Что делать                                                    |
-| --------------------------------- | ------------------------------------------------------------- |
-| Нет ключа / ошибки LLM            | Проверь `backend/.env`: ключ задан; модель умеет tool use     |
-| Порт **8000** занят               | Останови другой процесс или `uvicorn ... --port 8001`         |
-| Порт **5173** занят               | Vite предложит другой порт или останови конфликтующий процесс |
-| `pnpm: command not found`         | `npm install -g pnpm`                                         |
-| Backend не стартует после install | Активируй venv, из `backend/` снова `pip install -e ".[dev]"` |
-| HTTP **409** `workspace not open` | В UI ещё не открыта папка — открой воркспейс (шаг 3)          |
-| 409 при смене папки               | Дождись окончания активного прогона скилла, затем переключи   |
-
-
-Если ничего не помогает — пришли вывод терминала (backend и/или frontend).
+If nothing helps — send the terminal output (backend and/or frontend).
 
 ---
 
+## Obsolete for local use: Docker
 
+The Docker wrapper lives in `deploy/` (`deploy/docker-compose.yml`, volume `catalog-data` → `/data`, `deploy/Catalog.command` / `deploy/Build.command`) — this is **not** the product path for working with documents on your machine. A named volume is no longer “where my files live”.
 
-## Устарело для локального запуска: Docker
-
-Docker-обвязка вынесена в `deploy/` (`deploy/docker-compose.yml`, том `catalog-data` → `/data`, `deploy/Catalog.command` / `deploy/Build.command`) — это **не** продуктовый сценарий для работы с документами на своём компьютере. Named volume больше не место «где лежат мои файлы».
-
-Скрипты и образ оставлены как задел под возможный серверный деплой и могут отставать от кода. Для повседневной локальной работы используй нативный путь выше.
+The scripts and image are kept as a starting point for a possible server deploy and may lag behind the code. For day-to-day local work, use the native path above.
