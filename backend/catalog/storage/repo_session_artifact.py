@@ -156,7 +156,15 @@ def _short_dry_run_error(error: str | None) -> str | None:
         return None
     if len(error) <= _DRY_RUN_ERROR_LIMIT:
         return error
-    return error[:_DRY_RUN_ERROR_LIMIT] + "…"
+    marker = "(line "
+    idx = error.rfind(marker)
+    if idx < 0:
+        return error[:_DRY_RUN_ERROR_LIMIT] + "…"
+    suffix = error[idx:]
+    if len(suffix) >= _DRY_RUN_ERROR_LIMIT:
+        return suffix[:_DRY_RUN_ERROR_LIMIT] + "…"
+    budget = _DRY_RUN_ERROR_LIMIT - len(suffix)
+    return error[:budget] + "…" + suffix
 
 
 def _row_to_dry_run(row: sqlite3.Row) -> ScriptDryRunRow:

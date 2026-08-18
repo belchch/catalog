@@ -399,12 +399,18 @@ def _dry_run_gate_errors(
         return errors
     if config.kind != "pipeline":
         return errors
+    script_slot_available = True
     for index, step in enumerate(config.steps):
         if step.type != "script":
             continue
         if has_green_script_dry_run(
             db, session_id, step.code, slot=dry_run_slot(index)
         ):
+            continue
+        if script_slot_available and has_green_script_dry_run(
+            db, session_id, step.code, slot=dry_run_slot()
+        ):
+            script_slot_available = False
             continue
         label = step.id or f"steps:{index}"
         errors.append(

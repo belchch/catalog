@@ -64,6 +64,24 @@ def _seed_green_dry_run(
     )
 
 
+def test_dry_run_error_keeps_line_suffix_when_truncated(mem_db: Database) -> None:
+    session_id = create_session(mem_db)
+    long_error = "script raised: " + ("boom " * 120) + "(line 7: return items[0])"
+    row = upsert_script_dry_run(
+        mem_db,
+        session_id=session_id,
+        slot=dry_run_slot(),
+        sha256=code_sha256("result = 1\n"),
+        ok=False,
+        stage="run",
+        error=long_error,
+    )
+    assert row.error is not None
+    assert len(row.error) < len(long_error)
+    assert "(line 7:" in row.error
+    assert "return items[0]" in row.error
+
+
 def test_upsert_get_list_delete_artifact(mem_db: Database) -> None:
     session_id = create_session(mem_db)
     row = upsert_artifact(
@@ -1002,9 +1020,7 @@ def test_build_pipeline_from_split_artifacts(client, provider, db) -> None:
         json={"content": "rewrite the text"},
     )
     assert prompt.json()["is_valid"] is True
-    _seed_green_dry_run(
-        db, session_id, "result = document.upper()\n", step_index=0
-    )
+    _seed_green_dry_run(db, session_id, "result = document.upper()\n")
     provider.script = []
     resp = client.post(f"/sessions/{session_id}/skills")
     assert resp.status_code == 200, resp.text
@@ -1859,6 +1875,44 @@ def test_build_pipeline_same_code_steps_require_own_slot(client, db) -> None:
         json={"content": json.dumps(steps, ensure_ascii=False)},
     )
     _seed_green_dry_run(db, session_id, code, step_index=0)
+    resp = client.post(f"/sessions/{session_id}/skills")
+    assert resp.status_code == 422
+    detail = resp.json()["detail"]
+    assert "second" in detail
+    assert "step_index=1" in detail
+    _seed_green_dry_run(db, session_id, code, step_index=1)
+    ok = client.post(f"/sessions/{session_id}/skills")
+    assert ok.status_code == 200, ok.text
+
+
+def test_build_pipeline_script_slot_covers_only_one_step(client, db) -> None:
+    session_id = client.post("/sessions").json()["id"]
+    code = "result = document.upper()\n"
+    client.patch(
+        f"/sessions/{session_id}/skill-meta",
+        json={"name": "Dup", "description": "same scripts", "kind": "pipeline"},
+    )
+    steps = {
+        "steps": [
+            {
+                "id": "first",
+                "type": "script",
+                "input": "documents",
+                "code": code,
+            },
+            {
+                "id": "second",
+                "type": "script",
+                "input": "previous",
+                "code": code,
+            },
+        ]
+    }
+    client.patch(
+        f"/sessions/{session_id}/artifacts/steps",
+        json={"content": json.dumps(steps, ensure_ascii=False)},
+    )
+    _seed_green_dry_run(db, session_id, code)
     resp = client.post(f"/sessions/{session_id}/skills")
     assert resp.status_code == 422
     detail = resp.json()["detail"]
