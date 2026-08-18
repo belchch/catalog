@@ -124,6 +124,17 @@ CREATE TABLE IF NOT EXISTS custom_check(
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS session_script_dry_run(
+  session_id TEXT NOT NULL,
+  slot TEXT NOT NULL,
+  sha256 TEXT NOT NULL,
+  ok INTEGER NOT NULL,
+  stage TEXT,
+  error TEXT,
+  ran_at TEXT NOT NULL,
+  PRIMARY KEY (session_id, slot),
+  FOREIGN KEY (session_id) REFERENCES session(id)
+);
 """
 
 SCHEMA_SQL = WORKSPACE_SCHEMA

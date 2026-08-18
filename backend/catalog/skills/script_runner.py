@@ -137,14 +137,20 @@ SCRIPT_CODE_CONTRACT_RU = (
     f"операторы import/from-import запрещены и не нужны: в namespace уже "
     f"доступны модули {_SAFE_MODULE_LIST} (пиши сразу json.loads, re.sub и т.п.); "
     f"без open/eval/exec; вход — текст документа (xlsx уже как markdown-таблицы), "
-    f"pandas/openpyxl и бинарные файлы недоступны"
+    f"pandas/openpyxl и бинарные файлы недоступны; "
+    f"после save_skill_script вызови try_skill_script и правь до ok, затем собирай; "
+    f"input_preview — фактический вход (markdown-таблицы из docx/xlsx), "
+    f"парсь его, а не догадывайся"
 )
 
 SCRIPT_CODE_CONTRACT_EN = (
     f"import/from-import are forbidden and unnecessary: {_SAFE_MODULE_LIST} "
     f"are pre-injected into the namespace (use json.loads, re.sub, etc. directly); "
     f"no open/eval/exec; input is document text (xlsx is already markdown tables); "
-    f"no pandas/openpyxl or binary file access"
+    f"no pandas/openpyxl or binary file access; "
+    f"after save_skill_script call try_skill_script and fix until ok before building; "
+    f"input_preview is the actual input (markdown tables from docx/xlsx) — "
+    f"parse that, do not guess"
 )
 
 # Names that must never be reachable, used by the AST checker. The dynamic

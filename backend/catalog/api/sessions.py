@@ -52,6 +52,7 @@ from catalog.llm.base import LLMProvider, Message
 from catalog.llm.log_context import prompt_log_context
 from catalog.llm.timeout import DEFAULT_LLM_TIMEOUT_SECONDS, llm_timeout_context
 from catalog.skills.artifact_tools import (
+    artifact_payload,
     artifacts_frame,
     build_artifact_tools,
     parse_steps_content,
@@ -118,6 +119,8 @@ PLANNER_SYSTEM_PROMPT = (
     "Для kind=script: "
     + SCRIPT_CODE_CONTRACT_RU
     + ". "
+    "Порядок: save_skill_script → try_skill_script → правка до ok → сборка. "
+    "input_preview — фактический вход, подгоняй парсинг под него. "
     "Поддерживай черновик актуальным через эти инструменты. "
     "Не дублируй полный prompt или script простынёй в чат — они живут в "
     "панели артефактов; в ответе кратко сообщи, что сохранил или обновил "
@@ -496,15 +499,8 @@ def _normalize_meta_input_arity(
     return None, "input_arity must be 1, 2, or null"
 
 
-def _artifact_out(row) -> SessionArtifactOut:
-    return SessionArtifactOut(
-        type=row.type,
-        content=row.content,
-        is_valid=row.is_valid,
-        error=row.error,
-        source=row.source,
-        updated_at=row.updated_at,
-    )
+def _artifact_out(db: Database, row) -> SessionArtifactOut:
+    return SessionArtifactOut.model_validate(artifact_payload(db, row))
 
 
 @router.get(
@@ -517,7 +513,7 @@ async def list_session_artifacts_endpoint(
 ) -> list[SessionArtifactOut]:
     if get_session(db, session_id) is None:
         raise HTTPException(status_code=404, detail="session not found")
-    return [_artifact_out(r) for r in list_artifacts(db, session_id)]
+    return [_artifact_out(db, r) for r in list_artifacts(db, session_id)]
 
 
 @router.post(
@@ -620,7 +616,7 @@ async def patch_session_artifact_endpoint(
             is_valid=not errors,
             error="; ".join(errors) if errors else None,
         )
-        return _artifact_out(row)
+        return _artifact_out(db, row)
 
     if artifact_type == "steps":
         parsed, errors = parse_steps_content(req.content)
@@ -647,7 +643,7 @@ async def patch_session_artifact_endpoint(
             is_valid=not errors,
             error="; ".join(errors) if errors else None,
         )
-        return _artifact_out(row)
+        return _artifact_out(db, row)
 
     is_valid = True
     error: str | None = None
@@ -670,7 +666,7 @@ async def patch_session_artifact_endpoint(
         is_valid=is_valid,
         error=error,
     )
-    return _artifact_out(row)
+    return _artifact_out(db, row)
 
 
 @router.patch(
@@ -711,7 +707,7 @@ async def patch_skill_meta_endpoint(
         is_valid=not errors,
         error="; ".join(errors) if errors else None,
     )
-    return _artifact_out(row)
+    return _artifact_out(db, row)
 
 
 async def _run_planner_turn(

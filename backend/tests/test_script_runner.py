@@ -206,6 +206,13 @@ def test_script_code_contract_lists_preinjected_modules() -> None:
         assert name in SCRIPT_CODE_CONTRACT_EN
     assert "import/from-import запрещены" in SCRIPT_CODE_CONTRACT_RU
     assert "import/from-import are forbidden" in SCRIPT_CODE_CONTRACT_EN
+    assert "try_skill_script" in SCRIPT_CODE_CONTRACT_EN
+    assert "save_skill_script" in SCRIPT_CODE_CONTRACT_EN
+    assert "input_preview" in SCRIPT_CODE_CONTRACT_EN
+    assert "try_skill_script" in SCRIPT_CODE_CONTRACT_RU
+    assert "input_preview" in SCRIPT_CODE_CONTRACT_RU
+    assert "try_skill_script" in PLANNER_SYSTEM_PROMPT
+    assert "input_preview" in PLANNER_SYSTEM_PROMPT
     assert SCRIPT_CODE_CONTRACT_RU in BUILD_SKILL_SYSTEM_PROMPT
     assert SCRIPT_CODE_CONTRACT_RU in PLANNER_SYSTEM_PROMPT
     assert (

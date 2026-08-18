@@ -88,6 +88,7 @@ from catalog.storage.repo_message import add_message, list_messages
 from catalog.storage.repo_session import create_session, get_session, update_session_status
 from catalog.storage.repo_session_artifact import (
     get_artifact,
+    has_green_script_dry_run,
     list_artifacts,
     upsert_artifact,
 )
@@ -380,16 +381,42 @@ def _args_to_config(args: dict, default_model: str) -> SkillConfig:
     )
 
 
-def _validate_config(
-    config: SkillConfig, available_tools: list[str], available_checks: list[str]
+def _dry_run_gate_errors(
+    db: Database,
+    session_id: str,
+    config: SkillConfig,
 ) -> list[str]:
-    """Return a list of validation errors (empty when the config is valid).
+    errors: list[str] = []
+    if config.kind == "script":
+        if not has_green_script_dry_run(db, session_id, config.code):
+            errors.append(
+                "script dry-run is missing or stale; "
+                "run try_skill_script for the current script"
+            )
+        return errors
+    if config.kind != "pipeline":
+        return errors
+    for index, step in enumerate(config.steps):
+        if step.type != "script":
+            continue
+        if has_green_script_dry_run(db, session_id, step.code):
+            continue
+        label = step.id or f"steps:{index}"
+        errors.append(
+            f"step {label}: script dry-run is missing or stale; "
+            f"run try_skill_script(step_index={index})"
+        )
+    return errors
 
-    For ``kind="script"`` the code is statically validated via
-    :func:`validate_script` (syntax + sandbox policy); ``allowed_tools`` is
-    ignored (always empty). For ``kind="agent"`` the classic tool/check
-    checks apply. Verify-check ids are validated for both kinds.
-    """
+
+def _validate_config(
+    config: SkillConfig,
+    available_tools: list[str],
+    available_checks: list[str],
+    *,
+    db: Database | None = None,
+    session_id: str | None = None,
+) -> list[str]:
     errors: list[str] = []
     if config.kind not in SKILL_KINDS:
         errors.append(
@@ -412,6 +439,8 @@ def _validate_config(
             config.verify_checks, available_checks=available_checks
         )
     )
+    if db is not None and session_id is not None:
+        errors.extend(_dry_run_gate_errors(db, session_id, config))
     return errors
 
 
@@ -578,7 +607,13 @@ def _build_skill_from_artifacts(
             status_code=422, detail=f"failed to assemble skill config: {exc}"
         ) from exc
 
-    errors = _validate_config(config, base_tools.names(), registered_checks())
+    errors = _validate_config(
+        config,
+        base_tools.names(),
+        registered_checks(),
+        db=db,
+        session_id=session_id,
+    )
     if errors:
         raise HTTPException(
             status_code=422,
@@ -637,7 +672,13 @@ async def _build_skill_from_session_llm(
                 )
                 continue
 
-            errors = _validate_config(config, available_tools, available_checks)
+            errors = _validate_config(
+                config,
+                available_tools,
+                available_checks,
+                db=db,
+                session_id=session_id,
+            )
             if errors:
                 history.append(
                     Message(

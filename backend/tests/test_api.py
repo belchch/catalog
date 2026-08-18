@@ -19,6 +19,7 @@ from catalog.skills.repo_skill import create_skill, get_skill, update_status
 from catalog.storage.repo_document import get_document
 from catalog.storage.repo_message import add_message, list_messages
 from catalog.storage.repo_session import get_session
+from catalog.storage.repo_session_artifact import code_sha256, upsert_script_dry_run
 from catalog.storage.repo_session_document import attach_documents, list_session_documents
 
 
@@ -1449,10 +1450,19 @@ def test_build_script_skill_valid_code(client, provider, db) -> None:
     """A kind=script skill with valid Python code is built as draft."""
     session_id = client.post("/sessions").json()["id"]
     add_message(db, session_id=session_id, role="user", content="uppercase the doc")
+    code = "result = document.upper()\n"
+    upsert_script_dry_run(
+        db,
+        session_id=session_id,
+        slot="script",
+        sha256=code_sha256(code),
+        ok=True,
+        stage="run",
+    )
 
     provider.script = [
         _completion(
-            tool_calls=[_build_script_skill_call(code="result = document.upper()\n")]
+            tool_calls=[_build_script_skill_call(code=code)]
         )
     ]
 

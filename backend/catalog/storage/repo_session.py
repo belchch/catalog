@@ -134,6 +134,10 @@ def delete_session(db: Database, session_id: str) -> bool:
         if row is None:
             return False
         conn.execute("DELETE FROM session_artifact WHERE session_id = ?", (session_id,))
+        conn.execute(
+            "DELETE FROM session_script_dry_run WHERE session_id = ?",
+            (session_id,),
+        )
         conn.execute("DELETE FROM session_document WHERE session_id = ?", (session_id,))
         conn.execute("DELETE FROM session_skill WHERE session_id = ?", (session_id,))
         conn.execute("DELETE FROM message WHERE session_id = ?", (session_id,))

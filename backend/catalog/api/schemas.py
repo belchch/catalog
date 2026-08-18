@@ -320,6 +320,15 @@ class SetupKeysUpdate(BaseModel):
     zai_api_key: str | None = None
 
 
+class ScriptDryRunStatus(BaseModel):
+    slot: str
+    sha256: str
+    ok: bool
+    stage: Literal["validate", "run", "verify"] | None = None
+    error: str | None = None
+    time: str | None = None
+
+
 class SessionArtifactOut(BaseModel):
     type: str
     content: str
@@ -327,6 +336,7 @@ class SessionArtifactOut(BaseModel):
     error: str | None = None
     source: str
     updated_at: str
+    dry_run: ScriptDryRunStatus | list[ScriptDryRunStatus] | None = None
 
 
 class ArtifactPatchRequest(BaseModel):

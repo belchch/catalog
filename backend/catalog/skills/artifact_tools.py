@@ -39,9 +39,14 @@ from catalog.skills.verify import (
 )
 from catalog.storage.db import Database
 from catalog.storage.repo_session_artifact import (
+    SCRIPT_DRY_RUN_SLOT,
+    code_sha256,
+    dry_run_slot,
     get_artifact,
+    get_script_dry_run,
     list_artifacts,
     upsert_artifact,
+    upsert_script_dry_run,
 )
 from catalog.storage.repo_session_document import list_session_documents
 
@@ -65,6 +70,70 @@ def _result_as_text(value: str | list[str]) -> str:
             return value[0]
         return "\n\n---\n\n".join(value)
     return value
+
+
+def _persist_try_dry_run(
+    db: Database,
+    session_id: str,
+    *,
+    slot: str,
+    code: str,
+    payload: dict[str, Any],
+) -> None:
+    upsert_script_dry_run(
+        db,
+        session_id=session_id,
+        slot=slot,
+        sha256=code_sha256(code),
+        ok=bool(payload.get("ok")),
+        stage=payload.get("stage"),
+        error=payload.get("error"),
+    )
+
+
+def _dry_run_view(
+    slot: str,
+    code: str,
+    stored,
+) -> dict[str, Any]:
+    digest = code_sha256(code)
+    if stored is None:
+        return {
+            "slot": slot,
+            "sha256": digest,
+            "ok": False,
+            "stage": None,
+            "error": None,
+            "time": None,
+        }
+    matches = stored.sha256 == digest
+    return {
+        "slot": stored.slot,
+        "sha256": stored.sha256,
+        "ok": bool(stored.ok and matches),
+        "stage": stored.stage,
+        "error": stored.error,
+        "time": stored.time,
+    }
+
+
+def _dry_run_for_artifact(db: Database, row) -> dict[str, Any] | list[dict[str, Any]] | None:
+    if row.type == "script":
+        stored = get_script_dry_run(db, row.session_id, SCRIPT_DRY_RUN_SLOT)
+        return _dry_run_view(SCRIPT_DRY_RUN_SLOT, row.content, stored)
+    if row.type == "steps":
+        parsed, errors = parse_steps_content(row.content)
+        if errors:
+            return []
+        views: list[dict[str, Any]] = []
+        for index, step in enumerate(parsed):
+            if step.type != "script":
+                continue
+            slot = dry_run_slot(index)
+            stored = get_script_dry_run(db, row.session_id, slot)
+            views.append(_dry_run_view(slot, step.code, stored))
+        return views
+    return None
 
 
 def _try_payload(
@@ -210,6 +279,7 @@ async def run_try_skill_script(
     input_text, _documents = prepare_script_input(doc_texts)
     input_preview = _preview_text(input_text)
     input_len = len(input_text)
+    slot = dry_run_slot(step_index)
     if source is None or code_error is not None:
         return _try_payload(
             ok=False,
@@ -221,18 +291,20 @@ async def run_try_skill_script(
     try:
         validate_script(source)
     except ScriptValidationError as exc:
-        return _try_payload(
+        payload = _try_payload(
             ok=False,
             stage="validate",
             error=str(exc),
             input_preview=input_preview,
             input_len=input_len,
         )
+        _persist_try_dry_run(db, session_id, slot=slot, code=source, payload=payload)
+        return payload
     started = time.perf_counter()
     try:
         output = await run_skill_script_async(source, doc_texts)
     except ScriptValidationError as exc:
-        return _try_payload(
+        payload = _try_payload(
             ok=False,
             stage="validate",
             error=str(exc),
@@ -240,8 +312,10 @@ async def run_try_skill_script(
             input_len=input_len,
             duration_ms=int((time.perf_counter() - started) * 1000),
         )
+        _persist_try_dry_run(db, session_id, slot=slot, code=source, payload=payload)
+        return payload
     except ScriptRuntimeError as exc:
-        return _try_payload(
+        payload = _try_payload(
             ok=False,
             stage="run",
             error=str(exc),
@@ -251,6 +325,8 @@ async def run_try_skill_script(
             line_no=exc.line_no,
             source_line=exc.source_line,
         )
+        _persist_try_dry_run(db, session_id, slot=slot, code=source, payload=payload)
+        return payload
     duration_ms = int((time.perf_counter() - started) * 1000)
     output_kind = "list" if isinstance(output, list) else "str"
     output_text = _result_as_text(output)
@@ -261,7 +337,7 @@ async def run_try_skill_script(
         result = await run_verify_async(output_text, checks, db=db)
         verify_payload = result.as_payload()
         stage = "verify"
-    return _try_payload(
+    payload = _try_payload(
         ok=True,
         stage=stage,
         input_preview=input_preview,
@@ -272,9 +348,11 @@ async def run_try_skill_script(
         duration_ms=duration_ms,
         verify=verify_payload,
     )
+    _persist_try_dry_run(db, session_id, slot=slot, code=source, payload=payload)
+    return payload
 
 
-def _artifact_payload(row) -> dict[str, Any]:
+def artifact_payload(db: Database, row) -> dict[str, Any]:
     return {
         "type": row.type,
         "content": row.content,
@@ -282,6 +360,7 @@ def _artifact_payload(row) -> dict[str, Any]:
         "error": row.error,
         "source": row.source,
         "updated_at": row.updated_at,
+        "dry_run": _dry_run_for_artifact(db, row),
     }
 
 
@@ -289,7 +368,7 @@ def artifacts_frame(db: Database, session_id: str) -> dict[str, Any]:
     return {
         "type": "session_artifacts",
         "artifacts": [
-            _artifact_payload(row) for row in list_artifacts(db, session_id)
+            artifact_payload(db, row) for row in list_artifacts(db, session_id)
         ],
     }
 
@@ -487,7 +566,7 @@ def build_artifact_tools(
             error=error,
         )
         await _notify()
-        return {"ok": is_valid, "artifact": _artifact_payload(row)}
+        return {"ok": is_valid, "artifact": artifact_payload(db, row)}
 
     async def _save_skill_script(*, code: str) -> dict[str, Any]:
         text = code if isinstance(code, str) else str(code)
@@ -508,7 +587,7 @@ def build_artifact_tools(
             error=error,
         )
         await _notify()
-        return {"ok": is_valid, "artifact": _artifact_payload(row), "error": error}
+        return {"ok": is_valid, "artifact": artifact_payload(db, row), "error": error}
 
     async def _set_skill_meta(
         *,
@@ -559,7 +638,7 @@ def build_artifact_tools(
             error=error,
         )
         await _notify()
-        return {"ok": is_valid, "artifact": _artifact_payload(row), "error": error}
+        return {"ok": is_valid, "artifact": artifact_payload(db, row), "error": error}
 
     async def _save_skill_steps(*, steps: list[dict] | dict) -> dict[str, Any]:
         errors: list[str] = []
@@ -592,7 +671,7 @@ def build_artifact_tools(
             error=error,
         )
         await _notify()
-        return {"ok": is_valid, "artifact": _artifact_payload(row), "error": error}
+        return {"ok": is_valid, "artifact": artifact_payload(db, row), "error": error}
 
     async def _list_session_skills() -> dict[str, Any]:
         rows = [
@@ -616,7 +695,7 @@ def build_artifact_tools(
     async def _read_skill_draft() -> dict[str, Any]:
         rows = list_artifacts(db, session_id)
         out: dict[str, Any] = {
-            "artifacts": [_artifact_payload(r) for r in rows],
+            "artifacts": [artifact_payload(db, r) for r in rows],
         }
         meta = get_artifact(db, session_id, "meta")
         if meta is not None:
@@ -632,7 +711,7 @@ def build_artifact_tools(
         doc_ids: list[str] | str | None = None,
         step_index: int | None = None,
     ) -> dict[str, Any]:
-        return await run_try_skill_script(
+        result = await run_try_skill_script(
             db,
             session_id,
             workspace_dir=workspace_dir,
@@ -641,6 +720,8 @@ def build_artifact_tools(
             step_index=step_index,
             budget=budget,
         )
+        await _notify()
+        return result
 
     reg.register(
         ToolSpec(
@@ -664,7 +745,8 @@ def build_artifact_tools(
             description=(
                 "Save the deterministic Python script draft for this session. "
                 + SCRIPT_CODE_CONTRACT_EN
-                + ". On validation error, fix the code and call again."
+                + ". Then call try_skill_script and fix until ok before "
+                "building. On validation error, fix the code and call again."
             ),
             parameters={
                 "type": "object",
@@ -790,7 +872,7 @@ def build_artifact_tools(
             name="read_skill_draft",
             description=(
                 "Read the current session skill draft artifacts (prompt, "
-                "script, meta, steps)."
+                "script, meta, steps) including script dry_run status."
             ),
             parameters={"type": "object", "properties": {}},
         ),
@@ -801,8 +883,11 @@ def build_artifact_tools(
             name="try_skill_script",
             description=(
                 "Dry-run the session script draft in the same sandbox as apply. "
-                "Does not save documents or skill_run. Optional code overrides "
-                "the script artifact; optional doc_ids must belong to this "
+                "Call after save_skill_script and fix the code until ok before "
+                "building. input_preview is the actual script input (markdown "
+                "tables from docx/xlsx) — parse that, do not guess. Does not "
+                "save documents or skill_run. Optional code overrides the "
+                "script artifact; optional doc_ids must belong to this "
                 "session; optional step_index runs a pipeline script step."
             ),
             parameters={

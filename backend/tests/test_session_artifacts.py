@@ -21,10 +21,13 @@ from catalog.storage.repo_document import list_documents
 from catalog.storage.repo_message import list_messages
 from catalog.storage.repo_session import create_session
 from catalog.storage.repo_session_artifact import (
+    code_sha256,
     delete_artifact,
+    dry_run_slot,
     get_artifact,
     list_artifacts,
     upsert_artifact,
+    upsert_script_dry_run,
 )
 from catalog.storage.repo_session_document import attach_documents
 from catalog.storage.repo_session_skill import attach_skills
@@ -35,6 +38,23 @@ def mem_db() -> Database:
     d = Database(":memory:")
     d.init_schema()
     return d
+
+
+def _seed_green_dry_run(
+    db: Database,
+    session_id: str,
+    code: str,
+    *,
+    step_index: int | None = None,
+) -> None:
+    upsert_script_dry_run(
+        db,
+        session_id=session_id,
+        slot=dry_run_slot(step_index),
+        sha256=code_sha256(code),
+        ok=True,
+        stage="run",
+    )
 
 
 def test_upsert_get_list_delete_artifact(mem_db: Database) -> None:
@@ -363,6 +383,7 @@ def test_build_script_from_artifacts(client, provider, db) -> None:
     )
     assert patch.status_code == 200
     assert patch.json()["is_valid"] is True
+    _seed_green_dry_run(db, session_id, code)
     resp = client.post(f"/sessions/{session_id}/skills")
     assert resp.status_code == 200, resp.text
     skill = get_skill(db, resp.json()["skill_id"])
@@ -796,6 +817,7 @@ def test_build_pipeline_from_artifacts(client, provider, db) -> None:
     )
     assert patch.status_code == 200, patch.text
     assert patch.json()["is_valid"] is True
+    _seed_green_dry_run(db, session_id, "result = document.upper()\n")
     provider.script = []
     resp = client.post(f"/sessions/{session_id}/skills")
     assert resp.status_code == 200, resp.text
@@ -854,6 +876,7 @@ def test_build_pipeline_from_artifacts_despite_track_intent(
         },
     )
     assert select.status_code == 200, select.text
+    _seed_green_dry_run(db, session_id, "result = document.upper()\n")
     provider.script = []
     resp = client.post(f"/sessions/{session_id}/skills")
     assert resp.status_code == 200, resp.text
@@ -968,6 +991,7 @@ def test_build_pipeline_from_split_artifacts(client, provider, db) -> None:
         json={"content": "rewrite the text"},
     )
     assert prompt.json()["is_valid"] is True
+    _seed_green_dry_run(db, session_id, "result = document.upper()\n")
     provider.script = []
     resp = client.post(f"/sessions/{session_id}/skills")
     assert resp.status_code == 200, resp.text
@@ -1667,3 +1691,191 @@ def test_try_skill_script_http_limit_is_not_500(client) -> None:
     assert resp.status_code != 500
     assert resp.json()["ok"] is False
     assert "limit" in (resp.json()["error"] or "").lower()
+
+
+def test_build_script_without_dry_run_returns_422(client) -> None:
+    session_id = client.post("/sessions").json()["id"]
+    client.patch(
+        f"/sessions/{session_id}/skill-meta",
+        json={"name": "Upper", "description": "upper", "kind": "script"},
+    )
+    client.patch(
+        f"/sessions/{session_id}/artifacts/script",
+        json={"content": "result = document.upper()\n"},
+    )
+    resp = client.post(f"/sessions/{session_id}/skills")
+    assert resp.status_code == 422
+    detail = resp.json()["detail"].lower()
+    assert "dry-run" in detail
+    assert "try_skill_script" in detail
+
+
+def test_build_script_after_code_change_requires_new_dry_run(client, db) -> None:
+    session_id = client.post("/sessions").json()["id"]
+    first = "result = document.upper()\n"
+    second = "result = document.lower()\n"
+    client.patch(
+        f"/sessions/{session_id}/skill-meta",
+        json={"name": "Case", "description": "case", "kind": "script"},
+    )
+    client.patch(
+        f"/sessions/{session_id}/artifacts/script",
+        json={"content": first},
+    )
+    _seed_green_dry_run(db, session_id, first)
+    ok = client.post(f"/sessions/{session_id}/skills")
+    assert ok.status_code == 200, ok.text
+    client.patch(
+        f"/sessions/{session_id}/artifacts/script",
+        json={"content": second},
+    )
+    stale = client.post(f"/sessions/{session_id}/skills")
+    assert stale.status_code == 422
+    assert "dry-run" in stale.json()["detail"].lower()
+    _seed_green_dry_run(db, session_id, second)
+    again = client.post(f"/sessions/{session_id}/skills")
+    assert again.status_code == 200, again.text
+    skill = get_skill(db, again.json()["skill_id"])
+    assert skill is not None
+    assert skill.config.code == second
+
+
+def test_build_pipeline_two_script_steps_requires_each_dry_run(client, db) -> None:
+    session_id = client.post("/sessions").json()["id"]
+    client.patch(
+        f"/sessions/{session_id}/skill-meta",
+        json={"name": "Two", "description": "two scripts", "kind": "pipeline"},
+    )
+    steps = {
+        "steps": [
+            {
+                "id": "upper",
+                "type": "script",
+                "input": "documents",
+                "code": "result = document.upper()\n",
+            },
+            {
+                "id": "lower",
+                "type": "script",
+                "input": "previous",
+                "code": "result = document.lower()\n",
+            },
+        ]
+    }
+    client.patch(
+        f"/sessions/{session_id}/artifacts/steps",
+        json={"content": json.dumps(steps, ensure_ascii=False)},
+    )
+    _seed_green_dry_run(
+        db, session_id, "result = document.upper()\n", step_index=0
+    )
+    resp = client.post(f"/sessions/{session_id}/skills")
+    assert resp.status_code == 422
+    detail = resp.json()["detail"]
+    assert "lower" in detail
+    assert "step_index=1" in detail
+    _seed_green_dry_run(
+        db, session_id, "result = document.lower()\n", step_index=1
+    )
+    ok = client.post(f"/sessions/{session_id}/skills")
+    assert ok.status_code == 200, ok.text
+
+
+def test_build_agent_and_skill_pipeline_skip_dry_run_gate(client, provider, db) -> None:
+    session_id = client.post("/sessions").json()["id"]
+    client.patch(
+        f"/sessions/{session_id}/skill-meta",
+        json={
+            "name": "Agent",
+            "description": "no script",
+            "kind": "agent",
+            "allowed_tools": ["read_document"],
+        },
+    )
+    client.patch(
+        f"/sessions/{session_id}/artifacts/prompt",
+        json={"content": "Summarize."},
+    )
+    provider.script = []
+    agent = client.post(f"/sessions/{session_id}/skills")
+    assert agent.status_code == 200, agent.text
+    assert get_skill(db, agent.json()["skill_id"]) is not None
+
+    pipe_id = client.post("/sessions").json()["id"]
+    child_id = _committed_script(db)
+    attach = client.post(
+        f"/sessions/{pipe_id}/tools", json={"skill_ids": [child_id]}
+    )
+    assert attach.status_code == 200, attach.text
+    client.patch(
+        f"/sessions/{pipe_id}/skill-meta",
+        json={"name": "Parent", "description": "skill only", "kind": "pipeline"},
+    )
+    steps = {
+        "steps": [
+            {
+                "id": "call",
+                "type": "skill",
+                "input": "documents",
+                "skill_id": child_id,
+            }
+        ]
+    }
+    client.patch(
+        f"/sessions/{pipe_id}/artifacts/steps",
+        json={"content": json.dumps(steps, ensure_ascii=False)},
+    )
+    provider.script = []
+    pipe = client.post(f"/sessions/{pipe_id}/skills")
+    assert pipe.status_code == 200, pipe.text
+
+
+def test_dry_run_status_in_artifact_payload_and_draft(
+    client, db, mem_db: Database
+) -> None:
+    session_id = create_session(mem_db)
+    tools = build_artifact_tools(
+        mem_db, session_id, available_tools=["read_document"]
+    )
+    _, save_script = tools.get("save_skill_script")
+    _, read_draft = tools.get("read_skill_draft")
+    _, try_fn = tools.get("try_skill_script")
+    code = "result = document.upper()\n"
+
+    async def _before():
+        await save_script(code=code)
+        return await read_draft()
+
+    before = asyncio.run(_before())
+    script = next(a for a in before["artifacts"] if a["type"] == "script")
+    assert script["dry_run"]["ok"] is False
+    assert script["dry_run"]["slot"] == "script"
+    assert script["dry_run"]["time"] is None
+
+    async def _after():
+        result = await try_fn()
+        draft = await read_draft()
+        return result, draft
+
+    result, draft = asyncio.run(_after())
+    assert result["ok"] is True
+    script = next(a for a in draft["artifacts"] if a["type"] == "script")
+    assert script["dry_run"]["ok"] is True
+    assert script["dry_run"]["sha256"]
+    assert script["dry_run"]["time"]
+    assert script["dry_run"]["stage"] in ("run", "verify")
+
+    session_id = client.post("/sessions").json()["id"]
+    client.patch(
+        f"/sessions/{session_id}/artifacts/script",
+        json={"content": code},
+    )
+    listed = client.get(f"/sessions/{session_id}/artifacts").json()
+    script_http = next(a for a in listed if a["type"] == "script")
+    assert "dry_run" in script_http
+    assert script_http["dry_run"]["ok"] is False
+    _seed_green_dry_run(db, session_id, code)
+    listed = client.get(f"/sessions/{session_id}/artifacts").json()
+    script_http = next(a for a in listed if a["type"] == "script")
+    assert script_http["dry_run"]["ok"] is True
+    assert script_http["dry_run"]["sha256"]

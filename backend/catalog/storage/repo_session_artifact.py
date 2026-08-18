@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import sqlite3
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -8,6 +9,8 @@ from catalog.storage.db import Database
 
 ARTIFACT_TYPES = ("prompt", "script", "meta", "steps")
 ARTIFACT_SOURCES = ("llm", "user")
+SCRIPT_DRY_RUN_SLOT = "script"
+_DRY_RUN_ERROR_LIMIT = 400
 
 
 @dataclass
@@ -121,3 +124,124 @@ def delete_session_artifacts(db: Database, session_id: str) -> None:
             "DELETE FROM session_artifact WHERE session_id = ?",
             (session_id,),
         )
+        conn.execute(
+            "DELETE FROM session_script_dry_run WHERE session_id = ?",
+            (session_id,),
+        )
+
+
+@dataclass
+class ScriptDryRunRow:
+    session_id: str
+    slot: str
+    sha256: str
+    ok: bool
+    stage: str | None
+    error: str | None
+    time: str
+
+
+def dry_run_slot(step_index: int | None = None) -> str:
+    if step_index is None:
+        return SCRIPT_DRY_RUN_SLOT
+    return f"steps:{step_index}"
+
+
+def code_sha256(code: str) -> str:
+    return hashlib.sha256(code.encode("utf-8")).hexdigest()
+
+
+def _short_dry_run_error(error: str | None) -> str | None:
+    if error is None:
+        return None
+    if len(error) <= _DRY_RUN_ERROR_LIMIT:
+        return error
+    return error[:_DRY_RUN_ERROR_LIMIT] + "…"
+
+
+def _row_to_dry_run(row: sqlite3.Row) -> ScriptDryRunRow:
+    return ScriptDryRunRow(
+        session_id=row["session_id"],
+        slot=row["slot"],
+        sha256=row["sha256"],
+        ok=bool(row["ok"]),
+        stage=row["stage"],
+        error=row["error"],
+        time=row["ran_at"],
+    )
+
+
+def upsert_script_dry_run(
+    db: Database,
+    *,
+    session_id: str,
+    slot: str,
+    sha256: str,
+    ok: bool,
+    stage: str | None = None,
+    error: str | None = None,
+) -> ScriptDryRunRow:
+    now = _now_iso()
+    short_error = _short_dry_run_error(error)
+    with db.connect() as conn:
+        conn.execute(
+            "INSERT INTO session_script_dry_run("
+            "session_id, slot, sha256, ok, stage, error, ran_at"
+            ") VALUES (?, ?, ?, ?, ?, ?, ?) "
+            "ON CONFLICT(session_id, slot) DO UPDATE SET "
+            "sha256 = excluded.sha256, "
+            "ok = excluded.ok, "
+            "stage = excluded.stage, "
+            "error = excluded.error, "
+            "ran_at = excluded.ran_at",
+            (
+                session_id,
+                slot,
+                sha256,
+                1 if ok else 0,
+                stage,
+                short_error,
+                now,
+            ),
+        )
+        row = conn.execute(
+            "SELECT session_id, slot, sha256, ok, stage, error, ran_at "
+            "FROM session_script_dry_run WHERE session_id = ? AND slot = ?",
+            (session_id, slot),
+        ).fetchone()
+    assert row is not None
+    return _row_to_dry_run(row)
+
+
+def get_script_dry_run(
+    db: Database, session_id: str, slot: str
+) -> ScriptDryRunRow | None:
+    with db.connect() as conn:
+        row = conn.execute(
+            "SELECT session_id, slot, sha256, ok, stage, error, ran_at "
+            "FROM session_script_dry_run WHERE session_id = ? AND slot = ?",
+            (session_id, slot),
+        ).fetchone()
+    return _row_to_dry_run(row) if row is not None else None
+
+
+def list_script_dry_runs(db: Database, session_id: str) -> list[ScriptDryRunRow]:
+    with db.connect() as conn:
+        rows = conn.execute(
+            "SELECT session_id, slot, sha256, ok, stage, error, ran_at "
+            "FROM session_script_dry_run WHERE session_id = ? "
+            "ORDER BY slot",
+            (session_id,),
+        ).fetchall()
+    return [_row_to_dry_run(r) for r in rows]
+
+
+def has_green_script_dry_run(db: Database, session_id: str, code: str) -> bool:
+    digest = code_sha256(code)
+    with db.connect() as conn:
+        row = conn.execute(
+            "SELECT 1 FROM session_script_dry_run "
+            "WHERE session_id = ? AND sha256 = ? AND ok = 1 LIMIT 1",
+            (session_id, digest),
+        ).fetchone()
+    return row is not None
