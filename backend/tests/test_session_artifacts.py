@@ -2,17 +2,22 @@ from __future__ import annotations
 
 import asyncio
 import json
+from pathlib import Path
 
 import pytest
 
+from catalog.documents.ingest import ingest_file
+from catalog.documents.tools import build_document_tools
 from catalog.llm.base import CompletionResult, ToolCall
 from catalog.api.sessions import _planner_system_prompt
 from catalog.skills.artifact_tools import build_artifact_tools
-from catalog.skills.skill_tools import config_hash
+from catalog.skills.budget import SkillBudget, _session_script_tries
+from catalog.skills.skill_tools import _RESERVED, config_hash
 from catalog.skills.verify import registered_checks, verify_checks_params_hint
 from catalog.skills.config import PipelineStep, SkillConfig, VerifyCheck
 from catalog.skills.repo_skill import create_skill, get_skill, update_skill
 from catalog.storage.db import Database
+from catalog.storage.repo_document import list_documents
 from catalog.storage.repo_message import list_messages
 from catalog.storage.repo_session import create_session
 from catalog.storage.repo_session_artifact import (
@@ -21,6 +26,7 @@ from catalog.storage.repo_session_artifact import (
     list_artifacts,
     upsert_artifact,
 )
+from catalog.storage.repo_session_document import attach_documents
 from catalog.storage.repo_session_skill import attach_skills
 
 
@@ -1407,3 +1413,257 @@ def test_build_pipeline_rejects_unfilled_empty_steps(client, provider) -> None:
     assert resp.status_code == 422
     detail = resp.json()["detail"].lower()
     assert "invalid" in detail or "empty" in detail
+
+
+def _count_rows(db: Database, table: str) -> int:
+    with db.connect() as conn:
+        row = conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()  # noqa: S608
+        return int(row[0])
+
+
+def _artifact_try_tools(
+    db: Database,
+    session_id: str,
+    *,
+    workspace: str = "",
+    budget: SkillBudget | None = None,
+):
+    return build_artifact_tools(
+        db,
+        session_id,
+        available_tools=["read_document"],
+        workspace_dir=workspace,
+        budget=budget,
+    )
+
+
+def test_try_skill_script_is_planner_only(mem_db: Database) -> None:
+    session_id = create_session(mem_db)
+    tools = _artifact_try_tools(mem_db, session_id)
+    assert "try_skill_script" in tools.names()
+    assert "try_skill_script" in _RESERVED
+    spec, _fn = tools.get("try_skill_script")
+    assert spec is not None
+    assert spec.name == "try_skill_script"
+    apply_tools = build_document_tools(mem_db, "/tmp", session_id)
+    assert "try_skill_script" not in apply_tools.names()
+
+
+def test_try_skill_script_ok_on_attached_document(
+    mem_db: Database, tmp_path: Path
+) -> None:
+    session_id = create_session(mem_db)
+    doc = ingest_file(mem_db, tmp_path, filename="note.md", content=b"hello world")
+    attach_documents(mem_db, session_id, [doc.id])
+    tools = _artifact_try_tools(mem_db, session_id, workspace=str(tmp_path))
+    _, try_fn = tools.get("try_skill_script")
+
+    async def _run():
+        return await try_fn(code="result = document.upper()\n")
+
+    result = asyncio.run(_run())
+    assert result["ok"] is True
+    assert result["stage"] in ("run", "verify")
+    assert result["output_preview"]
+    assert "HELLO WORLD" in result["output_preview"]
+    assert result["output_kind"] == "str"
+    assert result["input_len"] > 0
+    assert result["output_len"] > 0
+
+
+def test_try_skill_script_run_error_includes_line(
+    mem_db: Database, tmp_path: Path
+) -> None:
+    session_id = create_session(mem_db)
+    doc = ingest_file(mem_db, tmp_path, filename="note.md", content=b"hello")
+    attach_documents(mem_db, session_id, [doc.id])
+    tools = _artifact_try_tools(mem_db, session_id, workspace=str(tmp_path))
+    _, try_fn = tools.get("try_skill_script")
+    code = "def main():\n    items = []\n    return items[0]\n"
+
+    async def _run():
+        return await try_fn(code=code)
+
+    result = asyncio.run(_run())
+    assert result["ok"] is False
+    assert result["stage"] == "run"
+    assert result["line_no"] == 3
+    assert result["source_line"] is not None
+    assert "items[0]" in result["source_line"]
+    assert "3" in (result["error"] or "")
+
+
+def test_try_skill_script_forbidden_import_is_validate(mem_db: Database) -> None:
+    session_id = create_session(mem_db)
+    tools = _artifact_try_tools(mem_db, session_id)
+    _, try_fn = tools.get("try_skill_script")
+
+    async def _run():
+        return await try_fn(code="import os\nresult = 'x'\n")
+
+    result = asyncio.run(_run())
+    assert result["ok"] is False
+    assert result["stage"] == "validate"
+    assert "import" in (result["error"] or "").lower()
+    assert result["output_preview"] == ""
+    assert result["duration_ms"] == 0
+
+
+def test_try_skill_script_timeout(mem_db: Database) -> None:
+    session_id = create_session(mem_db)
+    tools = _artifact_try_tools(mem_db, session_id)
+    _, try_fn = tools.get("try_skill_script")
+
+    async def _run():
+        return await try_fn(code="while True:\n    pass\n")
+
+    result = asyncio.run(_run())
+    assert result["ok"] is False
+    assert result["stage"] == "run"
+    assert "time limit" in (result["error"] or "")
+
+
+def test_try_skill_script_rejects_foreign_doc_id(
+    mem_db: Database, tmp_path: Path
+) -> None:
+    session_id = create_session(mem_db)
+    other_session = create_session(mem_db)
+    attached = ingest_file(mem_db, tmp_path, filename="in.md", content=b"in")
+    foreign = ingest_file(mem_db, tmp_path, filename="out.md", content=b"out")
+    attach_documents(mem_db, session_id, [attached.id])
+    attach_documents(mem_db, other_session, [foreign.id])
+    tools = _artifact_try_tools(mem_db, session_id, workspace=str(tmp_path))
+    _, try_fn = tools.get("try_skill_script")
+
+    async def _run():
+        return await try_fn(
+            code="result = document.upper()\n",
+            doc_ids=[foreign.id],
+        )
+
+    result = asyncio.run(_run())
+    assert result["ok"] is False
+    assert result["error"] == "document_not_available_in_session"
+
+
+def test_try_skill_script_does_not_persist(
+    mem_db: Database, tmp_path: Path
+) -> None:
+    session_id = create_session(mem_db)
+    doc = ingest_file(mem_db, tmp_path, filename="note.md", content=b"hello")
+    attach_documents(mem_db, session_id, [doc.id])
+    docs_before = _count_rows(mem_db, "document")
+    runs_before = _count_rows(mem_db, "skill_run")
+    tools = _artifact_try_tools(mem_db, session_id, workspace=str(tmp_path))
+    _, try_fn = tools.get("try_skill_script")
+
+    async def _run():
+        return await try_fn(code="result = document.upper()\n")
+
+    result = asyncio.run(_run())
+    assert result["ok"] is True
+    assert _count_rows(mem_db, "document") == docs_before
+    assert _count_rows(mem_db, "skill_run") == runs_before
+    assert len(list_documents(mem_db)) == docs_before
+
+
+def test_try_skill_script_turn_limit_is_ok_false(mem_db: Database) -> None:
+    session_id = create_session(mem_db)
+    budget = SkillBudget(llm_calls_left=60, nested_runs_left=20, script_tries_left=0)
+    tools = _artifact_try_tools(mem_db, session_id, budget=budget)
+    _, try_fn = tools.get("try_skill_script")
+
+    async def _run():
+        return await try_fn(code="result = 'x'\n")
+
+    result = asyncio.run(_run())
+    assert result["ok"] is False
+    assert "limit" in (result["error"] or "").lower()
+    assert result["stage"] is None
+
+
+def test_try_skill_script_http_ok_and_same_payload(
+    client, db, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    async def _fake_run(code, doc_texts, params=None, **kwargs):
+        return (doc_texts[0] if doc_texts else "").upper()
+
+    monkeypatch.setattr(
+        "catalog.skills.artifact_tools.run_skill_script_async",
+        _fake_run,
+    )
+    session_id = client.post("/sessions").json()["id"]
+    uploaded = client.post(
+        "/documents",
+        files={"file": ("note.md", b"hello world", "text/markdown")},
+    )
+    assert uploaded.status_code == 200
+    doc_id = uploaded.json()["id"]
+    attach_documents(db, session_id, [doc_id])
+    resp = client.post(
+        f"/sessions/{session_id}/artifacts/script/try",
+        json={"code": "result = document.upper()\n"},
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["ok"] is True
+    assert "HELLO WORLD" in body["output_preview"]
+    assert set(body) >= {
+        "ok",
+        "stage",
+        "error",
+        "input_preview",
+        "input_len",
+        "output_preview",
+        "output_len",
+        "output_kind",
+        "duration_ms",
+        "verify",
+    }
+    assert _count_rows(db, "skill_run") == 0
+    docs_after = _count_rows(db, "document")
+    resp2 = client.post(
+        f"/sessions/{session_id}/artifacts/script/try",
+        json={"code": "result = document.upper()\n"},
+    )
+    assert resp2.status_code == 200
+    assert _count_rows(db, "skill_run") == 0
+    assert _count_rows(db, "document") == docs_after
+
+
+def test_try_skill_script_http_validate_and_foreign_doc(client, db) -> None:
+    session_id = client.post("/sessions").json()["id"]
+    other = client.post("/sessions").json()["id"]
+    uploaded = client.post(
+        "/documents",
+        files={"file": ("note.md", b"hello", "text/markdown")},
+    )
+    doc_id = uploaded.json()["id"]
+    attach_documents(db, other, [doc_id])
+    forbidden = client.post(
+        f"/sessions/{session_id}/artifacts/script/try",
+        json={"code": "import os\nresult = 'x'\n"},
+    )
+    assert forbidden.status_code == 200
+    assert forbidden.json()["ok"] is False
+    assert forbidden.json()["stage"] == "validate"
+    foreign = client.post(
+        f"/sessions/{session_id}/artifacts/script/try",
+        json={"code": "result = document.upper()\n", "doc_ids": [doc_id]},
+    )
+    assert foreign.status_code == 200
+    assert foreign.json()["ok"] is False
+    assert foreign.json()["error"] == "document_not_available_in_session"
+
+
+def test_try_skill_script_http_limit_is_not_500(client) -> None:
+    session_id = client.post("/sessions").json()["id"]
+    _session_script_tries[session_id] = 0
+    resp = client.post(
+        f"/sessions/{session_id}/artifacts/script/try",
+        json={"code": "result = 'ok'\n"},
+    )
+    assert resp.status_code == 200
+    assert resp.status_code != 500
+    assert resp.json()["ok"] is False
+    assert "limit" in (resp.json()["error"] or "").lower()

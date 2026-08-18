@@ -333,6 +333,27 @@ class ArtifactPatchRequest(BaseModel):
     content: str
 
 
+class ScriptTryRequest(BaseModel):
+    code: str | None = None
+    doc_ids: list[str] | None = None
+    step_index: int | None = None
+
+
+class ScriptTryOut(BaseModel):
+    ok: bool
+    stage: Literal["validate", "run", "verify"] | None = None
+    error: str | None = None
+    input_preview: str = ""
+    input_len: int = 0
+    output_preview: str = ""
+    output_len: int = 0
+    output_kind: Literal["str", "list"] | None = None
+    duration_ms: int = 0
+    verify: dict | None = None
+    line_no: int | None = None
+    source_line: str | None = None
+
+
 class SkillMetaPatchRequest(BaseModel):
     name: str
     description: str

@@ -1,17 +1,22 @@
 from __future__ import annotations
 
 import json
+import time
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import replace
+from pathlib import Path
 from typing import Any
 
 from catalog.agent.registry import ToolRegistry
+from catalog.documents.extract import extract_text
 from catalog.llm.base import ToolSpec
+from catalog.skills.budget import SkillBudget, consume_script_try
 from catalog.skills.config import (
     PIPELINE_STEP_INPUTS,
     PIPELINE_STEP_TYPES,
     SKILL_KINDS,
     PipelineStep,
+    VerifyCheck,
     pipeline_step_to_dict,
     pipeline_steps_from_value,
 )
@@ -20,11 +25,15 @@ from catalog.skills.skill_tools import config_hash
 from catalog.storage.repo_session_skill import list_session_skills
 from catalog.skills.script_runner import (
     SCRIPT_CODE_CONTRACT_EN,
+    ScriptRuntimeError,
     ScriptValidationError,
+    prepare_script_input,
+    run_skill_script_async,
     validate_script,
 )
 from catalog.skills.verify import (
     registered_checks,
+    run_verify_async,
     validate_verify_checks,
     verify_checks_params_hint,
 )
@@ -34,8 +43,235 @@ from catalog.storage.repo_session_artifact import (
     list_artifacts,
     upsert_artifact,
 )
+from catalog.storage.repo_session_document import list_session_documents
 
 NotifyFn = Callable[[], Awaitable[None]]
+
+_PREVIEW_LIMIT = 2000
+_PREVIEW_MARK = "…[truncated]"
+_TRY_LIMIT_ERROR = "try_skill_script limit exceeded"
+_DOC_SCOPE_ERROR = "document_not_available_in_session"
+
+
+def _preview_text(text: str) -> str:
+    if len(text) <= _PREVIEW_LIMIT:
+        return text
+    return text[:_PREVIEW_LIMIT] + _PREVIEW_MARK
+
+
+def _result_as_text(value: str | list[str]) -> str:
+    if isinstance(value, list):
+        if len(value) == 1:
+            return value[0]
+        return "\n\n---\n\n".join(value)
+    return value
+
+
+def _try_payload(
+    *,
+    ok: bool,
+    stage: str | None = None,
+    error: str | None = None,
+    input_preview: str = "",
+    input_len: int = 0,
+    output_preview: str = "",
+    output_len: int = 0,
+    output_kind: str | None = None,
+    duration_ms: int = 0,
+    verify: dict | None = None,
+    line_no: int | None = None,
+    source_line: str | None = None,
+) -> dict[str, Any]:
+    return {
+        "ok": ok,
+        "stage": stage,
+        "error": error,
+        "input_preview": input_preview,
+        "input_len": input_len,
+        "output_preview": output_preview,
+        "output_len": output_len,
+        "output_kind": output_kind,
+        "duration_ms": duration_ms,
+        "verify": verify,
+        "line_no": line_no,
+        "source_line": source_line,
+    }
+
+
+def _resolve_try_code(
+    db: Database,
+    session_id: str,
+    *,
+    code: str | None,
+    step_index: int | None,
+) -> tuple[str | None, str | None]:
+    if code is not None:
+        text = code if isinstance(code, str) else str(code)
+        if text.strip():
+            return text, None
+        return None, "script code is empty"
+    if step_index is not None:
+        row = get_artifact(db, session_id, "steps")
+        if row is None:
+            return None, "steps artifact is missing"
+        parsed, errors = parse_steps_content(row.content)
+        if errors:
+            return None, errors[0]
+        if isinstance(step_index, bool) or not isinstance(step_index, int):
+            return None, "step_index must be an integer"
+        if step_index < 0 or step_index >= len(parsed):
+            return None, "step_index out of range"
+        step = parsed[step_index]
+        if step.type != "script":
+            return None, "step is not a script step"
+        if not step.code.strip():
+            return None, "script code is empty"
+        return step.code, None
+    row = get_artifact(db, session_id, "script")
+    if row is None or not row.content.strip():
+        return None, "script code is empty"
+    return row.content, None
+
+
+def _resolve_try_documents(
+    db: Database,
+    session_id: str,
+    doc_ids: list[str] | str | None,
+) -> tuple[list, str | None]:
+    attached = list_session_documents(db, session_id)
+    by_id = {row.id: row for row in attached}
+    if doc_ids is None:
+        return attached, None
+    if isinstance(doc_ids, str):
+        requested = [doc_ids] if doc_ids.strip() else []
+    else:
+        requested = [str(item).strip() for item in doc_ids if str(item).strip()]
+    resolved = []
+    for doc_id in requested:
+        row = by_id.get(doc_id)
+        if row is None:
+            return [], _DOC_SCOPE_ERROR
+        resolved.append(row)
+    return resolved, None
+
+
+def _draft_verify_checks(db: Database, session_id: str) -> list[VerifyCheck]:
+    meta = get_artifact(db, session_id, "meta")
+    if meta is None:
+        return []
+    try:
+        payload = json.loads(meta.content)
+    except (TypeError, ValueError, json.JSONDecodeError):
+        return []
+    if not isinstance(payload, dict):
+        return []
+    raw = payload.get("verify_checks") or []
+    if not isinstance(raw, list):
+        return []
+    checks: list[VerifyCheck] = []
+    for item in raw:
+        if not isinstance(item, dict):
+            continue
+        name = item.get("check")
+        if not isinstance(name, str) or not name:
+            continue
+        params = item.get("params") or {}
+        if not isinstance(params, dict):
+            params = {}
+        checks.append(VerifyCheck(check=name, params=dict(params)))
+    return checks
+
+
+async def run_try_skill_script(
+    db: Database,
+    session_id: str,
+    *,
+    workspace_dir: str,
+    code: str | None = None,
+    doc_ids: list[str] | str | None = None,
+    step_index: int | None = None,
+    budget: SkillBudget | None = None,
+) -> dict[str, Any]:
+    if not consume_script_try(budget, session_id=session_id):
+        return _try_payload(ok=False, error=_TRY_LIMIT_ERROR)
+    source, code_error = _resolve_try_code(
+        db, session_id, code=code, step_index=step_index
+    )
+    docs, doc_error = _resolve_try_documents(db, session_id, doc_ids)
+    if doc_error is not None:
+        return _try_payload(ok=False, error=doc_error)
+    doc_texts: list[str] = []
+    for row in docs:
+        path = str(Path(workspace_dir) / row.path)
+        try:
+            doc_texts.append(extract_text(path, row.kind))
+        except (OSError, ValueError) as exc:
+            return _try_payload(ok=False, error=str(exc))
+    input_text, _documents = prepare_script_input(doc_texts)
+    input_preview = _preview_text(input_text)
+    input_len = len(input_text)
+    if source is None or code_error is not None:
+        return _try_payload(
+            ok=False,
+            stage="validate",
+            error=code_error or "script code is empty",
+            input_preview=input_preview,
+            input_len=input_len,
+        )
+    try:
+        validate_script(source)
+    except ScriptValidationError as exc:
+        return _try_payload(
+            ok=False,
+            stage="validate",
+            error=str(exc),
+            input_preview=input_preview,
+            input_len=input_len,
+        )
+    started = time.perf_counter()
+    try:
+        output = await run_skill_script_async(source, doc_texts)
+    except ScriptValidationError as exc:
+        return _try_payload(
+            ok=False,
+            stage="validate",
+            error=str(exc),
+            input_preview=input_preview,
+            input_len=input_len,
+            duration_ms=int((time.perf_counter() - started) * 1000),
+        )
+    except ScriptRuntimeError as exc:
+        return _try_payload(
+            ok=False,
+            stage="run",
+            error=str(exc),
+            input_preview=input_preview,
+            input_len=input_len,
+            duration_ms=int((time.perf_counter() - started) * 1000),
+            line_no=exc.line_no,
+            source_line=exc.source_line,
+        )
+    duration_ms = int((time.perf_counter() - started) * 1000)
+    output_kind = "list" if isinstance(output, list) else "str"
+    output_text = _result_as_text(output)
+    checks = _draft_verify_checks(db, session_id)
+    verify_payload = None
+    stage = "run"
+    if checks:
+        result = await run_verify_async(output_text, checks, db=db)
+        verify_payload = result.as_payload()
+        stage = "verify"
+    return _try_payload(
+        ok=True,
+        stage=stage,
+        input_preview=input_preview,
+        input_len=input_len,
+        output_preview=_preview_text(output_text),
+        output_len=len(output_text),
+        output_kind=output_kind,
+        duration_ms=duration_ms,
+        verify=verify_payload,
+    )
 
 
 def _artifact_payload(row) -> dict[str, Any]:
@@ -227,6 +463,8 @@ def build_artifact_tools(
     *,
     available_tools: list[str],
     on_artifacts_changed: NotifyFn | None = None,
+    workspace_dir: str = "",
+    budget: SkillBudget | None = None,
 ) -> ToolRegistry:
     reg = ToolRegistry()
     available_checks = registered_checks()
@@ -388,6 +626,22 @@ def build_artifact_tools(
                 out["meta"] = None
         return out
 
+    async def _try_skill_script(
+        *,
+        code: str | None = None,
+        doc_ids: list[str] | str | None = None,
+        step_index: int | None = None,
+    ) -> dict[str, Any]:
+        return await run_try_skill_script(
+            db,
+            session_id,
+            workspace_dir=workspace_dir,
+            code=code,
+            doc_ids=doc_ids,
+            step_index=step_index,
+            budget=budget,
+        )
+
     reg.register(
         ToolSpec(
             name="save_skill_prompt",
@@ -541,5 +795,28 @@ def build_artifact_tools(
             parameters={"type": "object", "properties": {}},
         ),
         _read_skill_draft,
+    )
+    reg.register(
+        ToolSpec(
+            name="try_skill_script",
+            description=(
+                "Dry-run the session script draft in the same sandbox as apply. "
+                "Does not save documents or skill_run. Optional code overrides "
+                "the script artifact; optional doc_ids must belong to this "
+                "session; optional step_index runs a pipeline script step."
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "code": {"type": "string"},
+                    "doc_ids": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                    },
+                    "step_index": {"type": "integer"},
+                },
+            },
+        ),
+        _try_skill_script,
     )
     return reg

@@ -29,11 +29,13 @@ from fastapi import APIRouter, Body, Depends, HTTPException, Response, WebSocket
 from catalog.agent import run_agent
 from catalog.agent.events import FinishEvent, ToolResultEvent
 from catalog.agent.registry import ToolRegistry
-from catalog.api.deps import agent_event_to_frame, get_workspace_db, get_tools
+from catalog.api.deps import agent_event_to_frame, get_workspace, get_workspace_db, get_tools
 from catalog.api.schemas import (
     ArtifactPatchRequest,
     DocumentOut,
     MessageOut,
+    ScriptTryOut,
+    ScriptTryRequest,
     SessionArtifactOut,
     SessionCreated,
     SessionCreateRequest,
@@ -53,6 +55,7 @@ from catalog.skills.artifact_tools import (
     artifacts_frame,
     build_artifact_tools,
     parse_steps_content,
+    run_try_skill_script,
     session_skill_lookup,
     validate_pipeline_steps,
 )
@@ -517,6 +520,28 @@ async def list_session_artifacts_endpoint(
     return [_artifact_out(r) for r in list_artifacts(db, session_id)]
 
 
+@router.post(
+    "/sessions/{session_id}/artifacts/script/try",
+    response_model=ScriptTryOut,
+)
+async def try_session_script_endpoint(
+    session_id: str,
+    req: Annotated[ScriptTryRequest, Body()] = ScriptTryRequest(),
+    db: Database = Depends(get_workspace_db),
+    workspace: str = Depends(get_workspace),
+) -> dict[str, Any]:
+    if get_session(db, session_id) is None:
+        raise HTTPException(status_code=404, detail="session not found")
+    return await run_try_skill_script(
+        db,
+        session_id,
+        workspace_dir=workspace,
+        code=req.code,
+        doc_ids=req.doc_ids,
+        step_index=req.step_index,
+    )
+
+
 @router.patch(
     "/sessions/{session_id}/artifacts/{artifact_type}",
     response_model=SessionArtifactOut,
@@ -799,6 +824,8 @@ def _ws_session_tools(
         session_id,
         available_tools=base_tools.names(),
         on_artifacts_changed=_notify_artifacts,
+        workspace_dir=workspace,
+        budget=budget,
     )
     for name in artifact_tools.names():
         entry = artifact_tools.get(name)

@@ -43,6 +43,7 @@ _RESERVED = frozenset(
         "save_skill_steps",
         "read_skill_draft",
         "list_session_skills",
+        "try_skill_script",
     }
 )
 

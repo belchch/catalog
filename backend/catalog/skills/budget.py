@@ -11,6 +11,9 @@ if TYPE_CHECKING:
 
 TURN_DEADLINE_FLOOR_SECONDS = 600
 TURN_DEADLINE_TIMEOUT_FACTOR = 15
+SCRIPT_TRIES_PER_TURN = 10
+
+_session_script_tries: dict[str, int] = {}
 
 
 @dataclass(frozen=True)
@@ -63,12 +66,19 @@ class SkillBudget:
     nested_runs_left: int
     deadline_monotonic: float | None = None
     deadline_hit: bool = False
+    script_tries_left: int = SCRIPT_TRIES_PER_TURN
 
     def snapshot(self) -> dict[str, int]:
         return {
             "llm_calls_left": self.llm_calls_left,
             "nested_runs_left": self.nested_runs_left,
         }
+
+    def consume_script_try(self) -> bool:
+        if self.script_tries_left <= 0:
+            return False
+        self.script_tries_left -= 1
+        return True
 
     def mark_deadline_if_exceeded(self, now: float | None = None) -> bool:
         if self.deadline_monotonic is None:
@@ -151,6 +161,23 @@ def current_skill_budget(explicit: SkillBudget | None = None) -> SkillBudget | N
     if explicit is not None:
         return explicit
     return _active_budget.get()
+
+
+def consume_script_try(
+    budget: SkillBudget | None = None,
+    *,
+    session_id: str | None = None,
+) -> bool:
+    active = current_skill_budget(budget)
+    if active is not None:
+        return active.consume_script_try()
+    if not session_id:
+        return True
+    left = _session_script_tries.get(session_id, SCRIPT_TRIES_PER_TURN)
+    if left <= 0:
+        return False
+    _session_script_tries[session_id] = left - 1
+    return True
 
 
 def skill_hold_active() -> bool:
