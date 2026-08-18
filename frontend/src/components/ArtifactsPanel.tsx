@@ -480,6 +480,10 @@ export function ArtifactsPanel({
   const showDryRunError = Boolean(
     tryError || failedRun || (runState === 'error' && dryStatus?.error),
   )
+  const showSuccessPreview = Boolean(
+    lastRun?.ok &&
+      (runState === 'ok' || runState === 'none' || dirtyScript),
+  )
 
   const emptyArtifacts = artifacts.length === 0 && !loading
 
@@ -947,12 +951,12 @@ export function ArtifactsPanel({
                 )}
               </div>
             </div>
-            {dirtyScript && lastRun && (
+            {dirtyScript && showSuccessPreview && (
               <p className="mt-2 text-[11px] text-warning-ink">
                 Результат относится к предыдущей версии кода
               </p>
             )}
-            {lastRun?.ok && (
+            {showSuccessPreview && lastRun && (
               <div className="mt-2 text-[11px] text-ink-muted">
                 <p>
                   {formatCount(lastRun.duration_ms)} мс

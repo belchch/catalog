@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { ScriptDryRunStatus, ScriptTryResult, SessionArtifact } from '../api.ts'
@@ -221,6 +222,133 @@ describe('ArtifactsPanel script dry-run', () => {
     expect(output?.open).toBe(false)
     expect(screen.getAllByText('Усечено').length).toBeGreaterThan(0)
     expect(screen.getByText(/показаны первые 2000 симв/)).toBeTruthy()
+  })
+
+  it('hides local success previews after a later failed server dry-run', async () => {
+    function Harness() {
+      const [artifacts, setArtifacts] = useState([
+        art('script', CODE),
+        art('meta', '{"kind":"script"}'),
+      ])
+      return (
+        <>
+          <button
+            type="button"
+            onClick={() =>
+              setArtifacts([
+                art('meta', '{"kind":"script"}'),
+                art('script', CODE, {
+                  dry_run: dry({
+                    ok: false,
+                    time: '2026-08-18T10:05:00Z',
+                    stage: 'run',
+                    error: 'script raised: IndexError (line 3: return items[0])',
+                  }),
+                }),
+              ])
+            }
+          >
+            ws-error
+          </button>
+          <ArtifactsPanel
+            sessionId="s1"
+            artifacts={artifacts}
+            loading={false}
+            error={null}
+            streaming={false}
+            highlightType={null}
+            onClearHighlight={() => {}}
+            onSavePrompt={vi.fn()}
+            onSaveScript={vi.fn(async (content: string) => art('script', content))}
+            onSaveMeta={vi.fn()}
+            onTryScript={vi.fn(async () => tryResult())}
+          />
+        </>
+      )
+    }
+    render(<Harness />)
+    fireEvent.click(screen.getByRole('button', { name: 'Прогнать' }))
+    await waitFor(() => {
+      expect(screen.getByText('Выход (output_preview)')).toBeTruthy()
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'ws-error' }))
+    await waitFor(() => {
+      expect(screen.getByText('Ошибка')).toBeTruthy()
+    })
+    expect(screen.queryByText('Выход (output_preview)')).toBeNull()
+    expect(screen.queryByText('Вход (input_preview)')).toBeNull()
+    expect(screen.getByText('Ошибка на стадии: запуск')).toBeTruthy()
+  })
+
+  it('hides local success previews after a save invalidates dry-run', async () => {
+    function Harness() {
+      const [artifacts, setArtifacts] = useState([
+        art('script', CODE),
+        art('meta', '{"kind":"script"}'),
+      ])
+      return (
+        <>
+          <button
+            type="button"
+            onClick={() =>
+              setArtifacts([
+                art('meta', '{"kind":"script"}'),
+                art('script', `${CODE}\n# saved\n`, {
+                  updated_at: '2026-08-18T10:10:00Z',
+                  dry_run: dry({
+                    ok: false,
+                    time: '2026-08-18T10:00:00Z',
+                    stage: 'run',
+                  }),
+                }),
+              ])
+            }
+          >
+            ws-stale
+          </button>
+          <ArtifactsPanel
+            sessionId="s1"
+            artifacts={artifacts}
+            loading={false}
+            error={null}
+            streaming={false}
+            highlightType={null}
+            onClearHighlight={() => {}}
+            onSavePrompt={vi.fn()}
+            onSaveScript={vi.fn(async (content: string) => art('script', content))}
+            onSaveMeta={vi.fn()}
+            onTryScript={vi.fn(async () => tryResult())}
+          />
+        </>
+      )
+    }
+    render(<Harness />)
+    fireEvent.click(screen.getByRole('button', { name: 'Прогнать' }))
+    await waitFor(() => {
+      expect(screen.getByText('Выход (output_preview)')).toBeTruthy()
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'ws-stale' }))
+    await waitFor(() => {
+      expect(screen.getByText('Устарел')).toBeTruthy()
+    })
+    expect(screen.queryByText('Выход (output_preview)')).toBeNull()
+  })
+
+  it('keeps local success previews when the code is dirty', async () => {
+    renderPanel(
+      [art('script', CODE), art('meta', '{"kind":"script"}')],
+      { onTryScript: vi.fn(async () => tryResult()) },
+    )
+    fireEvent.click(screen.getByRole('button', { name: 'Прогнать' }))
+    await waitFor(() => {
+      expect(screen.getByText('Выход (output_preview)')).toBeTruthy()
+    })
+    fireEvent.change(screen.getByPlaceholderText('Python-скрипт скилла…'), {
+      target: { value: `${CODE}\n# edit\n` },
+    })
+    expect(screen.getByText('Устарел')).toBeTruthy()
+    expect(screen.getByText('Результат относится к предыдущей версии кода')).toBeTruthy()
+    expect(screen.getByText('Выход (output_preview)')).toBeTruthy()
   })
 
   it('saves dirty code before the dry-run', async () => {
