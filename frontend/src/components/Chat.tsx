@@ -30,6 +30,7 @@ interface ChatProps {
   onReconnect: () => void
   onRemoveDocument?: (docId: string) => void
   onCreateSkill: () => void
+  buildBlockReason?: string | null
   buildingSkill: boolean
   proposingTracks: boolean
   editingSkillName: string | null
@@ -68,6 +69,7 @@ export function Chat({
   onReconnect,
   onRemoveDocument,
   onCreateSkill,
+  buildBlockReason = null,
   buildingSkill,
   proposingTracks,
   editingSkillName,
@@ -97,6 +99,7 @@ export function Chat({
   const toolsButtonRef = useRef<HTMLButtonElement>(null)
   const restoreComposerFocusRef = useRef(false)
   const toolsPopoverId = useId()
+  const buildHintId = useId()
   const socketDown = closed || reconnecting
   const liveStreaming = streaming && !socketDown
   const showBanner = !error && socketDown
@@ -237,6 +240,11 @@ export function Chat({
       : 'Инструменты'
 
   const skillBusy = buildingSkill || proposingTracks
+  const showBuildHint =
+    Boolean(buildBlockReason) &&
+    messages.length > 0 &&
+    !skillBusy &&
+    !buildError
   const skillLabel = proposingTracks
     ? 'Подбираю варианты…'
     : buildingSkill
@@ -265,10 +273,20 @@ export function Chat({
             onClick={onCreateSkill}
             disabled={skillBusy || messages.length === 0}
             aria-busy={skillBusy}
+            aria-describedby={showBuildHint ? buildHintId : undefined}
           >
             {skillLabel}
           </button>
         </div>
+        {showBuildHint && (
+          <p
+            id={buildHintId}
+            role="status"
+            className="mt-1 text-[11px] text-warning-ink"
+          >
+            {buildBlockReason}
+          </p>
+        )}
       </header>
       <div
         ref={scrollRef}

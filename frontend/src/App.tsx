@@ -43,6 +43,7 @@ import { WorkspaceFooter } from './components/WorkspaceFooter.tsx'
 import { WorkspacePicker } from './components/WorkspacePicker.tsx'
 import { useDocuments } from './hooks/useDocuments.ts'
 import { usePlannerSession } from './hooks/usePlannerSession.ts'
+import { buildBlockReason } from './lib/dryRun.ts'
 import { useRunStream } from './hooks/useRunStream.ts'
 import { useSessions } from './hooks/useSessions.ts'
 import { useSettings } from './hooks/useSettings.ts'
@@ -957,6 +958,7 @@ export default function App() {
                       onReconnect={planner.reconnect}
                       onRemoveDocument={planner.removeDocument}
                       onCreateSkill={handleCreateSkill}
+                      buildBlockReason={buildBlockReason(planner.artifacts)}
                       buildingSkill={buildingSkill}
                       proposingTracks={proposingTracks}
                       editingSkillName={editingSkill?.name ?? null}
@@ -1023,6 +1025,7 @@ export default function App() {
                             onSavePrompt={planner.savePrompt}
                             onSaveScript={planner.saveScript}
                             onSaveMeta={planner.saveMeta}
+                            onTryScript={planner.tryScript}
                           />
                         </div>
                       </div>

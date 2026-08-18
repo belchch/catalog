@@ -4,6 +4,13 @@ import {
   type PipelineStepDraft,
   type SessionArtifact,
 } from '../api.ts'
+import {
+  dryRunBadgeClass,
+  dryRunState,
+  dryRunSummaryLabel,
+  dryRunTitle,
+  scriptDryRunView,
+} from '../lib/dryRun.ts'
 
 interface ArtifactSummaryCardProps {
   artifacts: SessionArtifact[]
@@ -69,6 +76,11 @@ export function ArtifactSummaryCard({
     return true
   })
   const readyCount = required.filter((type) => isRowReady(type, artifacts)).length
+  const scriptView = scriptDryRunView(artifacts)
+  const scriptRunState = dryRunState({
+    status: scriptView.status,
+    artifactUpdatedAt: scriptView.artifactUpdatedAt,
+  })
 
   return (
     <aside className="artifact-summary" aria-label="Черновик скилла">
@@ -106,7 +118,15 @@ export function ArtifactSummaryCard({
                 {type === 'steps' && ready && (
                   <span className="artifact-summary__ready">{formatStepCount(parsedSteps.length)}</span>
                 )}
-                {type !== 'steps' && ready && (
+                {type === 'script' && ready && (
+                  <span
+                    className={`${dryRunBadgeClass(scriptRunState)} ml-auto`}
+                    title={dryRunTitle(scriptRunState)}
+                  >
+                    {dryRunSummaryLabel(scriptRunState)}
+                  </span>
+                )}
+                {type !== 'steps' && type !== 'script' && ready && (
                   <span className="artifact-summary__ready">готово</span>
                 )}
                 {type !== 'steps' && !needed && (

@@ -99,4 +99,90 @@ describe('ArtifactSummaryCard', () => {
     expect(screen.queryByText('2 шага')).toBeNull()
     expect(screen.queryByText(/шагов/)).toBeNull()
   })
+
+  it('shows a dry-run badge on Скрипт without changing the ready count', () => {
+    render(
+      <ArtifactSummaryCard
+        artifacts={[
+          art('meta', '{"kind":"script"}'),
+          art('prompt', 'hi'),
+          art('script', 'result = document'),
+        ]}
+        loading={false}
+        error={null}
+        streaming={false}
+        onOpen={() => {}}
+      />,
+    )
+    expect(screen.getByText('Готово 3 из 3 разделов')).toBeTruthy()
+    expect(screen.getByText('Нужен прогон')).toBeTruthy()
+    expect(screen.getAllByText('готово').length).toBeGreaterThan(0)
+  })
+
+  it('maps payload states onto the script badge', () => {
+    const { rerender } = render(
+      <ArtifactSummaryCard
+        artifacts={[
+          art('script', 'result = document', {
+            dry_run: {
+              slot: 'script',
+              sha256: 'x',
+              ok: true,
+              stage: 'run',
+              error: null,
+              time: '2026-08-18T10:00:00Z',
+            },
+          }),
+        ]}
+        loading={false}
+        error={null}
+        streaming={false}
+        onOpen={() => {}}
+      />,
+    )
+    expect(screen.getByText('Прогон ok')).toBeTruthy()
+    rerender(
+      <ArtifactSummaryCard
+        artifacts={[
+          art('script', 'result = document', {
+            dry_run: {
+              slot: 'script',
+              sha256: 'x',
+              ok: false,
+              stage: 'run',
+              error: 'boom',
+              time: '2026-08-18T10:00:00Z',
+            },
+          }),
+        ]}
+        loading={false}
+        error={null}
+        streaming={false}
+        onOpen={() => {}}
+      />,
+    )
+    expect(screen.getByText('Ошибка прогона')).toBeTruthy()
+    rerender(
+      <ArtifactSummaryCard
+        artifacts={[
+          art('script', 'result = document', {
+            updated_at: '2026-08-18T12:00:00Z',
+            dry_run: {
+              slot: 'script',
+              sha256: 'x',
+              ok: false,
+              stage: 'run',
+              error: 'boom',
+              time: '2026-08-18T10:00:00Z',
+            },
+          }),
+        ]}
+        loading={false}
+        error={null}
+        streaming={false}
+        onOpen={() => {}}
+      />,
+    )
+    expect(screen.getByText('Прогон устарел')).toBeTruthy()
+  })
 })

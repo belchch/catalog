@@ -718,6 +718,53 @@ function normalizePipelineStep(
   }
 }
 
+export type ScriptDryRunStage = 'validate' | 'run' | 'verify'
+
+export interface ScriptDryRunStatus {
+  slot: string
+  sha256: string
+  ok: boolean
+  stage: ScriptDryRunStage | null
+  error: string | null
+  time: string | null
+}
+
+export interface ScriptTryVerifyCheck {
+  check: string
+  params?: Record<string, unknown>
+  passed: boolean
+  reason: string | null
+  source: string
+  skipped: boolean
+}
+
+export interface ScriptTryVerify {
+  passed: boolean
+  failures: string[]
+  checks: ScriptTryVerifyCheck[]
+}
+
+export interface ScriptTryResult {
+  ok: boolean
+  stage: ScriptDryRunStage | null
+  error: string | null
+  input_preview: string
+  input_len: number
+  output_preview: string
+  output_len: number
+  output_kind: 'str' | 'list' | null
+  duration_ms: number
+  verify: ScriptTryVerify | null
+  line_no: number | null
+  source_line: string | null
+}
+
+export interface ScriptTryRequest {
+  code?: string | null
+  doc_ids?: string[] | null
+  step_index?: number | null
+}
+
 export interface SessionArtifact {
   type: ArtifactType
   content: string
@@ -725,6 +772,7 @@ export interface SessionArtifact {
   error: string | null
   source: string
   updated_at: string
+  dry_run?: ScriptDryRunStatus | ScriptDryRunStatus[] | null
 }
 
 export interface SkillMetaPatch {
@@ -795,6 +843,17 @@ export async function hideCustomCheck(id: string): Promise<void> {
 
 export function getSessionArtifacts(sessionId: string): Promise<SessionArtifact[]> {
   return jsonFetch<SessionArtifact[]>(`/sessions/${sessionId}/artifacts`)
+}
+
+export function trySkillScript(
+  sessionId: string,
+  body?: ScriptTryRequest,
+): Promise<ScriptTryResult> {
+  return jsonFetch<ScriptTryResult>(`/sessions/${sessionId}/artifacts/script/try`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body ?? {}),
+  })
 }
 
 export function patchArtifact(

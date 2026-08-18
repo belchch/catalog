@@ -400,3 +400,39 @@ describe('Chat connection banner', () => {
     )
   })
 })
+
+describe('Chat build gate hint', () => {
+  const reason =
+    'Сборка заблокирована: скрипт не прогнан — откройте черновик и нажмите «Прогнать».'
+
+  it('shows the reason under Создать скилл and keeps the button enabled', () => {
+    renderChat({
+      messages: [{ role: 'user', content: 'hi' }],
+      buildBlockReason: reason,
+    })
+    const btn = screen.getByRole('button', { name: 'Создать скилл' }) as HTMLButtonElement
+    expect(btn.disabled).toBe(false)
+    const hint = screen.getByText(/скрипт не прогнан/)
+    expect(hint.getAttribute('role')).toBe('status')
+    expect(btn.getAttribute('aria-describedby')).toBe(hint.id)
+  })
+
+  it('hides the hint when there are no messages, during build, or after buildError', () => {
+    renderChat({ messages: [], buildBlockReason: reason })
+    expect(screen.queryByText(/скрипт не прогнан/)).toBeNull()
+    cleanup()
+    renderChat({
+      messages: [{ role: 'user', content: 'hi' }],
+      buildBlockReason: reason,
+      buildingSkill: true,
+    })
+    expect(screen.queryByText(/скрипт не прогнан/)).toBeNull()
+    cleanup()
+    renderChat({
+      messages: [{ role: 'user', content: 'hi' }],
+      buildBlockReason: reason,
+      buildError: '422 gate',
+    })
+    expect(screen.queryByText(/скрипт не прогнан/)).toBeNull()
+  })
+})

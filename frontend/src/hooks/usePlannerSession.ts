@@ -6,8 +6,10 @@ import {
   patchArtifact,
   patchSkillMeta,
   removeSessionDocument,
+  trySkillScript,
   type DocumentOut,
   type MessageOut,
+  type ScriptTryResult,
   type SessionArtifact,
   type SkillMetaPatch,
 } from '../api.ts'
@@ -44,6 +46,7 @@ export interface UsePlannerSessionResult {
   savePrompt: (content: string) => Promise<SessionArtifact>
   saveScript: (content: string) => Promise<SessionArtifact>
   saveMeta: (meta: SkillMetaPatch) => Promise<SessionArtifact>
+  tryScript: () => Promise<ScriptTryResult>
   send: (text: string, docIds?: string[], docs?: DocumentOut[]) => void
   cancel: () => void
   reconnect: () => void
@@ -511,6 +514,18 @@ export function usePlannerSession(
     [sessionId],
   )
 
+  const tryScript = useCallback(async () => {
+    if (!sessionId) throw new Error('no session')
+    const result = await trySkillScript(sessionId)
+    try {
+      const arts = await getSessionArtifacts(sessionId)
+      if (sessionIdRef.current === sessionId) setArtifacts(arts)
+    } catch {
+      return result
+    }
+    return result
+  }, [sessionId])
+
   return {
     messages,
     streaming,
@@ -527,6 +542,7 @@ export function usePlannerSession(
     savePrompt,
     saveScript,
     saveMeta,
+    tryScript,
     send,
     cancel,
     reconnect,

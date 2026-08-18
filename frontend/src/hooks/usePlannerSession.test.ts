@@ -8,11 +8,13 @@ const {
   getSessionDocuments,
   listSessionMessages,
   getSessionArtifacts,
+  trySkillScript,
   connectPlanner,
 } = vi.hoisted(() => ({
   getSessionDocuments: vi.fn(),
   listSessionMessages: vi.fn(),
   getSessionArtifacts: vi.fn(),
+  trySkillScript: vi.fn(),
   connectPlanner: vi.fn(),
 }))
 
@@ -23,6 +25,7 @@ vi.mock('../api.ts', () => ({
   patchArtifact: vi.fn(),
   patchSkillMeta: vi.fn(),
   removeSessionDocument: vi.fn(),
+  trySkillScript,
 }))
 
 vi.mock('../ws.ts', () => ({
@@ -87,9 +90,24 @@ describe('usePlannerSession', () => {
     getSessionDocuments.mockReset()
     listSessionMessages.mockReset()
     getSessionArtifacts.mockReset()
+    trySkillScript.mockReset()
     connectPlanner.mockReset()
     listSessionMessages.mockResolvedValue([])
     getSessionArtifacts.mockResolvedValue([])
+    trySkillScript.mockResolvedValue({
+      ok: true,
+      stage: 'run',
+      error: null,
+      input_preview: '',
+      input_len: 0,
+      output_preview: '',
+      output_len: 0,
+      output_kind: 'str',
+      duration_ms: 1,
+      verify: null,
+      line_no: null,
+      source_line: null,
+    })
     getSessionDocuments.mockResolvedValue([])
     captured.onEvent = null
     captured.onOpen = undefined
@@ -382,5 +400,40 @@ describe('usePlannerSession', () => {
     expect(result.current.closed).toBe(false)
     expect(result.current.streaming).toBe(false)
     expect(result.current.messages).toEqual([])
+  })
+
+  it('tryScript posts a dry-run and refreshes artifacts', async () => {
+    getSessionArtifacts
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([
+        {
+          type: 'script',
+          content: 'result = 1',
+          is_valid: true,
+          error: null,
+          source: 'user',
+          updated_at: '2026-08-18T10:00:00Z',
+          dry_run: {
+            slot: 'script',
+            sha256: 'x',
+            ok: true,
+            stage: 'run',
+            error: null,
+            time: '2026-08-18T10:00:00Z',
+          },
+        },
+      ])
+
+    const { result } = renderHook(() => usePlannerSession('s1'))
+    await waitFor(() => {
+      expect(getSessionArtifacts).toHaveBeenCalledTimes(1)
+    })
+
+    await act(async () => {
+      const out = await result.current.tryScript()
+      expect(out.ok).toBe(true)
+    })
+    expect(trySkillScript).toHaveBeenCalledWith('s1')
+    expect(result.current.artifacts[0]?.dry_run).toMatchObject({ ok: true })
   })
 })

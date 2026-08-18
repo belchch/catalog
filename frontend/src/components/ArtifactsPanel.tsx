@@ -1,12 +1,23 @@
 import { useEffect, useId, useRef, useState, type ReactNode } from 'react'
 import {
+  extractApiDetail,
   parseStepsArtifact,
   type ArtifactType,
   type PipelineStepDraft,
+  type ScriptTryResult,
   type SessionArtifact,
   type SkillKind,
   type SkillMetaPatch,
 } from '../api.ts'
+import {
+  dryRunBadgeClass,
+  dryRunLabel,
+  dryRunState,
+  errorLineNo,
+  errorSourceLine,
+  scriptDryRun,
+  stageLabel,
+} from '../lib/dryRun.ts'
 import { StepsList } from './StepsList.tsx'
 import { VerifyChecksPicker, type VerifyCheckDraft } from './VerifyChecksPicker.tsx'
 
@@ -33,6 +44,7 @@ interface ArtifactsPanelProps {
   onSavePrompt: (content: string) => Promise<SessionArtifact>
   onSaveScript: (content: string) => Promise<SessionArtifact>
   onSaveMeta: (meta: SkillMetaPatch) => Promise<SessionArtifact>
+  onTryScript: () => Promise<ScriptTryResult>
 }
 
 const ARITY_OPTIONS: { value: InputArity; label: string }[] = [
@@ -177,6 +189,14 @@ function formatUpdatedAt(iso: string): string {
   }
 }
 
+function formatCount(n: number): string {
+  return n.toLocaleString('ru-RU')
+}
+
+function previewTruncated(preview: string, len: number): boolean {
+  return preview.endsWith('…[truncated]') || len > preview.length
+}
+
 function cycleOption<T>(options: { value: T }[], current: T, dir: 1 | -1): T {
   const idx = options.findIndex((o) => o.value === current)
   const next = (idx + dir + options.length) % options.length
@@ -194,6 +214,7 @@ export function ArtifactsPanel({
   onSavePrompt,
   onSaveScript,
   onSaveMeta,
+  onTryScript,
 }: ArtifactsPanelProps) {
   const [promptDraft, setPromptDraft] = useState('')
   const [scriptDraft, setScriptDraft] = useState('')
@@ -205,6 +226,9 @@ export function ArtifactsPanel({
   const [saveErrors, setSaveErrors] = useState<Partial<Record<ArtifactType, string>>>({})
   const [savedFlash, setSavedFlash] = useState<Partial<Record<ArtifactType, boolean>>>({})
   const [nameClientError, setNameClientError] = useState(false)
+  const [lastRun, setLastRun] = useState<ScriptTryResult | null>(null)
+  const [tryError, setTryError] = useState<string | null>(null)
+  const [inFlight, setInFlight] = useState(false)
 
   const metaRef = useRef<HTMLDivElement>(null)
   const stepsRef = useRef<HTMLDivElement>(null)
@@ -214,6 +238,7 @@ export function ArtifactsPanel({
   const stepsHeadingId = useId()
   const dirtyRef = useRef({ meta: false, prompt: false, script: false })
   const flashTimers = useRef<Partial<Record<ArtifactType, ReturnType<typeof setTimeout>>>>({})
+  const inFlightRef = useRef(false)
 
   const promptArt = findArtifact(artifacts, 'prompt')
   const scriptArt = findArtifact(artifacts, 'script')
@@ -236,6 +261,10 @@ export function ArtifactsPanel({
     setSaveErrors({})
     setSavedFlash({})
     setNameClientError(false)
+    setLastRun(null)
+    setTryError(null)
+    setInFlight(false)
+    inFlightRef.current = false
   }, [sessionId])
 
   useEffect(() => {
@@ -379,6 +408,78 @@ export function ArtifactsPanel({
       setSaving(null)
     }
   }
+
+  const goToScriptLine = (lineNo: number) => {
+    const el = scriptRef.current
+    if (!el) return
+    const lines = scriptDraft.split('\n')
+    if (lineNo < 1 || lineNo > lines.length) return
+    let start = 0
+    for (let i = 0; i < lineNo - 1; i++) start += lines[i].length + 1
+    const end = start + lines[lineNo - 1].length
+    el.focus()
+    el.setSelectionRange(start, end)
+    el.scrollIntoView({ block: 'nearest' })
+  }
+
+  const handleTryScript = async () => {
+    if (inFlightRef.current) return
+    if (!scriptDraft.trim() || streaming || saving === 'script') return
+    inFlightRef.current = true
+    setInFlight(true)
+    setTryError(null)
+    try {
+      if (dirtyScript) {
+        const art = await onSaveScript(scriptDraft)
+        setScriptDraft(art.content)
+        setServerScript(art.content)
+        flashSaved('script')
+        clearHighlightIf('script')
+      }
+      const result = await onTryScript()
+      setLastRun(result)
+    } catch (e) {
+      setTryError(extractApiDetail(e))
+    } finally {
+      inFlightRef.current = false
+      setInFlight(false)
+    }
+  }
+
+  const dryStatus = scriptDryRun(artifacts)
+  const runState = dryRunState({
+    status: dryStatus,
+    artifactUpdatedAt: scriptArt?.updated_at,
+    dirty: dirtyScript,
+  })
+  const runMeta =
+    runState === 'none'
+      ? 'прогон нужен для сборки'
+      : runState === 'ok' && dryStatus?.time
+        ? formatUpdatedAt(dryStatus.time)
+        : runState === 'stale'
+          ? 'код менялся после прогона — прогоните снова'
+          : null
+  const tryDisabled =
+    !scriptDraft.trim() || inFlight || inputsDisabled || saving === 'script'
+  const tryTitle = !scriptDraft.trim()
+    ? 'Добавьте код скрипта'
+    : inputsDisabled
+      ? 'Идёт генерация'
+      : inFlight
+        ? 'Прогоняю…'
+        : undefined
+  const failedRun = lastRun && !lastRun.ok ? lastRun : null
+  const errorText =
+    failedRun?.error ?? tryError ?? (runState === 'error' ? dryStatus?.error ?? null : null)
+  const errorStage = stageLabel(
+    failedRun ? failedRun.stage : runState === 'error' ? dryStatus?.stage : null,
+  )
+  const errorLine = errorLineNo(dryStatus, failedRun)
+  const errorLineText = errorSourceLine(dryStatus, failedRun)
+  const showDryRunError = Boolean(
+    tryError || failedRun || (runState === 'error' && dryStatus?.error),
+  )
 
   const emptyArtifacts = artifacts.length === 0 && !loading
 
@@ -801,6 +902,7 @@ export function ArtifactsPanel({
                 [
                   scriptArt?.error ? 'script-error' : null,
                   saveErrors.script ? 'script-save-error' : null,
+                  showDryRunError ? 'script-dry-run-error' : null,
                 ]
                   .filter(Boolean)
                   .join(' ') || undefined
@@ -814,6 +916,127 @@ export function ArtifactsPanel({
               <p id="script-error" className="mt-1 text-[11px] text-danger-ink">
                 {scriptArt.error}
               </p>
+            )}
+            <div
+              role="status"
+              aria-live="polite"
+              className="mt-2 flex items-center justify-between gap-2"
+            >
+              <div className="min-w-0">
+                <span className={dryRunBadgeClass(runState)}>{dryRunLabel(runState)}</span>
+                {runMeta && (
+                  <span className="ml-2 text-[10px] text-ink-faint">{runMeta}</span>
+                )}
+              </div>
+              <div className="flex shrink-0 flex-col items-end">
+                <button
+                  type="button"
+                  className="btn-secondary"
+                  disabled={tryDisabled}
+                  aria-busy={inFlight}
+                  title={tryTitle}
+                  aria-description={tryTitle}
+                  onClick={() => void handleTryScript()}
+                >
+                  {inFlight ? 'Прогоняю…' : 'Прогнать'}
+                </button>
+                {dirtyScript && (
+                  <span className="text-[10px] text-ink-faint">
+                    код сохранится перед прогоном
+                  </span>
+                )}
+              </div>
+            </div>
+            {dirtyScript && lastRun && (
+              <p className="mt-2 text-[11px] text-warning-ink">
+                Результат относится к предыдущей версии кода
+              </p>
+            )}
+            {lastRun?.ok && (
+              <div className="mt-2 text-[11px] text-ink-muted">
+                <p>
+                  {formatCount(lastRun.duration_ms)} мс
+                  {lastRun.output_kind ? ` · выход ${lastRun.output_kind}` : ''}
+                  {` · ${formatCount(lastRun.output_len)} симв.`}
+                  {` · вход ${formatCount(lastRun.input_len)} симв.`}
+                </p>
+                {lastRun.verify && (
+                  <div className="mt-1">
+                    <p>
+                      Проверки: {lastRun.verify.checks.filter((c) => c.passed).length}/
+                      {lastRun.verify.checks.length}
+                    </p>
+                    {lastRun.verify.checks
+                      .filter((c) => !c.passed || c.skipped)
+                      .map((c) => (
+                        <p key={`${c.check}-${c.reason ?? ''}`}>
+                          {c.skipped
+                            ? `${c.check} — пропущена`
+                            : `${c.check}${c.reason ? ` — ${c.reason}` : ''}`}
+                        </p>
+                      ))}
+                  </div>
+                )}
+                <details className="mt-1">
+                  <summary className="cursor-pointer text-[11px] text-ink-faint">
+                    Вход (input_preview)
+                    {previewTruncated(lastRun.input_preview, lastRun.input_len) && (
+                      <span className="badge-warning ml-2">Усечено</span>
+                    )}
+                  </summary>
+                  {previewTruncated(lastRun.input_preview, lastRun.input_len) && (
+                    <p className="mt-1 text-[10px] text-ink-faint">
+                      показаны первые 2000 симв. из {formatCount(lastRun.input_len)}
+                    </p>
+                  )}
+                  <pre className="mt-1 max-h-40 overflow-auto whitespace-pre-wrap break-words rounded bg-surface-muted p-1.5 font-mono text-[11px] text-ink-muted">
+                    {lastRun.input_preview}
+                  </pre>
+                </details>
+                <details className="mt-1">
+                  <summary className="cursor-pointer text-[11px] text-ink-faint">
+                    Выход (output_preview)
+                    {previewTruncated(lastRun.output_preview, lastRun.output_len) && (
+                      <span className="badge-warning ml-2">Усечено</span>
+                    )}
+                  </summary>
+                  {previewTruncated(lastRun.output_preview, lastRun.output_len) && (
+                    <p className="mt-1 text-[10px] text-ink-faint">
+                      показаны первые 2000 симв. из {formatCount(lastRun.output_len)}
+                    </p>
+                  )}
+                  <pre className="mt-1 max-h-40 overflow-auto whitespace-pre-wrap break-words rounded bg-surface-muted p-1.5 font-mono text-[11px] text-ink-muted">
+                    {lastRun.output_preview}
+                  </pre>
+                </details>
+              </div>
+            )}
+            {showDryRunError && (
+              <div
+                id="script-dry-run-error"
+                className="mt-2 rounded-md border border-danger-line bg-danger-soft px-2 py-1.5 text-[11px] text-danger-ink"
+              >
+                {errorStage && (
+                  <p>Ошибка на стадии: {errorStage}</p>
+                )}
+                {errorText && (
+                  <p className="whitespace-pre-wrap break-words">{errorText}</p>
+                )}
+                {errorLine != null && errorLineText != null && (
+                  <p className="mt-1 bg-danger-soft font-mono text-danger-ink">
+                    {errorLine} │ {errorLineText}
+                  </p>
+                )}
+                {errorLine != null && errorLine <= scriptDraft.split('\n').length && (
+                  <button
+                    type="button"
+                    className="btn-ghost mt-1"
+                    onClick={() => goToScriptLine(errorLine)}
+                  >
+                    Перейти к строке {errorLine}
+                  </button>
+                )}
+              </div>
             )}
             {saveBtn(
               'script',
