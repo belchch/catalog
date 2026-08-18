@@ -32,6 +32,7 @@ from __future__ import annotations
 import ast
 import inspect
 import signal
+import traceback
 from typing import Any
 
 # Builtins available to script skills. Anything that touches the outside
@@ -173,6 +174,8 @@ _FORBIDDEN_BUILTINS = {
 # Default per-run limits.
 DEFAULT_TIMEOUT_SECONDS = 5.0
 DEFAULT_MEMORY_BYTES = 256 * 1024 * 1024  # 256 MiB
+_SCRIPT_FILENAME = "<script-skill>"
+_SCRIPT_DOC_JOIN = "\n\n---\n\n"
 
 
 class ScriptValidationError(ValueError):
@@ -181,6 +184,17 @@ class ScriptValidationError(ValueError):
 
 class ScriptRuntimeError(RuntimeError):
     """Raised when a script fails at runtime (timeout, error, bad output)."""
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        line_no: int | None = None,
+        source_line: str | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.line_no = line_no
+        self.source_line = source_line
 
 
 # --------------------------------------------------------------------------- #
@@ -349,6 +363,44 @@ def _extract_result(namespace: dict[str, Any]) -> str | list[str]:
     return ""
 
 
+def prepare_script_input(doc_texts: list[str]) -> tuple[str, list[str]]:
+    documents = list(doc_texts)
+    if len(documents) == 1:
+        return documents[0], documents
+    return _SCRIPT_DOC_JOIN.join(documents), documents
+
+
+def _script_error_location(
+    code: str, exc: BaseException
+) -> tuple[int | None, str | None]:
+    frames = [
+        frame
+        for frame in traceback.extract_tb(exc.__traceback__)
+        if frame.filename == _SCRIPT_FILENAME
+    ]
+    if not frames:
+        return None, None
+    line_no = frames[0].lineno
+    if line_no is None:
+        return None, None
+    lines = code.splitlines()
+    if line_no < 1 or line_no > len(lines):
+        return line_no, None
+    return line_no, lines[line_no - 1]
+
+
+def _script_raised_error(code: str, exc: BaseException) -> ScriptRuntimeError:
+    line_no, source_line = _script_error_location(code, exc)
+    if line_no is None:
+        return ScriptRuntimeError(f"script raised: {exc}")
+    line_text = "" if source_line is None else source_line.strip()
+    return ScriptRuntimeError(
+        f"script raised: {exc} (line {line_no}: {line_text})",
+        line_no=line_no,
+        source_line=source_line,
+    )
+
+
 def run_script(
     code: str,
     doc_text: str,
@@ -392,7 +444,7 @@ def run_script(
     signal.setitimer(signal.ITIMER_REAL, timeout_seconds)
     signal.signal(signal.SIGALRM, _timeout_handler)
     try:
-        exec(compile(code, "<script-skill>", "exec"), namespace)  # noqa: S102
+        exec(compile(code, _SCRIPT_FILENAME, "exec"), namespace)  # noqa: S102
         return _extract_result(namespace)
     except _ScriptTimeoutError as exc:
         raise ScriptRuntimeError(
@@ -404,7 +456,7 @@ def run_script(
     except ScriptRuntimeError:
         raise
     except Exception as exc:  # noqa: BLE001 — surface any script error verbatim
-        raise ScriptRuntimeError(f"script raised: {exc}") from exc
+        raise _script_raised_error(code, exc) from exc
     finally:
         signal.setitimer(signal.ITIMER_REAL, 0)
         signal.signal(signal.SIGALRM, old_handler)
@@ -434,6 +486,42 @@ async def run_script_async(
         doc_text,
         params,
         documents=documents,
+        timeout_seconds=timeout_seconds,
+        memory_bytes=memory_bytes,
+    )
+
+
+def run_skill_script(
+    code: str,
+    doc_texts: list[str],
+    params: dict | None = None,
+    *,
+    timeout_seconds: float = DEFAULT_TIMEOUT_SECONDS,
+    memory_bytes: int = DEFAULT_MEMORY_BYTES,
+) -> str | list[str]:
+    doc_text, documents = prepare_script_input(doc_texts)
+    return run_script(
+        code,
+        doc_text,
+        params,
+        documents=documents,
+        timeout_seconds=timeout_seconds,
+        memory_bytes=memory_bytes,
+    )
+
+
+async def run_skill_script_async(
+    code: str,
+    doc_texts: list[str],
+    params: dict | None = None,
+    *,
+    timeout_seconds: float = DEFAULT_TIMEOUT_SECONDS,
+    memory_bytes: int = DEFAULT_MEMORY_BYTES,
+) -> str | list[str]:
+    return run_skill_script(
+        code,
+        doc_texts,
+        params,
         timeout_seconds=timeout_seconds,
         memory_bytes=memory_bytes,
     )

@@ -68,7 +68,7 @@ from catalog.skills.budget import (
 )
 from catalog.skills.config import PipelineStep, SkillConfig, ensure_read_document_tool
 from catalog.skills.repo_run import claim_run, create_run, finish_run, get_run
-from catalog.skills.script_runner import ScriptRuntimeError, run_script_async
+from catalog.skills.script_runner import ScriptRuntimeError, run_skill_script_async
 from catalog.skills.verify import run_verify_async
 from catalog.storage.db import Database
 from catalog.storage.repo_document import create_document, get_document
@@ -418,9 +418,6 @@ async def _apply_core(
             # once over the document text. Retrying is pointless (same input
             # always yields the same output), so there is a single attempt and
             # a single verify pass — then the shared persist/finish tail.
-            # Single document → its text verbatim. Multiple → joined with a
-            # separator so the script sees all input content.
-            doc_text = doc_texts[0] if len(doc_texts) == 1 else "\n\n---\n\n".join(doc_texts)
             # CATALOG-3/16: surface script execution as granular trace steps
             # (start/done/error with a code snippet, the return value and the
             # wall-clock duration) so a script run is not an opaque black box.
@@ -429,9 +426,7 @@ async def _apply_core(
             log_agent_event(script_start)
             t0 = time.perf_counter()
             try:
-                text = await run_script_async(
-                    skill.code, doc_text, documents=doc_texts
-                )
+                text = await run_skill_script_async(skill.code, doc_texts)
                 if isinstance(text, list):
                     text = _value_as_text(text)
             except ScriptRuntimeError as exc:
@@ -495,8 +490,6 @@ async def _apply_core(
                 step_input = _pipeline_step_input(step, current, doc_texts)
                 from_documents = step.input == "documents"
                 if step.type == "script":
-                    doc_text = _value_as_text(step_input)
-                    docs_list = _value_as_documents(step_input)
                     script_start = ScriptEvent(
                         stage="start", snippet=step.code, step_id=step.id
                     )
@@ -504,8 +497,8 @@ async def _apply_core(
                     log_agent_event(script_start)
                     t0 = time.perf_counter()
                     try:
-                        text = await run_script_async(
-                            step.code, doc_text, documents=docs_list
+                        text = await run_skill_script_async(
+                            step.code, _value_as_documents(step_input)
                         )
                     except ScriptRuntimeError as exc:
                         script_error = ScriptEvent(

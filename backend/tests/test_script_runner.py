@@ -26,7 +26,9 @@ from catalog.skills.script_runner import (
     SCRIPT_CODE_CONTRACT_RU,
     ScriptRuntimeError,
     ScriptValidationError,
+    prepare_script_input,
     run_script,
+    run_skill_script,
     validate_script,
 )
 
@@ -231,8 +233,11 @@ def test_run_script_empty_output() -> None:
 def test_run_script_timeout() -> None:
     """An infinite loop is killed by the wall-clock timeout."""
     code = "while True:\n    pass\n"
-    with pytest.raises(ScriptRuntimeError, match="time limit"):
+    with pytest.raises(ScriptRuntimeError, match="time limit") as caught:
         run_script(code, "", timeout_seconds=0.3, memory_bytes=_TEST_MEM)
+    assert caught.value.line_no is None
+    assert caught.value.source_line is None
+    assert "line " not in str(caught.value)
 
 
 def test_run_script_timeout_covers_main_body() -> None:
@@ -257,3 +262,45 @@ def test_run_script_wraps_error_raised_inside_main() -> None:
     code = "def main(document):\n    return 1 / 0\n"
     with pytest.raises(ScriptRuntimeError, match="script raised"):
         run_script(code, "irrelevant", memory_bytes=_TEST_MEM)
+
+
+def test_run_script_index_error_includes_source_line() -> None:
+    code = "def main():\n    items = []\n    return items[0]\n"
+    with pytest.raises(ScriptRuntimeError) as caught:
+        run_script(code, "irrelevant", memory_bytes=_TEST_MEM)
+    exc = caught.value
+    assert exc.line_no == 3
+    assert exc.source_line is not None
+    assert exc.source_line.strip() == "return items[0]"
+    message = str(exc)
+    assert "script raised" in message
+    assert "3" in message
+    assert "return items[0]" in message
+    assert "backend/" not in message
+    assert "script_runner" not in message
+    assert "catalog/" not in message
+
+
+def test_run_script_error_message_has_no_backend_paths() -> None:
+    with pytest.raises(ScriptRuntimeError) as caught:
+        run_script("x = 1 / 0\n", "irrelevant", memory_bytes=_TEST_MEM)
+    message = str(caught.value)
+    assert "script raised" in message
+    assert "backend/" not in message
+    assert ".py" not in message
+    assert "catalog/" not in message
+
+
+def test_prepare_script_input_single_and_multiple() -> None:
+    text, docs = prepare_script_input(["only"])
+    assert text == "only"
+    assert docs == ["only"]
+    text, docs = prepare_script_input(["a", "b"])
+    assert text == "a\n\n---\n\nb"
+    assert docs == ["a", "b"]
+
+
+def test_run_skill_script_joins_multiple_documents() -> None:
+    code = "result = document + '|' + str(len(documents))\n"
+    out = run_skill_script(code, ["a", "b"], memory_bytes=_TEST_MEM)
+    assert out == "a\n\n---\n\nb|2"
