@@ -13,7 +13,7 @@ TURN_DEADLINE_FLOOR_SECONDS = 600
 TURN_DEADLINE_TIMEOUT_FACTOR = 15
 SCRIPT_TRIES_PER_TURN = 10
 
-_session_script_tries: dict[str, int] = {}
+_session_script_tries: dict[str, tuple[int, float]] = {}
 
 
 @dataclass(frozen=True)
@@ -167,16 +167,24 @@ def consume_script_try(
     budget: SkillBudget | None = None,
     *,
     session_id: str | None = None,
+    now: float | None = None,
 ) -> bool:
     active = current_skill_budget(budget)
     if active is not None:
         return active.consume_script_try()
     if not session_id:
         return True
-    left = _session_script_tries.get(session_id, SCRIPT_TRIES_PER_TURN)
+    current = time.monotonic() if now is None else now
+    left, started = _session_script_tries.get(
+        session_id, (SCRIPT_TRIES_PER_TURN, current)
+    )
+    if current - started >= TURN_DEADLINE_FLOOR_SECONDS:
+        left = SCRIPT_TRIES_PER_TURN
+        started = current
     if left <= 0:
+        _session_script_tries[session_id] = (0, started)
         return False
-    _session_script_tries[session_id] = left - 1
+    _session_script_tries[session_id] = (left - 1, started)
     return True
 
 

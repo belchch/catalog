@@ -236,12 +236,15 @@ def list_script_dry_runs(db: Database, session_id: str) -> list[ScriptDryRunRow]
     return [_row_to_dry_run(r) for r in rows]
 
 
-def has_green_script_dry_run(db: Database, session_id: str, code: str) -> bool:
+def has_green_script_dry_run(
+    db: Database, session_id: str, code: str, *, slot: str
+) -> bool:
     digest = code_sha256(code)
     with db.connect() as conn:
         row = conn.execute(
             "SELECT 1 FROM session_script_dry_run "
-            "WHERE session_id = ? AND sha256 = ? AND ok = 1 LIMIT 1",
-            (session_id, digest),
+            "WHERE session_id = ? AND slot = ? AND sha256 = ? AND ok = 1 "
+            "LIMIT 1",
+            (session_id, slot, digest),
         ).fetchone()
     return row is not None

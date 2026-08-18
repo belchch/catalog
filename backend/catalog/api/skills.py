@@ -87,6 +87,7 @@ from catalog.storage.db import Database
 from catalog.storage.repo_message import add_message, list_messages
 from catalog.storage.repo_session import create_session, get_session, update_session_status
 from catalog.storage.repo_session_artifact import (
+    dry_run_slot,
     get_artifact,
     has_green_script_dry_run,
     list_artifacts,
@@ -388,7 +389,9 @@ def _dry_run_gate_errors(
 ) -> list[str]:
     errors: list[str] = []
     if config.kind == "script":
-        if not has_green_script_dry_run(db, session_id, config.code):
+        if not has_green_script_dry_run(
+            db, session_id, config.code, slot=dry_run_slot()
+        ):
             errors.append(
                 "script dry-run is missing or stale; "
                 "run try_skill_script for the current script"
@@ -399,7 +402,9 @@ def _dry_run_gate_errors(
     for index, step in enumerate(config.steps):
         if step.type != "script":
             continue
-        if has_green_script_dry_run(db, session_id, step.code):
+        if has_green_script_dry_run(
+            db, session_id, step.code, slot=dry_run_slot(index)
+        ):
             continue
         label = step.id or f"steps:{index}"
         errors.append(

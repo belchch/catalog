@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import time
 from pathlib import Path
 
 import pytest
@@ -11,7 +12,13 @@ from catalog.documents.tools import build_document_tools
 from catalog.llm.base import CompletionResult, ToolCall
 from catalog.api.sessions import _planner_system_prompt
 from catalog.skills.artifact_tools import build_artifact_tools
-from catalog.skills.budget import SkillBudget, _session_script_tries
+from catalog.skills.budget import (
+    SCRIPT_TRIES_PER_TURN,
+    TURN_DEADLINE_FLOOR_SECONDS,
+    SkillBudget,
+    _session_script_tries,
+    consume_script_try,
+)
 from catalog.skills.skill_tools import _RESERVED, config_hash
 from catalog.skills.verify import registered_checks, verify_checks_params_hint
 from catalog.skills.config import PipelineStep, SkillConfig, VerifyCheck
@@ -817,7 +824,9 @@ def test_build_pipeline_from_artifacts(client, provider, db) -> None:
     )
     assert patch.status_code == 200, patch.text
     assert patch.json()["is_valid"] is True
-    _seed_green_dry_run(db, session_id, "result = document.upper()\n")
+    _seed_green_dry_run(
+        db, session_id, "result = document.upper()\n", step_index=0
+    )
     provider.script = []
     resp = client.post(f"/sessions/{session_id}/skills")
     assert resp.status_code == 200, resp.text
@@ -876,7 +885,9 @@ def test_build_pipeline_from_artifacts_despite_track_intent(
         },
     )
     assert select.status_code == 200, select.text
-    _seed_green_dry_run(db, session_id, "result = document.upper()\n")
+    _seed_green_dry_run(
+        db, session_id, "result = document.upper()\n", step_index=0
+    )
     provider.script = []
     resp = client.post(f"/sessions/{session_id}/skills")
     assert resp.status_code == 200, resp.text
@@ -991,7 +1002,9 @@ def test_build_pipeline_from_split_artifacts(client, provider, db) -> None:
         json={"content": "rewrite the text"},
     )
     assert prompt.json()["is_valid"] is True
-    _seed_green_dry_run(db, session_id, "result = document.upper()\n")
+    _seed_green_dry_run(
+        db, session_id, "result = document.upper()\n", step_index=0
+    )
     provider.script = []
     resp = client.post(f"/sessions/{session_id}/skills")
     assert resp.status_code == 200, resp.text
@@ -1682,7 +1695,7 @@ def test_try_skill_script_http_validate_and_foreign_doc(client, db) -> None:
 
 def test_try_skill_script_http_limit_is_not_500(client) -> None:
     session_id = client.post("/sessions").json()["id"]
-    _session_script_tries[session_id] = 0
+    _session_script_tries[session_id] = (0, time.monotonic())
     resp = client.post(
         f"/sessions/{session_id}/artifacts/script/try",
         json={"code": "result = 'ok'\n"},
@@ -1691,6 +1704,23 @@ def test_try_skill_script_http_limit_is_not_500(client) -> None:
     assert resp.status_code != 500
     assert resp.json()["ok"] is False
     assert "limit" in (resp.json()["error"] or "").lower()
+
+
+def test_session_script_tries_reset_after_turn_window() -> None:
+    session_id = "window-reset"
+    _session_script_tries.pop(session_id, None)
+    start = 1_000.0
+    for _ in range(SCRIPT_TRIES_PER_TURN):
+        assert consume_script_try(session_id=session_id, now=start) is True
+    assert consume_script_try(session_id=session_id, now=start + 1) is False
+    assert (
+        consume_script_try(
+            session_id=session_id,
+            now=start + TURN_DEADLINE_FLOOR_SECONDS,
+        )
+        is True
+    )
+    _session_script_tries.pop(session_id, None)
 
 
 def test_build_script_without_dry_run_returns_422(client) -> None:
@@ -1740,6 +1770,26 @@ def test_build_script_after_code_change_requires_new_dry_run(client, db) -> None
     assert skill.config.code == second
 
 
+def test_build_script_ignores_green_dry_run_from_other_slot(client, db) -> None:
+    session_id = client.post("/sessions").json()["id"]
+    code = "result = document.upper()\n"
+    client.patch(
+        f"/sessions/{session_id}/skill-meta",
+        json={"name": "Upper", "description": "upper", "kind": "script"},
+    )
+    client.patch(
+        f"/sessions/{session_id}/artifacts/script",
+        json={"content": code},
+    )
+    _seed_green_dry_run(db, session_id, code, step_index=0)
+    resp = client.post(f"/sessions/{session_id}/skills")
+    assert resp.status_code == 422
+    assert "dry-run" in resp.json()["detail"].lower()
+    _seed_green_dry_run(db, session_id, code)
+    ok = client.post(f"/sessions/{session_id}/skills")
+    assert ok.status_code == 200, ok.text
+
+
 def test_build_pipeline_two_script_steps_requires_each_dry_run(client, db) -> None:
     session_id = client.post("/sessions").json()["id"]
     client.patch(
@@ -1777,6 +1827,44 @@ def test_build_pipeline_two_script_steps_requires_each_dry_run(client, db) -> No
     _seed_green_dry_run(
         db, session_id, "result = document.lower()\n", step_index=1
     )
+    ok = client.post(f"/sessions/{session_id}/skills")
+    assert ok.status_code == 200, ok.text
+
+
+def test_build_pipeline_same_code_steps_require_own_slot(client, db) -> None:
+    session_id = client.post("/sessions").json()["id"]
+    code = "result = document.upper()\n"
+    client.patch(
+        f"/sessions/{session_id}/skill-meta",
+        json={"name": "Dup", "description": "same scripts", "kind": "pipeline"},
+    )
+    steps = {
+        "steps": [
+            {
+                "id": "first",
+                "type": "script",
+                "input": "documents",
+                "code": code,
+            },
+            {
+                "id": "second",
+                "type": "script",
+                "input": "previous",
+                "code": code,
+            },
+        ]
+    }
+    client.patch(
+        f"/sessions/{session_id}/artifacts/steps",
+        json={"content": json.dumps(steps, ensure_ascii=False)},
+    )
+    _seed_green_dry_run(db, session_id, code, step_index=0)
+    resp = client.post(f"/sessions/{session_id}/skills")
+    assert resp.status_code == 422
+    detail = resp.json()["detail"]
+    assert "second" in detail
+    assert "step_index=1" in detail
+    _seed_green_dry_run(db, session_id, code, step_index=1)
     ok = client.post(f"/sessions/{session_id}/skills")
     assert ok.status_code == 200, ok.text
 
