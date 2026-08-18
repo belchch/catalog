@@ -2021,3 +2021,47 @@ def test_dry_run_status_in_artifact_payload_and_draft(
     script_http = next(a for a in listed if a["type"] == "script")
     assert script_http["dry_run"]["ok"] is True
     assert script_http["dry_run"]["sha256"]
+
+
+def test_failed_inline_try_does_not_clobber_saved_dry_run(client, db) -> None:
+    session_id = client.post("/sessions").json()["id"]
+    code = "result = document.upper()\n"
+    client.patch(
+        f"/sessions/{session_id}/skill-meta",
+        json={"name": "Upper", "description": "upper", "kind": "script"},
+    )
+    client.patch(
+        f"/sessions/{session_id}/artifacts/script",
+        json={"content": code},
+    )
+    _seed_green_dry_run(db, session_id, code)
+    probe = client.post(
+        f"/sessions/{session_id}/artifacts/script/try",
+        json={"code": "import os\nresult = 'x'\n"},
+    )
+    assert probe.status_code == 200
+    assert probe.json()["ok"] is False
+    listed = client.get(f"/sessions/{session_id}/artifacts").json()
+    script = next(a for a in listed if a["type"] == "script")
+    assert script["dry_run"]["ok"] is True
+    assert script["dry_run"]["sha256"] == code_sha256(code)
+    built = client.post(f"/sessions/{session_id}/skills")
+    assert built.status_code == 200, built.text
+
+
+def test_failed_try_of_saved_code_updates_dry_run(client, db) -> None:
+    session_id = client.post("/sessions").json()["id"]
+    bad = "import os\nresult = 'x'\n"
+    client.patch(
+        f"/sessions/{session_id}/artifacts/script",
+        json={"content": bad},
+    )
+    _seed_green_dry_run(db, session_id, bad)
+    resp = client.post(f"/sessions/{session_id}/artifacts/script/try")
+    assert resp.status_code == 200
+    assert resp.json()["ok"] is False
+    listed = client.get(f"/sessions/{session_id}/artifacts").json()
+    script = next(a for a in listed if a["type"] == "script")
+    assert script["dry_run"]["ok"] is False
+    assert script["dry_run"]["sha256"] == code_sha256(bad)
+    assert script["dry_run"]["stage"] == "validate"

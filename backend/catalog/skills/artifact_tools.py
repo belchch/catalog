@@ -72,14 +72,47 @@ def _result_as_text(value: str | list[str]) -> str:
     return value
 
 
+def _saved_slot_code(
+    db: Database,
+    session_id: str,
+    *,
+    step_index: int | None,
+) -> tuple[str | None, str | None]:
+    if step_index is not None:
+        row = get_artifact(db, session_id, "steps")
+        if row is None:
+            return None, "steps artifact is missing"
+        parsed, errors = parse_steps_content(row.content)
+        if errors:
+            return None, errors[0]
+        if isinstance(step_index, bool) or not isinstance(step_index, int):
+            return None, "step_index must be an integer"
+        if step_index < 0 or step_index >= len(parsed):
+            return None, "step_index out of range"
+        step = parsed[step_index]
+        if step.type != "script":
+            return None, "step is not a script step"
+        if not step.code.strip():
+            return None, "script code is empty"
+        return step.code, None
+    row = get_artifact(db, session_id, "script")
+    if row is None or not row.content.strip():
+        return None, "script code is empty"
+    return row.content, None
+
+
 def _persist_try_dry_run(
     db: Database,
     session_id: str,
     *,
     slot: str,
+    step_index: int | None,
     code: str,
     payload: dict[str, Any],
 ) -> None:
+    saved, _error = _saved_slot_code(db, session_id, step_index=step_index)
+    if saved is None or code_sha256(saved) != code_sha256(code):
+        return
     upsert_script_dry_run(
         db,
         session_id=session_id,
@@ -179,27 +212,7 @@ def _resolve_try_code(
         if text.strip():
             return text, None
         return None, "script code is empty"
-    if step_index is not None:
-        row = get_artifact(db, session_id, "steps")
-        if row is None:
-            return None, "steps artifact is missing"
-        parsed, errors = parse_steps_content(row.content)
-        if errors:
-            return None, errors[0]
-        if isinstance(step_index, bool) or not isinstance(step_index, int):
-            return None, "step_index must be an integer"
-        if step_index < 0 or step_index >= len(parsed):
-            return None, "step_index out of range"
-        step = parsed[step_index]
-        if step.type != "script":
-            return None, "step is not a script step"
-        if not step.code.strip():
-            return None, "script code is empty"
-        return step.code, None
-    row = get_artifact(db, session_id, "script")
-    if row is None or not row.content.strip():
-        return None, "script code is empty"
-    return row.content, None
+    return _saved_slot_code(db, session_id, step_index=step_index)
 
 
 def _resolve_try_documents(
@@ -298,7 +311,14 @@ async def run_try_skill_script(
             input_preview=input_preview,
             input_len=input_len,
         )
-        _persist_try_dry_run(db, session_id, slot=slot, code=source, payload=payload)
+        _persist_try_dry_run(
+            db,
+            session_id,
+            slot=slot,
+            step_index=step_index,
+            code=source,
+            payload=payload,
+        )
         return payload
     started = time.perf_counter()
     try:
@@ -312,7 +332,14 @@ async def run_try_skill_script(
             input_len=input_len,
             duration_ms=int((time.perf_counter() - started) * 1000),
         )
-        _persist_try_dry_run(db, session_id, slot=slot, code=source, payload=payload)
+        _persist_try_dry_run(
+            db,
+            session_id,
+            slot=slot,
+            step_index=step_index,
+            code=source,
+            payload=payload,
+        )
         return payload
     except ScriptRuntimeError as exc:
         payload = _try_payload(
@@ -325,7 +352,14 @@ async def run_try_skill_script(
             line_no=exc.line_no,
             source_line=exc.source_line,
         )
-        _persist_try_dry_run(db, session_id, slot=slot, code=source, payload=payload)
+        _persist_try_dry_run(
+            db,
+            session_id,
+            slot=slot,
+            step_index=step_index,
+            code=source,
+            payload=payload,
+        )
         return payload
     duration_ms = int((time.perf_counter() - started) * 1000)
     output_kind = "list" if isinstance(output, list) else "str"
@@ -348,7 +382,14 @@ async def run_try_skill_script(
         duration_ms=duration_ms,
         verify=verify_payload,
     )
-    _persist_try_dry_run(db, session_id, slot=slot, code=source, payload=payload)
+    _persist_try_dry_run(
+        db,
+        session_id,
+        slot=slot,
+        step_index=step_index,
+        code=source,
+        payload=payload,
+    )
     return payload
 
 
