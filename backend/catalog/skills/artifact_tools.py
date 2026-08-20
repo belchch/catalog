@@ -52,6 +52,7 @@ from catalog.storage.repo_session_artifact import (
     upsert_artifact,
     upsert_script_dry_run,
 )
+from catalog.storage.repo_session import get_session_by_skill_id
 from catalog.storage.repo_session_document import list_session_documents
 
 NotifyFn = Callable[[], Awaitable[None]]
@@ -90,6 +91,40 @@ def _draft_outputs(db: Database, session_id: str) -> list[SkillOutput]:
     if errors:
         return []
     return parsed
+
+
+def sync_draft_outputs_artifact(
+    db: Database, skill_id: str, outputs: list[SkillOutput]
+) -> None:
+    """Keep the session's ``outputs`` artifact in sync with a configure() edit.
+
+    CATALOG-155 / ADR-0015: the settings modal writes outputs straight into
+    ``config_json`` via ``update_skill_config``. Build re-packs a skill from
+    session artifacts, so without this a later rebuild from the *same*
+    session would silently discard the human's edit and restore whatever
+    ``set_skill_outputs`` last wrote — reproducing the exact bug this task
+    exists to close. Chosen sync strategy is variant (a) from the plan:
+    write to both the frozen config *and* the session artifact.
+
+    Only edit sessions (``POST /skills/{id}/edit``, CATALOG-17) carry
+    ``session.skill_id``; a draft that was never opened for editing has no
+    linked session and nothing to sync — this is a no-op, not an error, so
+    configure never fails because of it.
+    """
+    session_row = get_session_by_skill_id(db, skill_id)
+    if session_row is None:
+        return
+    upsert_artifact(
+        db,
+        session_id=session_row.id,
+        type="outputs",
+        content=json.dumps(
+            [skill_output_to_dict(item) for item in outputs], ensure_ascii=False
+        ),
+        source="user",
+        is_valid=True,
+        error=None,
+    )
 
 
 def _try_dict_allowed(

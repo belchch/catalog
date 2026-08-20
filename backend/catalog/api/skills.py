@@ -31,6 +31,7 @@ from catalog.api.schemas import (
     SkillBuilt,
     SkillConfigureRequest,
     SkillOut,
+    SkillOutputOut,
     SkillPreview,
     SkillRenameRequest,
     SkillTrack,
@@ -50,6 +51,7 @@ from catalog.agent.registry import ToolRegistry
 from catalog.skills.artifact_tools import (
     parse_steps_content,
     resolve_pipeline_skill_steps,
+    sync_draft_outputs_artifact,
     validate_pipeline_steps,
 )
 from catalog.skills.budget import estimate_skill_llm_calls
@@ -996,6 +998,13 @@ def _preview(config: SkillConfig) -> SkillPreview:
         reasoning=config.reasoning,
         input_arity=config.input_arity,
         allowed_tools=list(config.allowed_tools),
+        # CATALOG-155: order preserved verbatim — it is primary/secondary/...
+        outputs=[
+            SkillOutputOut(
+                key=item.key, description=item.description, multiple=item.multiple
+            )
+            for item in config.outputs
+        ],
     )
 
 
@@ -1189,8 +1198,18 @@ async def configure_skill_endpoint(
         configure_kwargs["input_arity"] = req.input_arity
     if req.name is not None:
         configure_kwargs["name"] = req.name
+    outputs_supplied = "outputs" in req.model_fields_set
+    if outputs_supplied:
+        # Already validated by SkillConfigureRequest; re-parse into
+        # SkillOutput instances (empty body = "no outputs", not "unchanged").
+        configure_kwargs["outputs"] = skill_outputs_from_value(req.outputs or [])
     updated = update_skill_config(db, skill_id, **configure_kwargs)
     assert updated is not None
+    if outputs_supplied:
+        # CATALOG-155 sync strategy (a): keep the linked session's `outputs`
+        # artifact in step with the frozen config so a later rebuild from
+        # that same session does not silently discard this edit.
+        sync_draft_outputs_artifact(db, skill_id, updated.config.outputs)
     return SkillBuilt(skill_id=skill_id, config=_preview(updated.config))
 
 

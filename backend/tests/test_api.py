@@ -40,20 +40,20 @@ def _build_skill_call(
     name: str = "Summarizer",
     allowed_tools: list[str] | None = None,
     verify_checks: list[dict] | None = None,
+    outputs: list[dict] | None = None,
 ) -> ToolCall:
     """A build_skill tool call with a (by default valid) SkillConfig payload."""
-    return ToolCall(
-        id="build-1",
-        name="build_skill",
-        arguments={
-            "name": name,
-            "description": "Skill built from a planning session.",
-            "system_prompt": "You process the document as instructed.",
-            "allowed_tools": allowed_tools if allowed_tools is not None else ["read_document"],
-            "model": "test/model",
-            "verify_checks": verify_checks if verify_checks is not None else [{"check": "non_empty"}],
-        },
-    )
+    arguments = {
+        "name": name,
+        "description": "Skill built from a planning session.",
+        "system_prompt": "You process the document as instructed.",
+        "allowed_tools": allowed_tools if allowed_tools is not None else ["read_document"],
+        "model": "test/model",
+        "verify_checks": verify_checks if verify_checks is not None else [{"check": "non_empty"}],
+    }
+    if outputs is not None:
+        arguments["outputs"] = outputs
+    return ToolCall(id="build-1", name="build_skill", arguments=arguments)
 
 
 def _build_script_skill_call(
@@ -1179,6 +1179,254 @@ def test_configure_skill_renames_draft(client, provider, db) -> None:
     listed = client.get("/skills").json()
     match = next(s for s in listed if s["id"] == skill_id)
     assert match["name"] == "New Name"
+
+
+def test_build_skill_preview_returns_outputs_in_order(client, provider, db) -> None:
+    """SkillPreview.outputs mirrors config.outputs, order preserved (CATALOG-155)."""
+    session_id = client.post("/sessions").json()["id"]
+    add_message(db, session_id=session_id, role="user", content="make a skill")
+    provider.script = [
+        _completion(
+            tool_calls=[
+                _build_skill_call(
+                    name="Extractor",
+                    outputs=[
+                        {"key": "summary", "description": "The summary."},
+                        {"key": "details", "description": "The details.", "multiple": True},
+                    ],
+                )
+            ]
+        )
+    ]
+    resp = client.post(f"/sessions/{session_id}/skills")
+    assert resp.status_code == 200, resp.text
+    outputs = resp.json()["config"]["outputs"]
+    assert outputs == [
+        {"key": "summary", "description": "The summary.", "multiple": False},
+        {"key": "details", "description": "The details.", "multiple": True},
+    ]
+
+
+def test_configure_skill_overwrites_outputs(client, provider, db) -> None:
+    """PATCH .../configure replaces outputs when the field is present (CATALOG-155)."""
+    session_id = client.post("/sessions").json()["id"]
+    add_message(db, session_id=session_id, role="user", content="make a skill")
+    provider.script = [
+        _completion(
+            tool_calls=[
+                _build_skill_call(
+                    outputs=[{"key": "summary", "description": "Original."}]
+                )
+            ]
+        )
+    ]
+    skill_id = client.post(f"/sessions/{session_id}/skills").json()["skill_id"]
+
+    resp = client.patch(
+        f"/skills/{skill_id}/configure",
+        json={"outputs": [{"key": "result", "description": "Renamed by hand."}]},
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["config"]["outputs"] == [
+        {"key": "result", "description": "Renamed by hand.", "multiple": False}
+    ]
+    skill = get_skill(db, skill_id)
+    assert skill is not None
+    assert [o.key for o in skill.config.outputs] == ["result"]
+
+    # Omitting the field leaves outputs untouched.
+    resp = client.patch(f"/skills/{skill_id}/configure", json={"model": "other"})
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["config"]["outputs"] == [
+        {"key": "result", "description": "Renamed by hand.", "multiple": False}
+    ]
+
+    # An explicit empty list is a valid "no outputs" value.
+    resp = client.patch(f"/skills/{skill_id}/configure", json={"outputs": []})
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["config"]["outputs"] == []
+    skill = get_skill(db, skill_id)
+    assert skill is not None
+    assert skill.config.outputs == []
+
+
+def test_configure_skill_rejects_invalid_outputs(client, provider, db) -> None:
+    """422 for the same violations the artifact card rejects (CATALOG-155)."""
+    session_id = client.post("/sessions").json()["id"]
+    add_message(db, session_id=session_id, role="user", content="make a skill")
+    provider.script = [_completion(tool_calls=[_build_skill_call(name="S")])]
+    skill_id = client.post(f"/sessions/{session_id}/skills").json()["skill_id"]
+
+    # Duplicate key.
+    resp = client.patch(
+        f"/skills/{skill_id}/configure",
+        json={
+            "outputs": [
+                {"key": "a", "description": "First."},
+                {"key": "a", "description": "Second."},
+            ]
+        },
+    )
+    assert resp.status_code == 422
+    assert "duplicate output key" in resp.text
+
+    # Key not matching the pattern.
+    resp = client.patch(
+        f"/skills/{skill_id}/configure",
+        json={"outputs": [{"key": "Not Ok", "description": "x"}]},
+    )
+    assert resp.status_code == 422
+    assert "must match" in resp.text
+
+    # Empty description.
+    resp = client.patch(
+        f"/skills/{skill_id}/configure",
+        json={"outputs": [{"key": "a", "description": ""}]},
+    )
+    assert resp.status_code == 422
+    assert "must be non-empty" in resp.text
+
+    # More than MAX_SKILL_OUTPUTS (8) entries.
+    resp = client.patch(
+        f"/skills/{skill_id}/configure",
+        json={
+            "outputs": [
+                {"key": f"k{i}", "description": f"d{i}"} for i in range(9)
+            ]
+        },
+    )
+    assert resp.status_code == 422
+    assert "at most 8 items" in resp.text
+
+    # None of the invalid attempts changed the stored config.
+    skill = get_skill(db, skill_id)
+    assert skill is not None
+    assert skill.config.outputs == []
+
+
+def test_configure_skill_outputs_changes_config_hash(client, provider, db) -> None:
+    """Editing outputs through configure changes config_hash (CATALOG-155)."""
+    from catalog.skills.skill_tools import config_hash
+
+    session_id = client.post("/sessions").json()["id"]
+    add_message(db, session_id=session_id, role="user", content="make a skill")
+    provider.script = [_completion(tool_calls=[_build_skill_call(name="S")])]
+    skill_id = client.post(f"/sessions/{session_id}/skills").json()["skill_id"]
+
+    before = get_skill(db, skill_id)
+    assert before is not None
+    hash_before = config_hash(before.config.to_json())
+
+    resp = client.patch(
+        f"/skills/{skill_id}/configure",
+        json={"outputs": [{"key": "result", "description": "New output."}]},
+    )
+    assert resp.status_code == 200, resp.text
+
+    after = get_skill(db, skill_id)
+    assert after is not None
+    hash_after = config_hash(after.config.to_json())
+    assert hash_after != hash_before
+
+
+def test_configure_skill_requires_draft_for_outputs(client, provider, db) -> None:
+    """Configure of a committed skill's outputs is still rejected (409), no writes."""
+    session_id = client.post("/sessions").json()["id"]
+    add_message(db, session_id=session_id, role="user", content="make a skill")
+    provider.script = [
+        _completion(
+            tool_calls=[
+                _build_skill_call(outputs=[{"key": "summary", "description": "x"}])
+            ]
+        )
+    ]
+    skill_id = client.post(f"/sessions/{session_id}/skills").json()["skill_id"]
+    update_status(db, skill_id, "committed")
+
+    resp = client.patch(
+        f"/skills/{skill_id}/configure",
+        json={"outputs": [{"key": "changed", "description": "y"}]},
+    )
+    assert resp.status_code == 409
+
+    skill = get_skill(db, skill_id)
+    assert skill is not None
+    assert [o.key for o in skill.config.outputs] == ["summary"]
+
+
+def test_configure_outputs_survive_rebuild_from_same_session(client, provider, db) -> None:
+    """CATALOG-155 sync strategy (a): configure writes outputs to config_json
+    *and* the linked edit session's ``outputs`` artifact, so rebuilding from
+    that same session does not silently discard the human's edit (ADR-0015:
+    build re-packs a skill from session artifacts).
+    """
+    config = SkillConfig(
+        name="Extractor",
+        description="Extracts fields.",
+        system_prompt="Extract the requested fields from the document.",
+        allowed_tools=["read_document"],
+        model="test/model",
+        outputs=[SkillOutput(key="summary", description="Set by the model.")],
+    )
+    skill_id = create_skill(
+        db,
+        name=config.name,
+        description=config.description,
+        config=config,
+        status="draft",
+    )
+
+    session_id = client.post(f"/skills/{skill_id}/edit").json()["session_id"]
+
+    resp = client.patch(
+        f"/skills/{skill_id}/configure",
+        json={
+            "outputs": [
+                {"key": "summary", "description": "Human-edited description."},
+                {"key": "details", "description": "Second output added by hand."},
+            ]
+        },
+    )
+    assert resp.status_code == 200, resp.text
+
+    # The linked session's `outputs` artifact was synced.
+    artifacts = client.get(f"/sessions/{session_id}/artifacts").json()
+    outputs_artifact = next(a for a in artifacts if a["type"] == "outputs")
+    assert json.loads(outputs_artifact["content"]) == [
+        {"key": "summary", "description": "Human-edited description."},
+        {"key": "details", "description": "Second output added by hand."},
+    ]
+
+    # Rebuilding from the same session must not discard the human edit.
+    rebuild = client.post(f"/sessions/{session_id}/skills")
+    assert rebuild.status_code == 200, rebuild.text
+    rebuilt_outputs = rebuild.json()["config"]["outputs"]
+    assert [o["key"] for o in rebuilt_outputs] == ["summary", "details"]
+    assert rebuilt_outputs[0]["description"] == "Human-edited description."
+
+    skill = get_skill(db, skill_id)
+    assert skill is not None
+    assert [o.key for o in skill.config.outputs] == ["summary", "details"]
+    assert skill.config.outputs[0].description == "Human-edited description."
+
+
+def test_configure_outputs_skip_sync_when_no_linked_session(client, provider, db) -> None:
+    """No linked edit session (fresh, never-edited draft) -> configure still
+    succeeds; the artifact sync is a no-op, not a failure (CATALOG-155).
+    """
+    session_id = client.post("/sessions").json()["id"]
+    add_message(db, session_id=session_id, role="user", content="make a skill")
+    provider.script = [_completion(tool_calls=[_build_skill_call(name="S")])]
+    skill_id = client.post(f"/sessions/{session_id}/skills").json()["skill_id"]
+
+    resp = client.patch(
+        f"/skills/{skill_id}/configure",
+        json={"outputs": [{"key": "result", "description": "y"}]},
+    )
+    assert resp.status_code == 200, resp.text
+    skill = get_skill(db, skill_id)
+    assert skill is not None
+    assert [o.key for o in skill.config.outputs] == ["result"]
 
 
 def test_rename_committed_skill(client, provider, db) -> None:

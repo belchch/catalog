@@ -96,6 +96,26 @@ def get_session(db: Database, session_id: str) -> SessionRow | None:
     return _row_to_session(row) if row is not None else None
 
 
+def get_session_by_skill_id(db: Database, skill_id: str) -> SessionRow | None:
+    """Find the session linked to a draft skill via ``session.skill_id``.
+
+    Only edit sessions (``POST /skills/{id}/edit``, CATALOG-17) set this
+    column, so a skill that has never been through an edit session has no
+    linked session and this returns ``None`` — callers must treat that as
+    "nothing to sync", not an error (CATALOG-155). If several sessions ever
+    point at the same skill (repeated edits without cleanup), the most
+    recently touched one wins.
+    """
+    with db.connect() as conn:
+        row = conn.execute(
+            f"SELECT {_SESSION_COLUMNS} FROM session WHERE skill_id = ? "
+            "ORDER BY COALESCE(updated_at, created_at) DESC, created_at DESC "
+            "LIMIT 1",
+            (skill_id,),
+        ).fetchone()
+    return _row_to_session(row) if row is not None else None
+
+
 def list_sessions(
     db: Database,
     *,
