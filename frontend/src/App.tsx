@@ -7,6 +7,7 @@ import {
   extractApiDetail,
   getHealth,
   getSession,
+  getRun,
   getSessionTools,
   isBuildTimeoutError,
   proposeSkillTracks,
@@ -88,6 +89,7 @@ function skippedDocsNotice(skippedIds: string[], docs?: DocumentOut[]): string {
 function highlightFromDetail(detail: string): ArtifactType | null {
   const d = detail.toLowerCase()
   if (d.includes('meta')) return 'meta'
+  if (d.includes('outputs')) return 'outputs'
   if (d.includes('steps')) return 'steps'
   if (d.includes('prompt')) return 'prompt'
   if (d.includes('script')) return 'script'
@@ -132,7 +134,7 @@ export default function App() {
   const [activeRunId, setActiveRunId] = useState<string | null>(null)
   const [settingsSkill, setSettingsSkill] = useState<{ skillId: string; preview: SkillPreview } | null>(null)
   const [editingSkill, setEditingSkill] = useState<{ skillId: string; name: string } | null>(null)
-  const [savedResultDoc, setSavedResultDoc] = useState<DocumentOut | null>(null)
+  const [savedResultDocs, setSavedResultDocs] = useState<DocumentOut[]>([])
   const [savingResult, setSavingResult] = useState(false)
   const [openSessions, setOpenSessions] = useState(false)
   const [openDocs, setOpenDocs] = useState(false)
@@ -215,7 +217,7 @@ export default function App() {
       setActiveRunId(null)
       setEditingSkill(null)
       setCurrentDocId(null)
-      setSavedResultDoc(null)
+      setSavedResultDocs([])
       setBuildError(null)
       setArtifactHighlight(null)
     }
@@ -689,7 +691,7 @@ export default function App() {
   const handleApply = useCallback(
     async (skillId: string, docIds: string[], mode: ApplyMode, prompt?: string) => {
       setNotice(null)
-      setSavedResultDoc(null)
+      setSavedResultDocs([])
       try {
         const epoch = sessionEpochRef.current
         const { id: sid } = await ensureSession()
@@ -709,7 +711,22 @@ export default function App() {
       setNotice(null)
       try {
         const doc = await saveRunResult(runId)
-        setSavedResultDoc(doc)
+        let ids = [doc.id]
+        try {
+          const runOut = await getRun(runId)
+          if (runOut.output_doc_ids && runOut.output_doc_ids.length > 0) {
+            ids = runOut.output_doc_ids
+          }
+        } catch {
+          ids = [doc.id]
+        }
+        setSavedResultDocs(
+          ids.map((id) =>
+            id === doc.id
+              ? doc
+              : { id, title: id.slice(0, 8), kind: 'result_md', created_at: doc.created_at },
+          ),
+        )
         await docs.refresh()
         await refreshSessionDocuments()
         setCurrentDocId(doc.id)
@@ -721,6 +738,11 @@ export default function App() {
     },
     [docs, refreshSessionDocuments],
   )
+
+  const handleOpenRunDoc = useCallback((docId: string) => {
+    setCurrentDocId(docId)
+    setActiveRunId(null)
+  }, [])
 
   const showChat = isLg || mainPane === 'chat'
   const showDraft = isLg || mainPane === 'draft'
@@ -875,7 +897,8 @@ export default function App() {
               onClose={() => setActiveRunId(null)}
               onSaveResult={handleSaveResult}
               savingResult={savingResult}
-              savedDoc={savedResultDoc}
+              savedDocs={savedResultDocs}
+              onOpenDoc={handleOpenRunDoc}
             />
           ) : !hasWorkspace ? (
             <div className="flex h-full items-center justify-center p-6">
@@ -1025,6 +1048,7 @@ export default function App() {
                             onSavePrompt={planner.savePrompt}
                             onSaveScript={planner.saveScript}
                             onSaveMeta={planner.saveMeta}
+                            onSaveOutputs={planner.saveOutputs}
                             onTryScript={planner.tryScript}
                           />
                         </div>

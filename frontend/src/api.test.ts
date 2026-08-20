@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest'
-import { parseStepsArtifact } from './api.ts'
+import {
+  normalizeRunArtifacts,
+  parseOutputsArtifact,
+  parseStepsArtifact,
+  serializeOutputs,
+  validateOutputs,
+} from './api.ts'
 
 describe('parseStepsArtifact', () => {
   it('parses wrapped steps and fills defaults', () => {
@@ -119,5 +125,89 @@ describe('parseStepsArtifact', () => {
   it('still normalizes an unknown type to script', () => {
     const { steps } = parseStepsArtifact(JSON.stringify([{ type: 'other' }]))
     expect(steps[0].type).toBe('script')
+  })
+})
+
+describe('parseOutputsArtifact', () => {
+  it('treats empty content as an empty list', () => {
+    expect(parseOutputsArtifact('')).toEqual({ outputs: [], parseError: null })
+  })
+
+  it('parses a key/description list', () => {
+    const { outputs, parseError } = parseOutputsArtifact(
+      JSON.stringify([
+        { key: 'brief', description: 'Резюме' },
+        { key: 'table', description: 'Таблица' },
+      ]),
+    )
+    expect(parseError).toBeNull()
+    expect(outputs).toEqual([
+      { key: 'brief', description: 'Резюме' },
+      { key: 'table', description: 'Таблица' },
+    ])
+  })
+
+  it('returns parseError when the payload is not an array', () => {
+    expect(parseOutputsArtifact('{not json').parseError).toBe('outputs must be JSON')
+    expect(parseOutputsArtifact('{"key":"x"}').parseError).toBe('outputs must be a JSON array')
+  })
+})
+
+describe('validateOutputs', () => {
+  it('accepts an empty list', () => {
+    expect(validateOutputs([]).ok).toBe(true)
+  })
+
+  it('rejects a bad key, a duplicate, and an empty description', () => {
+    const { ok, rowErrors } = validateOutputs([
+      { key: 'Brief', description: 'A' },
+      { key: 'brief', description: '' },
+      { key: 'brief', description: 'B' },
+    ])
+    expect(ok).toBe(false)
+    expect(rowErrors[0]?.key).toBe('ключ: только a-z, цифры и _')
+    expect(rowErrors[1]?.description).toBe('описание не может быть пустым')
+    expect(rowErrors[2]?.key).toBe('такой ключ уже есть')
+  })
+})
+
+describe('serializeOutputs', () => {
+  it('keeps key and description in order', () => {
+    expect(
+      serializeOutputs([
+        { key: 'a', description: 'one' },
+        { key: 'b', description: 'two' },
+      ]),
+    ).toBe(JSON.stringify([
+      { key: 'a', description: 'one' },
+      { key: 'b', description: 'two' },
+    ]))
+  })
+})
+
+describe('normalizeRunArtifacts', () => {
+  it('reads an array of objects', () => {
+    expect(
+      normalizeRunArtifacts([
+        { key: 'brief', text: 'HELLO', description: 'Резюме' },
+        { key: 'table', text: 'A -> a' },
+      ]),
+    ).toEqual([
+      { key: 'brief', text: 'HELLO', description: 'Резюме' },
+      { key: 'table', text: 'A -> a' },
+    ])
+  })
+
+  it('reads a key-to-text dictionary', () => {
+    expect(normalizeRunArtifacts({ brief: 'HELLO', table: 'A -> a' })).toEqual([
+      { key: 'brief', text: 'HELLO' },
+      { key: 'table', text: 'A -> a' },
+    ])
+  })
+
+  it('returns [] for missing or unknown shapes', () => {
+    expect(normalizeRunArtifacts(undefined)).toEqual([])
+    expect(normalizeRunArtifacts(null)).toEqual([])
+    expect(normalizeRunArtifacts('x')).toEqual([])
   })
 })

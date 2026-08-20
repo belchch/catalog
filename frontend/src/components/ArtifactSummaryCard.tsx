@@ -1,4 +1,5 @@
 import {
+  parseOutputsArtifact,
   parseStepsArtifact,
   type ArtifactType,
   type PipelineStepDraft,
@@ -22,12 +23,11 @@ interface ArtifactSummaryCardProps {
 
 const artifactLabels: Record<ArtifactType, string> = {
   meta: 'Настройки',
+  outputs: 'Выходы',
   steps: 'Шаги',
   prompt: 'Промпт',
   script: 'Скрипт',
 }
-
-const baseTypes: ArtifactType[] = ['meta', 'prompt', 'script']
 
 function formatStepCount(n: number): string {
   const n10 = n % 10
@@ -43,6 +43,10 @@ function isRowReady(type: ArtifactType, artifacts: SessionArtifact[]): boolean {
   if (type === 'steps') {
     if (art.is_valid === false) return false
     return parseStepsArtifact(art.content).steps.length >= 1
+  }
+  if (type === 'outputs') {
+    if (art.is_valid === false) return false
+    return parseOutputsArtifact(art.content).parseError == null
   }
   return art.content.trim().length > 0
 }
@@ -63,9 +67,14 @@ export function ArtifactSummaryCard({
   onOpen,
 }: ArtifactSummaryCardProps) {
   const hasSteps = artifacts.some((item) => item.type === 'steps')
-  const visible: ArtifactType[] = hasSteps
-    ? ['meta', 'steps', 'prompt', 'script']
-    : baseTypes
+  const hasOutputs = artifacts.some((item) => item.type === 'outputs')
+  const visible: ArtifactType[] = [
+    'meta',
+    ...(hasOutputs ? (['outputs'] as const) : []),
+    ...(hasSteps ? (['steps'] as const) : []),
+    'prompt',
+    'script',
+  ]
   const stepsArt = artifacts.find((item) => item.type === 'steps')
   const parsedSteps = stepsArt ? parseStepsArtifact(stepsArt.content).steps : []
   const needPrompt = !hasSteps || promptRequired(parsedSteps)

@@ -46,6 +46,7 @@ export interface UsePlannerSessionResult {
   savePrompt: (content: string) => Promise<SessionArtifact>
   saveScript: (content: string) => Promise<SessionArtifact>
   saveMeta: (meta: SkillMetaPatch) => Promise<SessionArtifact>
+  saveOutputs: (content: string) => Promise<SessionArtifact>
   tryScript: () => Promise<ScriptTryResult>
   send: (text: string, docIds?: string[], docs?: DocumentOut[]) => void
   cancel: () => void
@@ -514,6 +515,16 @@ export function usePlannerSession(
     [sessionId],
   )
 
+  const saveOutputs = useCallback(
+    async (content: string) => {
+      if (!sessionId) throw new Error('no session')
+      const art = await patchArtifact(sessionId, 'outputs', content)
+      setArtifacts((prev) => upsertArtifact(prev, art))
+      return art
+    },
+    [sessionId],
+  )
+
   const tryScript = useCallback(async () => {
     if (!sessionId) throw new Error('no session')
     const result = await trySkillScript(sessionId)
@@ -542,6 +553,7 @@ export function usePlannerSession(
     savePrompt,
     saveScript,
     saveMeta,
+    saveOutputs,
     tryScript,
     send,
     cancel,

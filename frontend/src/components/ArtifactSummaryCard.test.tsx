@@ -185,4 +185,36 @@ describe('ArtifactSummaryCard', () => {
     )
     expect(screen.getByText('Прогон устарел')).toBeTruthy()
   })
+
+  it('hides Выходы unless the outputs artifact exists', () => {
+    const { rerender } = render(
+      <ArtifactSummaryCard
+        artifacts={[art('meta', '{"kind":"agent"}'), art('prompt', 'hi')]}
+        loading={false}
+        error={null}
+        streaming={false}
+        onOpen={() => {}}
+      />,
+    )
+    expect(screen.getByText('Готово 2 из 3 разделов')).toBeTruthy()
+    expect(screen.queryByText('Выходы')).toBeNull()
+    rerender(
+      <ArtifactSummaryCard
+        artifacts={[
+          art('meta', '{"kind":"agent"}'),
+          art('prompt', 'hi'),
+          art(
+            'outputs',
+            JSON.stringify([{ key: 'brief', description: 'Резюме' }]),
+          ),
+        ]}
+        loading={false}
+        error={null}
+        streaming={false}
+        onOpen={() => {}}
+      />,
+    )
+    expect(screen.getByText('Выходы')).toBeTruthy()
+    expect(screen.getByText('Готово 3 из 4 разделов')).toBeTruthy()
+  })
 })

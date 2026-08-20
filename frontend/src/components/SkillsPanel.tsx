@@ -489,6 +489,11 @@ export function SkillsPanel({
                         {extraTags > 0 && (
                           <span className="badge-neutral">+{extraTags}</span>
                         )}
+                        {(s.outputs_count ?? 0) > 1 && (
+                          <span className="badge-neutral shrink-0">
+                            {s.outputs_count} вых.
+                          </span>
+                        )}
                       </span>
                       <span
                         className="shrink-0 rounded px-1.5 py-0.5 text-[10px] text-ink-faint"

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { normalizeRunArtifacts, type RunArtifact } from '../api.ts'
 import {
   attachSkillToolFields,
   extractToolInput,
@@ -61,6 +62,8 @@ export interface UseRunStreamResult {
   // Result document created by the run itself ("в док" mode) — null in
   // "на экран" mode until the user saves it explicitly (CATALOG-18).
   outputDocId: string | null
+  outputDocIds: string[]
+  artifacts: RunArtifact[]
   cancelling: boolean
   closed: boolean
   error: string | null
@@ -80,6 +83,8 @@ export function useRunStream(runId: string | null): UseRunStreamResult {
   const [status, setStatus] = useState<string | null>(null)
   const [finished, setFinished] = useState(false)
   const [outputDocId, setOutputDocId] = useState<string | null>(null)
+  const [outputDocIds, setOutputDocIds] = useState<string[]>([])
+  const [artifacts, setArtifacts] = useState<RunArtifact[]>([])
   const [cancelling, setCancelling] = useState(false)
   const [closed, setClosed] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -193,10 +198,19 @@ export function useRunStream(runId: string | null): UseRunStreamResult {
       case 'finish':
         if (e.status) setStatus(e.status)
         if (e.output_doc_id !== undefined) setOutputDocId(e.output_doc_id)
-        // The apply loop never streams tokens, so the finish frame's
-        // result_text (CATALOG-18) is the only source for the on-screen
-        // result — apply it unless something already streamed into resultText.
-        if (e.result_text != null) setResultText(e.result_text)
+        if (e.output_doc_ids !== undefined) {
+          setOutputDocIds(
+            Array.isArray(e.output_doc_ids)
+              ? e.output_doc_ids.filter((id): id is string => typeof id === 'string')
+              : [],
+          )
+        }
+        {
+          const arts = normalizeRunArtifacts(e.result_artifacts)
+          setArtifacts(arts)
+          if (arts.length > 0) setResultText(arts[0].text)
+          else if (e.result_text != null) setResultText(e.result_text)
+        }
         setFinished(true)
         setCancelling(false)
         break
@@ -217,6 +231,8 @@ export function useRunStream(runId: string | null): UseRunStreamResult {
     setStatus(null)
     setFinished(false)
     setOutputDocId(null)
+    setOutputDocIds([])
+    setArtifacts([])
     setClosed(false)
     setError(null)
 
@@ -242,6 +258,8 @@ export function useRunStream(runId: string | null): UseRunStreamResult {
     status,
     finished,
     outputDocId,
+    outputDocIds,
+    artifacts,
     cancelling,
     closed,
     error,

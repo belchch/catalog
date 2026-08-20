@@ -1212,6 +1212,7 @@ async def rename_skill_endpoint(
         tags=compute_tags(updated.config),
         input_arity=updated.config.input_arity,
         estimated_llm_calls=estimate_skill_llm_calls(updated.config),
+        outputs_count=len(updated.config.outputs),
     )
 
 
@@ -1245,6 +1246,7 @@ async def list_skills_endpoint(
             model=r.get("model"),
             reasoning=r.get("reasoning"),
             estimated_llm_calls=r.get("estimated_llm_calls", 0),
+            outputs_count=r.get("outputs_count", 0),
         )
         for r in rows
     ]

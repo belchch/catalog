@@ -101,4 +101,44 @@ describe('useRunStream', () => {
       skillDepth: 1,
     })
   })
+
+  it('reads a finish frame without named outputs as a single result', () => {
+    const { result } = renderHook(() => useRunStream('run-1'))
+    act(() => {
+      captured.onEvent?.({
+        type: 'finish',
+        status: 'ok',
+        output_doc_id: 'doc-1',
+        result_text: 'HELLO',
+      })
+    })
+    expect(result.current.resultText).toBe('HELLO')
+    expect(result.current.outputDocId).toBe('doc-1')
+    expect(result.current.outputDocIds).toEqual([])
+    expect(result.current.artifacts).toEqual([])
+    expect(result.current.finished).toBe(true)
+  })
+
+  it('reads named artifacts from finish and uses the primary text', () => {
+    const { result } = renderHook(() => useRunStream('run-1'))
+    act(() => {
+      captured.onEvent?.({
+        type: 'finish',
+        status: 'ok',
+        output_doc_id: 'doc-1',
+        output_doc_ids: ['doc-1', 'doc-2'],
+        result_text: 'ignored-when-artifacts-present',
+        result_artifacts: {
+          brief: 'PRIMARY',
+          table: 'TABLE',
+        },
+      })
+    })
+    expect(result.current.artifacts).toEqual([
+      { key: 'brief', text: 'PRIMARY' },
+      { key: 'table', text: 'TABLE' },
+    ])
+    expect(result.current.resultText).toBe('PRIMARY')
+    expect(result.current.outputDocIds).toEqual(['doc-1', 'doc-2'])
+  })
 })

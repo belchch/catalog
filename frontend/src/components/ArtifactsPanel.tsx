@@ -1,8 +1,13 @@
 import { useEffect, useId, useRef, useState, type ReactNode } from 'react'
 import {
   extractApiDetail,
+  parseOutputsArtifact,
   parseStepsArtifact,
+  serializeOutputs,
+  validateOutputs,
   type ArtifactType,
+  type OutputDraft,
+  type OutputRowError,
   type PipelineStepDraft,
   type ScriptTryResult,
   type SessionArtifact,
@@ -18,6 +23,7 @@ import {
   scriptDryRun,
   stageLabel,
 } from '../lib/dryRun.ts'
+import { OutputsList } from './OutputsList.tsx'
 import { StepsList } from './StepsList.tsx'
 import { VerifyChecksPicker, type VerifyCheckDraft } from './VerifyChecksPicker.tsx'
 
@@ -44,6 +50,7 @@ interface ArtifactsPanelProps {
   onSavePrompt: (content: string) => Promise<SessionArtifact>
   onSaveScript: (content: string) => Promise<SessionArtifact>
   onSaveMeta: (meta: SkillMetaPatch) => Promise<SessionArtifact>
+  onSaveOutputs: (content: string) => Promise<SessionArtifact>
   onTryScript: () => Promise<ScriptTryResult>
 }
 
@@ -214,14 +221,18 @@ export function ArtifactsPanel({
   onSavePrompt,
   onSaveScript,
   onSaveMeta,
+  onSaveOutputs,
   onTryScript,
 }: ArtifactsPanelProps) {
   const [promptDraft, setPromptDraft] = useState('')
   const [scriptDraft, setScriptDraft] = useState('')
   const [metaDraft, setMetaDraft] = useState<MetaDraft>(emptyMeta)
+  const [outputsDraft, setOutputsDraft] = useState<OutputDraft[]>([])
   const [serverPrompt, setServerPrompt] = useState('')
   const [serverScript, setServerScript] = useState('')
   const [serverMetaSnap, setServerMetaSnap] = useState(() => metaSnapshot(emptyMeta()))
+  const [serverOutputsSnap, setServerOutputsSnap] = useState(() => serializeOutputs([]))
+  const [outputsRowErrors, setOutputsRowErrors] = useState<(OutputRowError | null)[]>([])
   const [saving, setSaving] = useState<SectionSaving>(null)
   const [saveErrors, setSaveErrors] = useState<Partial<Record<ArtifactType, string>>>({})
   const [savedFlash, setSavedFlash] = useState<Partial<Record<ArtifactType, boolean>>>({})
@@ -231,12 +242,14 @@ export function ArtifactsPanel({
   const [inFlight, setInFlight] = useState(false)
 
   const metaRef = useRef<HTMLDivElement>(null)
+  const outputsRef = useRef<HTMLDivElement>(null)
   const stepsRef = useRef<HTMLDivElement>(null)
   const promptRef = useRef<HTMLTextAreaElement>(null)
   const scriptRef = useRef<HTMLTextAreaElement>(null)
   const nameRef = useRef<HTMLInputElement>(null)
+  const firstOutputKeyRef = useRef<HTMLInputElement>(null)
   const stepsHeadingId = useId()
-  const dirtyRef = useRef({ meta: false, prompt: false, script: false })
+  const dirtyRef = useRef({ meta: false, prompt: false, script: false, outputs: false })
   const flashTimers = useRef<Partial<Record<ArtifactType, ReturnType<typeof setTimeout>>>>({})
   const inFlightRef = useRef(false)
 
@@ -244,19 +257,29 @@ export function ArtifactsPanel({
   const scriptArt = findArtifact(artifacts, 'script')
   const metaArt = findArtifact(artifacts, 'meta')
   const stepsArt = findArtifact(artifacts, 'steps')
+  const outputsArt = findArtifact(artifacts, 'outputs')
 
   const dirtyMeta = metaSnapshot(metaDraft) !== serverMetaSnap
   const dirtyPrompt = promptDraft !== serverPrompt
   const dirtyScript = scriptDraft !== serverScript
-  dirtyRef.current = { meta: dirtyMeta, prompt: dirtyPrompt, script: dirtyScript }
+  const dirtyOutputs = serializeOutputs(outputsDraft) !== serverOutputsSnap
+  dirtyRef.current = {
+    meta: dirtyMeta,
+    prompt: dirtyPrompt,
+    script: dirtyScript,
+    outputs: dirtyOutputs,
+  }
 
   useEffect(() => {
     setPromptDraft('')
     setScriptDraft('')
     setMetaDraft(emptyMeta())
+    setOutputsDraft([])
     setServerPrompt('')
     setServerScript('')
     setServerMetaSnap(metaSnapshot(emptyMeta()))
+    setServerOutputsSnap(serializeOutputs([]))
+    setOutputsRowErrors([])
     setSaving(null)
     setSaveErrors({})
     setSavedFlash({})
@@ -290,13 +313,25 @@ export function ArtifactsPanel({
     } else if (metaArt) {
       setServerMetaSnap(metaSnapshot(parseMetaContent(metaArt.content)))
     }
-  }, [artifacts, promptArt, scriptArt, metaArt])
+    if (!dirty.outputs) {
+      const parsed = parseOutputsArtifact(outputsArt?.content ?? '')
+      setOutputsDraft(parsed.outputs)
+      setServerOutputsSnap(serializeOutputs(parsed.outputs))
+    } else if (outputsArt) {
+      setServerOutputsSnap(serializeOutputs(parseOutputsArtifact(outputsArt.content).outputs))
+    }
+  }, [artifacts, promptArt, scriptArt, metaArt, outputsArt])
 
   useEffect(() => {
     if (!highlightType) return
     if (highlightType === 'steps') {
       stepsRef.current?.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
       stepsRef.current?.focus({ preventScroll: true })
+      return
+    }
+    if (highlightType === 'outputs') {
+      outputsRef.current?.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
+      firstOutputKeyRef.current?.focus({ preventScroll: true })
       return
     }
     const el =
@@ -329,6 +364,7 @@ export function ArtifactsPanel({
   const kind = metaDraft.kind
   const hasMeta = Boolean(metaArt?.content.trim())
   const parsedSteps = parseStepsArtifact(stepsArt?.content ?? '')
+  const parsedOutputs = parseOutputsArtifact(outputsArt?.content ?? '')
   const showSteps = Boolean(stepsArt) || kind === 'pipeline'
 
   const flashSaved = (type: ArtifactType) => {
@@ -403,6 +439,37 @@ export function ArtifactsPanel({
       setSaveErrors((prev) => ({
         ...prev,
         script: e instanceof Error ? e.message : String(e),
+      }))
+    } finally {
+      setSaving(null)
+    }
+  }
+
+  const handleSaveOutputs = async () => {
+    if (streaming || saving === 'outputs') return
+    const checked = validateOutputs(outputsDraft)
+    if (!checked.ok) {
+      setOutputsRowErrors(checked.rowErrors)
+      const idx = checked.rowErrors.findIndex((item) => item != null)
+      const err = idx >= 0 ? checked.rowErrors[idx] : null
+      const elId = err?.key ? `outputs-key-${idx}` : `outputs-desc-${idx}`
+      document.getElementById(elId)?.focus()
+      return
+    }
+    setOutputsRowErrors([])
+    setSaving('outputs')
+    setSaveErrors((prev) => ({ ...prev, outputs: undefined }))
+    try {
+      const art = await onSaveOutputs(serializeOutputs(outputsDraft))
+      const parsed = parseOutputsArtifact(art.content)
+      setOutputsDraft(parsed.outputs)
+      setServerOutputsSnap(serializeOutputs(parsed.outputs))
+      flashSaved('outputs')
+      clearHighlightIf('outputs')
+    } catch (e) {
+      setSaveErrors((prev) => ({
+        ...prev,
+        outputs: e instanceof Error ? e.message : String(e),
       }))
     } finally {
       setSaving(null)
@@ -493,18 +560,28 @@ export function ArtifactsPanel({
     children: ReactNode,
   ) => {
     const highlighted = highlightType === type
+    const describedBy =
+      type === 'steps' && invalid
+        ? 'steps-error'
+        : type === 'outputs' && invalid && (outputsArt?.error || parsedOutputs.parseError)
+          ? 'outputs-error'
+          : undefined
     return (
       <div
         ref={
-          type === 'meta' ? metaRef : type === 'steps' ? stepsRef : undefined
+          type === 'meta'
+            ? metaRef
+            : type === 'steps'
+              ? stepsRef
+              : type === 'outputs'
+                ? outputsRef
+                : undefined
         }
         role={type === 'steps' ? 'group' : undefined}
         aria-labelledby={type === 'steps' ? stepsHeadingId : undefined}
         tabIndex={type === 'steps' ? -1 : undefined}
-        aria-invalid={type === 'steps' && invalid ? true : undefined}
-        aria-describedby={
-          type === 'steps' && invalid ? 'steps-error' : undefined
-        }
+        aria-invalid={(type === 'steps' || type === 'outputs') && invalid ? true : undefined}
+        aria-describedby={describedBy}
         className={
           'rounded-md border bg-surface p-3 ' +
           (invalid ? 'border-danger-line ' : 'border-line ') +
@@ -788,6 +865,69 @@ export function ArtifactsPanel({
             )}
           </>
         ))}
+
+        {sectionShell(
+          'outputs',
+          outputsArt?.is_valid === false ||
+            Boolean(parsedOutputs.parseError) ||
+            outputsRowErrors.some((item) => item != null),
+          (
+            <>
+              <div className="mb-2 flex items-center justify-between gap-2">
+                <h3 className="text-[11px] uppercase tracking-wide text-ink-faint">
+                  Outputs
+                </h3>
+                {statusRow(outputsArt)}
+              </div>
+              <p className="mb-2 text-[10px] text-ink-faint">
+                {parsedOutputs.parseError
+                  ? 'Не удалось разобрать список выходов'
+                  : outputsDraft.length === 0
+                    ? 'Выходов нет — прогон даёт один результат.'
+                    : 'Первый в списке — основной результат прогона.'}
+              </p>
+              {parsedOutputs.parseError && (
+                <>
+                  <p id="outputs-error" className="mb-1 text-[11px] text-danger-ink">
+                    {outputsArt?.error || parsedOutputs.parseError}
+                  </p>
+                  {outputsArt && (
+                    <details className="mb-2">
+                      <summary className="cursor-pointer text-[11px] text-ink-faint">
+                        сырой JSON
+                      </summary>
+                      <pre className="mt-1 max-h-40 overflow-auto whitespace-pre-wrap break-words rounded bg-surface-muted p-1.5 font-mono text-[11px] text-ink-muted">
+                        {outputsArt.content}
+                      </pre>
+                    </details>
+                  )}
+                </>
+              )}
+              <OutputsList
+                value={outputsDraft}
+                disabled={inputsDisabled}
+                rowErrors={outputsRowErrors}
+                firstKeyRef={firstOutputKeyRef}
+                onChange={(next) => {
+                  setOutputsDraft(next)
+                  setOutputsRowErrors([])
+                  clearHighlightIf('outputs')
+                }}
+              />
+              {outputsArt?.is_valid === false && outputsArt.error && !parsedOutputs.parseError && (
+                <p id="outputs-error" className="mt-1 text-[11px] text-danger-ink">
+                  {outputsArt.error}
+                </p>
+              )}
+              {saveBtn(
+                'outputs',
+                'Сохранить outputs',
+                () => void handleSaveOutputs(),
+                !dirtyOutputs,
+              )}
+            </>
+          ),
+        )}
 
         {showSteps &&
           sectionShell('steps', stepsArt?.is_valid === false, (

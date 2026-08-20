@@ -424,6 +424,7 @@ def _session_skill_out(row) -> SkillOut:
         model=row.config.model or None,
         reasoning=row.config.reasoning or None,
         estimated_llm_calls=estimate_skill_llm_calls(row.config),
+        outputs_count=len(row.config.outputs),
     )
 
 
