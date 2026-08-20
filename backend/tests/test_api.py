@@ -2551,6 +2551,75 @@ def test_named_outputs_preview_save_creates_both_documents(client, db) -> None:
     assert resp2.status_code == 409
 
 
+def test_named_outputs_save_blocked_while_companion_remains(client, db) -> None:
+    workspace = Path(client.app.state.workspace)
+    doc_id = _upload(client, "input.md", b"source text")
+    skill = SkillConfig(
+        name="splitter",
+        description="two outputs",
+        system_prompt="",
+        allowed_tools=[],
+        model="test/model",
+        kind="script",
+        code='result = {"brief": document.upper(), "table": "A -> a"}\n',
+        outputs=[
+            SkillOutput(key="brief", description="Текст"),
+            SkillOutput(key="table", description="Таблица"),
+        ],
+        verify_checks=[VerifyCheck("non_empty")],
+    )
+    skill_id = create_skill(
+        db,
+        name=skill.name,
+        description=skill.description,
+        config=skill,
+        status="committed",
+    )
+    result = asyncio.run(
+        apply_skill_collect(
+            provider=client.app.state.provider,
+            db=db,
+            workspace_dir=str(workspace),
+            skill=skill,
+            skill_id=skill_id,
+            input_doc_ids=[doc_id],
+            base_tools=build_document_tools(db, workspace),
+            persist=False,
+        )
+    )
+    assert result.status == "ok"
+    run_id = result.run_id
+    assert run_id is not None
+    saved = client.post(f"/runs/{run_id}/save")
+    assert saved.status_code == 200, saved.text
+    run_after = client.get(f"/runs/{run_id}").json()
+    primary_id = run_after["output_doc_id"]
+    companion_id = run_after["output_doc_ids"][1]
+    assert client.delete(f"/documents/{primary_id}").status_code == 204
+    after_primary = client.get(f"/runs/{run_id}").json()
+    assert after_primary["output_doc_id"] is None
+    assert after_primary["output_doc_ids"] == [companion_id]
+    blocked = client.post(f"/runs/{run_id}/save")
+    assert blocked.status_code == 409
+    result_docs = [
+        item for item in client.get("/documents").json() if item["kind"] == "result_md"
+    ]
+    assert [item["id"] for item in result_docs] == [companion_id]
+    assert client.delete(f"/documents/{companion_id}").status_code == 204
+    after_all = client.get(f"/runs/{run_id}").json()
+    assert after_all["output_doc_id"] is None
+    assert after_all["output_doc_ids"] == []
+    again = client.post(f"/runs/{run_id}/save")
+    assert again.status_code == 200, again.text
+    restored = client.get(f"/runs/{run_id}").json()
+    assert restored["output_doc_id"] == again.json()["id"]
+    assert len(restored["output_doc_ids"]) == 2
+    result_docs = [
+        item for item in client.get("/documents").json() if item["kind"] == "result_md"
+    ]
+    assert len(result_docs) == 2
+
+
 def test_named_outputs_save_survives_skill_output_edit(client, db) -> None:
     workspace = Path(client.app.state.workspace)
     doc_id = _upload(client, "input.md", b"source text")

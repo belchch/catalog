@@ -412,6 +412,7 @@ def test_delete_document_nullifies_skill_run_refs(db: Database, tmp_path: Path) 
     input_a = ingest_file(db, tmp_path, filename="a.md", content=b"a")
     input_b = ingest_file(db, tmp_path, filename="b.md", content=b"b")
     output = ingest_file(db, tmp_path, filename="out.md", content=b"out")
+    companion = ingest_file(db, tmp_path, filename="companion.md", content=b"side")
     run_id = create_run(
         db, skill_id="skill1", session_id=None, input_doc_ids=[input_a.id, input_b.id]
     )
@@ -422,6 +423,7 @@ def test_delete_document_nullifies_skill_run_refs(db: Database, tmp_path: Path) 
         output_doc_id=output.id,
         trace=Trace(),
         result_text="done",
+        output_doc_ids=[output.id, companion.id],
     )
 
     delete_document(db, tmp_path, input_a.id)
@@ -434,6 +436,13 @@ def test_delete_document_nullifies_skill_run_refs(db: Database, tmp_path: Path) 
     assert run["input_doc_id"] == input_b.id
     assert run["input_doc_ids"] == [input_b.id]
     assert run["output_doc_id"] is None
+    assert run["output_doc_ids"] == [companion.id]
+
+    delete_document(db, tmp_path, companion.id)
+    run = get_run(db, run_id)
+    assert run is not None
+    assert run["output_doc_id"] is None
+    assert run["output_doc_ids"] == []
 
 
 def test_list_documents_tool_reconciles_orphans(db: Database, tmp_path: Path) -> None:

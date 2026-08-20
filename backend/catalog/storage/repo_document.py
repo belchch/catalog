@@ -169,35 +169,45 @@ def list_documents_by_kind(db: Database, kind: str) -> list[DocumentRow]:
     return [_row_to_document(r) for r in rows]
 
 
+def _parse_doc_ids(raw: object, fallback: str | None) -> list[str]:
+    if raw:
+        try:
+            parsed = json.loads(raw)
+        except (json.JSONDecodeError, TypeError):
+            return [fallback] if fallback else []
+        if isinstance(parsed, list):
+            return [str(item) for item in parsed]
+        return [fallback] if fallback else []
+    if fallback:
+        return [fallback]
+    return []
+
+
 def _nullify_skill_run_refs(conn: sqlite3.Connection, doc_id: str) -> None:
-    conn.execute(
-        "UPDATE skill_run SET output_doc_id = NULL WHERE output_doc_id = ?",
-        (doc_id,),
-    )
     rows = conn.execute(
-        "SELECT id, input_doc_id, input_doc_ids FROM skill_run"
+        "SELECT id, input_doc_id, input_doc_ids, output_doc_id, output_doc_ids "
+        "FROM skill_run"
     ).fetchall()
     for row in rows:
-        raw_ids = row["input_doc_ids"]
-        ids: list[str]
-        if raw_ids:
-            try:
-                ids = list(json.loads(raw_ids))
-            except (json.JSONDecodeError, TypeError):
-                ids = [row["input_doc_id"]] if row["input_doc_id"] else []
-        elif row["input_doc_id"]:
-            ids = [row["input_doc_id"]]
-        else:
-            ids = []
-        if doc_id not in ids and row["input_doc_id"] != doc_id:
+        input_ids = _parse_doc_ids(row["input_doc_ids"], row["input_doc_id"])
+        output_ids = _parse_doc_ids(row["output_doc_ids"], row["output_doc_id"])
+        input_changed = doc_id in input_ids or row["input_doc_id"] == doc_id
+        output_changed = doc_id in output_ids or row["output_doc_id"] == doc_id
+        if not input_changed and not output_changed:
             continue
-        new_ids = [i for i in ids if i != doc_id]
-        first = new_ids[0] if new_ids else None
+        new_inputs = [item for item in input_ids if item != doc_id]
+        new_outputs = [item for item in output_ids if item != doc_id]
+        new_output_primary = row["output_doc_id"]
+        if new_output_primary == doc_id:
+            new_output_primary = None
         conn.execute(
-            "UPDATE skill_run SET input_doc_id = ?, input_doc_ids = ? WHERE id = ?",
+            "UPDATE skill_run SET input_doc_id = ?, input_doc_ids = ?, "
+            "output_doc_id = ?, output_doc_ids = ? WHERE id = ?",
             (
-                first,
-                json.dumps(new_ids, ensure_ascii=False) if new_ids else None,
+                new_inputs[0] if new_inputs else None,
+                json.dumps(new_inputs, ensure_ascii=False) if new_inputs else None,
+                new_output_primary,
+                json.dumps(new_outputs, ensure_ascii=False) if new_outputs else None,
                 row["id"],
             ),
         )

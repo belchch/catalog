@@ -137,7 +137,10 @@ async def save_run_result_endpoint(
     run = get_run(db, run_id)
     if run is None:
         raise HTTPException(status_code=404, detail="run not found")
-    if run["output_doc_id"]:
+    saved_ids = list(run.get("output_doc_ids") or [])
+    if run["output_doc_id"] and run["output_doc_id"] not in saved_ids:
+        saved_ids.insert(0, run["output_doc_id"])
+    if any(get_document(db, doc_id) is not None for doc_id in saved_ids):
         raise HTTPException(status_code=409, detail="run result is already saved")
     if run["status"] != "ok" or not run["result_text"]:
         raise HTTPException(status_code=409, detail="run has no result to save")
