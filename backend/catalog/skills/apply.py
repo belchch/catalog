@@ -253,49 +253,63 @@ def persist_run_outputs(
         items.append(("", title, primary_text))
 
     allocated: list[tuple[str, str, str, str]] = []
-    for key, item_title, text in items:
-        rel_path = allocate_rel_path(
-            workspace_path,
-            safe_filename(item_title, ".md"),
-            subdir="results",
-        )
-        dest = workspace_path / rel_path
-        dest.parent.mkdir(parents=True, exist_ok=True)
-        dest.touch()
-        allocated.append((key, item_title, text, rel_path))
+    try:
+        for key, item_title, text in items:
+            rel_path = allocate_rel_path(
+                workspace_path,
+                safe_filename(item_title, ".md"),
+                subdir="results",
+            )
+            dest = workspace_path / rel_path
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            dest.touch()
+            allocated.append((key, item_title, text, rel_path))
 
-    stems = [Path(rel_path).stem for *_, rel_path in allocated]
-    input_stems = [Path(doc.path).stem for doc in docs]
-    title_map = build_title_to_stem_map(db)
-    doc_ids: list[str] = []
-    rewritten_primary = primary_text
-    rewritten_artifacts: dict[str, str] = {}
-    for index, (_key, item_title, text, rel_path) in enumerate(allocated):
-        sibling_stems = [stem for i, stem in enumerate(stems) if i != index]
-        file_text = rewrite_wiki_links(text, title_map)
-        file_text = ensure_parent_wikilinks(file_text, input_stems + sibling_stems)
-        dest = workspace_path / rel_path
-        dest.write_text(file_text, encoding="utf-8")
-        st = dest.stat()
-        out_id = uuid.uuid4().hex
-        create_document(
-            db,
-            title=item_title,
-            path=rel_path,
-            kind="result_md",
-            doc_id=out_id,
-            mtime=st.st_mtime,
-            size=st.st_size,
-            content_hash=content_hash_bytes(file_text.encode("utf-8")),
-        )
-        doc_ids.append(out_id)
-        if _key:
-            rewritten_artifacts[_key] = file_text
-        if index == 0:
-            rewritten_primary = file_text
-    if session_id is not None and doc_ids:
-        attach_documents(db, session_id, doc_ids)
-    return doc_ids[0], doc_ids, rewritten_primary, rewritten_artifacts
+        stems = [Path(rel_path).stem for *_, rel_path in allocated]
+        input_stems = [Path(doc.path).stem for doc in docs]
+        title_map = build_title_to_stem_map(db)
+        prepared: list[tuple[str, str, str, str, str]] = []
+        rewritten_primary = primary_text
+        rewritten_artifacts: dict[str, str] = {}
+        for index, (_key, item_title, text, rel_path) in enumerate(allocated):
+            sibling_stems = [stem for i, stem in enumerate(stems) if i != index]
+            file_text = rewrite_wiki_links(text, title_map)
+            file_text = ensure_parent_wikilinks(
+                file_text, input_stems + sibling_stems
+            )
+            dest = workspace_path / rel_path
+            dest.write_text(file_text, encoding="utf-8")
+            out_id = uuid.uuid4().hex
+            prepared.append((_key, item_title, file_text, rel_path, out_id))
+            if _key:
+                rewritten_artifacts[_key] = file_text
+            if index == 0:
+                rewritten_primary = file_text
+
+        doc_ids = [out_id for *_, out_id in prepared]
+        with db.connect() as conn:
+            for _key, item_title, file_text, rel_path, out_id in prepared:
+                dest = workspace_path / rel_path
+                st = dest.stat()
+                create_document(
+                    db,
+                    title=item_title,
+                    path=rel_path,
+                    kind="result_md",
+                    doc_id=out_id,
+                    mtime=st.st_mtime,
+                    size=st.st_size,
+                    content_hash=content_hash_bytes(file_text.encode("utf-8")),
+                    conn=conn,
+                )
+            if session_id is not None and doc_ids:
+                attach_documents(db, session_id, doc_ids, conn=conn)
+        return doc_ids[0], doc_ids, rewritten_primary, rewritten_artifacts
+    except Exception:
+        for *_, rel_path in allocated:
+            dest = workspace_path / rel_path
+            dest.unlink(missing_ok=True)
+        raise
 
 
 def _config_hash(skill: SkillConfig) -> str:

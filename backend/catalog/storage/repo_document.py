@@ -47,8 +47,8 @@ _SELECT_COLS = (
 )
 
 
-def create_document(
-    db: Database,
+def _insert_document(
+    conn: sqlite3.Connection,
     *,
     title: str,
     path: str,
@@ -62,23 +62,22 @@ def create_document(
     if doc_id is None:
         doc_id = uuid.uuid4().hex
     created_at = _now_iso()
-    with db.connect() as conn:
-        conn.execute(
-            "INSERT INTO document("
-            "id, title, path, kind, created_at, mtime, size, content_hash, extracted_text"
-            ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            (
-                doc_id,
-                title,
-                path,
-                kind,
-                created_at,
-                mtime,
-                size,
-                content_hash,
-                extracted_text,
-            ),
-        )
+    conn.execute(
+        "INSERT INTO document("
+        "id, title, path, kind, created_at, mtime, size, content_hash, extracted_text"
+        ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        (
+            doc_id,
+            title,
+            path,
+            kind,
+            created_at,
+            mtime,
+            size,
+            content_hash,
+            extracted_text,
+        ),
+    )
     return DocumentRow(
         id=doc_id,
         title=title,
@@ -90,6 +89,45 @@ def create_document(
         content_hash=content_hash,
         extracted_text=extracted_text,
     )
+
+
+def create_document(
+    db: Database,
+    *,
+    title: str,
+    path: str,
+    kind: str,
+    doc_id: str | None = None,
+    mtime: float | None = None,
+    size: int | None = None,
+    content_hash: str | None = None,
+    extracted_text: str | None = None,
+    conn: sqlite3.Connection | None = None,
+) -> DocumentRow:
+    if conn is not None:
+        return _insert_document(
+            conn,
+            title=title,
+            path=path,
+            kind=kind,
+            doc_id=doc_id,
+            mtime=mtime,
+            size=size,
+            content_hash=content_hash,
+            extracted_text=extracted_text,
+        )
+    with db.connect() as opened:
+        return _insert_document(
+            opened,
+            title=title,
+            path=path,
+            kind=kind,
+            doc_id=doc_id,
+            mtime=mtime,
+            size=size,
+            content_hash=content_hash,
+            extracted_text=extracted_text,
+        )
 
 
 def update_document(

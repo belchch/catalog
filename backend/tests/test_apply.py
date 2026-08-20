@@ -2946,6 +2946,64 @@ def test_persist_run_outputs_keeps_artifacts_without_skill_outputs(
     assert get_document(db, output_ids[1]) is not None
 
 
+def test_persist_run_outputs_rolls_back_partial_pack(
+    db: Database, workspace: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from catalog.storage.repo_document import create_document
+
+    skill = _two_output_script()
+    input_doc_id = _ingest_input(db, workspace)
+    docs = [get_document(db, input_doc_id)]
+    session_id = create_session(db)
+    real = create_document
+    calls = {"n": 0}
+
+    def _flaky(*args: object, **kwargs: object):
+        calls["n"] += 1
+        if calls["n"] >= 2:
+            raise RuntimeError("disk full")
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr("catalog.skills.apply.create_document", _flaky)
+    results_dir = workspace / "results"
+    before_files = set(results_dir.glob("*.md")) if results_dir.is_dir() else set()
+    with pytest.raises(RuntimeError, match="disk full"):
+        persist_run_outputs(
+            db,
+            str(workspace),
+            skill=skill,
+            docs=docs,
+            session_id=session_id,
+            primary_text="SOURCE TEXT",
+            artifacts={"brief": "SOURCE TEXT", "table": "A -> a"},
+            primary_title=f"{skill.name} — результат",
+        )
+    assert _list_result_docs(db) == []
+    after_files = set(results_dir.glob("*.md")) if results_dir.is_dir() else set()
+    assert after_files == before_files
+    assert list_session_documents(db, session_id) == []
+
+    monkeypatch.setattr(
+        "catalog.skills.apply.create_document", create_document
+    )
+    primary_id, output_ids, _text, _rewritten = persist_run_outputs(
+        db,
+        str(workspace),
+        skill=skill,
+        docs=docs,
+        session_id=session_id,
+        primary_text="SOURCE TEXT",
+        artifacts={"brief": "SOURCE TEXT", "table": "A -> a"},
+        primary_title=f"{skill.name} — результат",
+    )
+    assert len(output_ids) == 2
+    assert get_document(db, primary_id) is not None
+    assert len(_list_result_docs(db)) == 2
+    assert {doc.id for doc in list_session_documents(db, session_id)} == set(
+        output_ids
+    )
+
+
 def _list_result_docs(db: Database):
     from catalog.storage.repo_document import list_documents
 
