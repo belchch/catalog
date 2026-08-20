@@ -51,3 +51,7 @@ review-*.md
 # Cursor pipeline state (local orchestrator state, not shared via git)
 .cursor/state/
 .cursor/steps-results/
+
+# Claude pipeline state (local orchestrator state, not shared via git)
+.claude/state/
+.claude/steps-results/
