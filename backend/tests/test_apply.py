@@ -30,7 +30,12 @@ from catalog.llm.base import (
     ToolCall,
     ToolSpec,
 )
-from catalog.skills.apply import PipelineStepError, apply_skill, apply_skill_collect
+from catalog.skills.apply import (
+    PipelineStepError,
+    apply_skill,
+    apply_skill_collect,
+    persist_run_outputs,
+)
 from catalog.skills.budget import SkillBudget, SkillCallContext
 from catalog.skills.artifact_tools import (
     resolve_pipeline_skill_steps,
@@ -39,10 +44,12 @@ from catalog.skills.artifact_tools import (
 from catalog.skills.config import (
     PipelineStep,
     SkillConfig,
+    SkillOutput,
     VerifyCheck,
     pipeline_step_from_dict,
     pipeline_step_to_dict,
 )
+from catalog.skills.skill_tools import config_hash
 from catalog.skills.repo_run import get_run
 from catalog.skills.repo_skill import create_skill, get_skill
 from catalog.storage.db import Database
@@ -1215,6 +1222,85 @@ def test_skill_config_kind_roundtrip() -> None:
     assert legacy.kind == "agent"
     assert legacy.code == ""
     assert legacy.steps == []
+    assert legacy.outputs == []
+
+
+def test_skill_config_outputs_roundtrip() -> None:
+    skill = SkillConfig(
+        name="multi",
+        description="d",
+        system_prompt="",
+        allowed_tools=[],
+        model="m",
+        outputs=[
+            SkillOutput(key="brief", description="Краткое резюме"),
+            SkillOutput(key="table", description="Таблица перекодировки"),
+        ],
+    )
+    restored = SkillConfig.from_json(skill.to_json())
+    assert [item.key for item in restored.outputs] == ["brief", "table"]
+    assert restored.outputs[0].description == "Краткое резюме"
+    assert restored.outputs[1].description == "Таблица перекодировки"
+
+
+def test_skill_config_outputs_missing_key_defaults_empty() -> None:
+    legacy = SkillConfig.from_json(
+        '{"name":"x","description":"d","system_prompt":"","allowed_tools":[],'
+        '"model":"m","temperature":0,"max_iterations":1,"max_retries":0,'
+        '"verify_checks":[],"output_kind":"md"}'
+    )
+    assert legacy.outputs == []
+    empty = SkillConfig(
+        name="x",
+        description="d",
+        system_prompt="",
+        allowed_tools=[],
+        model="m",
+    )
+    assert "outputs" not in empty.to_json()
+    assert SkillConfig.from_json(empty.to_json()).outputs == []
+
+
+def test_config_hash_changes_when_outputs_change() -> None:
+    base = SkillConfig(
+        name="x",
+        description="d",
+        system_prompt="",
+        allowed_tools=[],
+        model="m",
+    )
+    changed = SkillConfig(
+        name="x",
+        description="d",
+        system_prompt="",
+        allowed_tools=[],
+        model="m",
+        outputs=[SkillOutput(key="brief", description="Резюме")],
+    )
+    assert config_hash(base.to_json()) != config_hash(changed.to_json())
+    reordered = SkillConfig(
+        name="x",
+        description="d",
+        system_prompt="",
+        allowed_tools=[],
+        model="m",
+        outputs=[
+            SkillOutput(key="table", description="Таблица"),
+            SkillOutput(key="brief", description="Резюме"),
+        ],
+    )
+    two = SkillConfig(
+        name="x",
+        description="d",
+        system_prompt="",
+        allowed_tools=[],
+        model="m",
+        outputs=[
+            SkillOutput(key="brief", description="Резюме"),
+            SkillOutput(key="table", description="Таблица"),
+        ],
+    )
+    assert config_hash(two.to_json()) != config_hash(reordered.to_json())
 
 
 def _pipeline_skill() -> SkillConfig:
@@ -2601,3 +2687,1117 @@ def test_apply_cancelled_marks_run_cancelled(db: Database, workspace: Path) -> N
     assert row["output_doc_id"] is None
     # Partial trace preserved.
     assert row["trace_json"] is not None
+
+
+class _EmitThenBlockProvider(ScriptProvider):
+    def __init__(self) -> None:
+        super().__init__(script=[])
+        self.calls = 0
+
+    async def complete(
+        self,
+        model: str,
+        messages: list[Message],
+        tools: list[ToolSpec] | None = None,
+        temperature: float = 0.0,
+        tool_choice: str = "auto",
+        reasoning: str = "",
+    ) -> CompletionResult:
+        self.seen_tools.append(list(tools) if tools else None)
+        self.seen_messages.append(list(messages))
+        self.calls += 1
+        if self.calls == 1:
+            return _emit_calls(("brief", "KEEP ME"))
+        await asyncio.Event().wait()
+        return _result("unreachable")
+
+
+def test_apply_cancelled_keeps_partial_emit_outputs(
+    db: Database, workspace: Path
+) -> None:
+    skill = _two_output_agent()
+    skill_id = create_skill(
+        db, name=skill.name, description=skill.description, config=skill
+    )
+    input_doc_id = _ingest_input(db, workspace)
+    provider = _EmitThenBlockProvider()
+
+    async def _run_and_cancel() -> None:
+        task = asyncio.ensure_future(
+            _collect_events(
+                apply_skill(
+                    provider=provider,
+                    db=db,
+                    workspace_dir=str(workspace),
+                    skill=skill,
+                    skill_id=skill_id,
+                    input_doc_ids=[input_doc_id],
+                    base_tools=build_document_tools(db, workspace),
+                )
+            )
+        )
+        for _ in range(50):
+            if provider.calls >= 2:
+                break
+            await asyncio.sleep(0.01)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+
+    asyncio.run(_run_and_cancel())
+    with db.connect() as conn:
+        row = conn.execute(
+            "SELECT status, result_text, result_artifacts FROM skill_run "
+            "WHERE skill_id = ?",
+            (skill_id,),
+        ).fetchone()
+    assert row is not None
+    assert row["status"] == "cancelled"
+    import json as _json
+
+    artifacts = _json.loads(row["result_artifacts"] or "{}")
+    assert artifacts == {"brief": "KEEP ME"}
+
+
+def _two_output_script() -> SkillConfig:
+    return SkillConfig(
+        name="splitter",
+        description="two named outputs",
+        system_prompt="",
+        allowed_tools=[],
+        model="test/model",
+        verify_checks=[VerifyCheck("non_empty")],
+        kind="script",
+        code='result = {"brief": document.upper(), "table": "A -> a"}\n',
+        outputs=[
+            SkillOutput(key="brief", description="Псевдонимизированный текст"),
+            SkillOutput(key="table", description="Таблица перекодировки"),
+        ],
+    )
+
+
+def test_apply_script_two_outputs_persist_creates_two_documents(
+    db: Database, workspace: Path
+) -> None:
+    skill = _two_output_script()
+    skill_id = create_skill(
+        db, name=skill.name, description=skill.description, config=skill
+    )
+    session_id = create_session(db)
+    input_doc_id = _ingest_input(db, workspace)
+    result = asyncio.run(
+        apply_skill_collect(
+            provider=ScriptProvider([]),
+            db=db,
+            workspace_dir=str(workspace),
+            skill=skill,
+            skill_id=skill_id,
+            input_doc_ids=[input_doc_id],
+            base_tools=build_document_tools(db, workspace),
+            session_id=session_id,
+        )
+    )
+    assert result.status == "ok"
+    assert result.output_doc_id is not None
+    run = get_run(db, result.run_id)
+    assert run is not None
+    assert run["output_doc_id"] == result.output_doc_id
+    assert run["output_doc_ids"] == result.output_doc_ids
+    assert len(run["output_doc_ids"]) == 2
+    assert run["output_doc_ids"][0] == run["output_doc_id"]
+    assert "SOURCE TEXT" in (result.result_text or "")
+    primary = get_document(db, run["output_doc_id"])
+    companion = get_document(db, run["output_doc_ids"][1])
+    assert primary is not None
+    assert companion is not None
+    assert companion.title == f"{skill.name} — Таблица перекодировки"
+    primary_text = (workspace / primary.path).read_text(encoding="utf-8")
+    companion_text = (workspace / companion.path).read_text(encoding="utf-8")
+    assert list(run["result_artifacts"]) == ["brief", "table"]
+    assert run["result_artifacts"]["brief"] == primary_text
+    assert run["result_artifacts"]["table"] == companion_text
+    input_stem = Path(get_document(db, input_doc_id).path).stem
+    assert f"[[{input_stem}]]" in primary_text
+    assert f"[[{Path(companion.path).stem}]]" in primary_text
+    assert f"[[{Path(primary.path).stem}]]" in companion_text
+    assert f"[[{input_stem}]]" in companion_text
+    session_docs = {doc.id for doc in list_session_documents(db, session_id)}
+    assert run["output_doc_id"] in session_docs
+    assert run["output_doc_ids"][1] in session_docs
+
+
+def test_apply_script_two_outputs_preview_then_save(
+    db: Database, workspace: Path
+) -> None:
+    from catalog.skills.apply import persist_run_outputs
+    from catalog.skills.repo_run import set_output_doc_id
+
+    skill = _two_output_script()
+    skill_id = create_skill(
+        db, name=skill.name, description=skill.description, config=skill
+    )
+    input_doc_id = _ingest_input(db, workspace)
+    result = asyncio.run(
+        apply_skill_collect(
+            provider=ScriptProvider([]),
+            db=db,
+            workspace_dir=str(workspace),
+            skill=skill,
+            skill_id=skill_id,
+            input_doc_ids=[input_doc_id],
+            base_tools=build_document_tools(db, workspace),
+            persist=False,
+        )
+    )
+    assert result.status == "ok"
+    assert result.output_doc_id is None
+    assert result.output_doc_ids is None
+    run = get_run(db, result.run_id)
+    assert run is not None
+    assert run["output_doc_id"] is None
+    assert run["output_doc_ids"] == []
+    assert run["result_artifacts"] == {
+        "brief": "SOURCE TEXT",
+        "table": "A -> a",
+    }
+    assert all(doc.kind != "result_md" for doc in _list_result_docs(db))
+
+    docs = [get_document(db, input_doc_id)]
+    primary_id, output_ids, _text, _rewritten = persist_run_outputs(
+        db,
+        str(workspace),
+        skill=skill,
+        docs=docs,
+        session_id=None,
+        primary_text=run["result_text"],
+        artifacts=run["result_artifacts"],
+        primary_title=f"{skill.name} — результат",
+    )
+    set_output_doc_id(db, result.run_id, primary_id, output_ids)
+    saved = get_run(db, result.run_id)
+    assert saved is not None
+    assert saved["output_doc_id"] == primary_id
+    assert saved["output_doc_ids"] == output_ids
+    assert len(output_ids) == 2
+    assert get_document(db, output_ids[0]) is not None
+    assert get_document(db, output_ids[1]) is not None
+
+
+def test_persist_run_outputs_keeps_artifacts_when_skill_outputs_change(
+    db: Database, workspace: Path
+) -> None:
+    input_doc_id = _ingest_input(db, workspace)
+    docs = [get_document(db, input_doc_id)]
+    changed = SkillConfig(
+        name="renamed",
+        description="keys changed after the run",
+        system_prompt="",
+        allowed_tools=[],
+        model="test/model",
+        kind="script",
+        code="result = document\n",
+        outputs=[SkillOutput(key="summary", description="Новый выход")],
+    )
+    primary_id, output_ids, _text, _rewritten = persist_run_outputs(
+        db,
+        str(workspace),
+        skill=changed,
+        docs=docs,
+        session_id=None,
+        primary_text="SOURCE TEXT",
+        artifacts={"brief": "SOURCE TEXT", "table": "A -> a"},
+        primary_title="Результат прогона",
+    )
+    assert len(output_ids) == 2
+    assert primary_id == output_ids[0]
+    primary = get_document(db, output_ids[0])
+    companion = get_document(db, output_ids[1])
+    assert primary is not None
+    assert companion is not None
+    assert "SOURCE TEXT" in (workspace / primary.path).read_text(encoding="utf-8")
+    assert "A -> a" in (workspace / companion.path).read_text(encoding="utf-8")
+
+
+def test_persist_run_outputs_keeps_artifacts_without_skill_outputs(
+    db: Database, workspace: Path
+) -> None:
+    input_doc_id = _ingest_input(db, workspace)
+    docs = [get_document(db, input_doc_id)]
+    fallback = SkillConfig(
+        name="Результат прогона",
+        description="",
+        system_prompt="",
+        allowed_tools=[],
+        model="",
+    )
+    primary_id, output_ids, _text, _rewritten = persist_run_outputs(
+        db,
+        str(workspace),
+        skill=fallback,
+        docs=docs,
+        session_id=None,
+        primary_text="SOURCE TEXT",
+        artifacts={"brief": "SOURCE TEXT", "table": "A -> a"},
+        primary_title="Результат прогона",
+    )
+    assert len(output_ids) == 2
+    assert primary_id == output_ids[0]
+    assert get_document(db, output_ids[0]) is not None
+    assert get_document(db, output_ids[1]) is not None
+
+
+def test_persist_run_outputs_rolls_back_partial_pack(
+    db: Database, workspace: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from catalog.storage.repo_document import create_document
+
+    skill = _two_output_script()
+    input_doc_id = _ingest_input(db, workspace)
+    docs = [get_document(db, input_doc_id)]
+    session_id = create_session(db)
+    real = create_document
+    calls = {"n": 0}
+
+    def _flaky(*args: object, **kwargs: object):
+        calls["n"] += 1
+        if calls["n"] >= 2:
+            raise RuntimeError("disk full")
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr("catalog.skills.apply.create_document", _flaky)
+    results_dir = workspace / "results"
+    before_files = set(results_dir.glob("*.md")) if results_dir.is_dir() else set()
+    with pytest.raises(RuntimeError, match="disk full"):
+        persist_run_outputs(
+            db,
+            str(workspace),
+            skill=skill,
+            docs=docs,
+            session_id=session_id,
+            primary_text="SOURCE TEXT",
+            artifacts={"brief": "SOURCE TEXT", "table": "A -> a"},
+            primary_title=f"{skill.name} — результат",
+        )
+    assert _list_result_docs(db) == []
+    after_files = set(results_dir.glob("*.md")) if results_dir.is_dir() else set()
+    assert after_files == before_files
+    assert list_session_documents(db, session_id) == []
+
+    monkeypatch.setattr(
+        "catalog.skills.apply.create_document", create_document
+    )
+    primary_id, output_ids, _text, _rewritten = persist_run_outputs(
+        db,
+        str(workspace),
+        skill=skill,
+        docs=docs,
+        session_id=session_id,
+        primary_text="SOURCE TEXT",
+        artifacts={"brief": "SOURCE TEXT", "table": "A -> a"},
+        primary_title=f"{skill.name} — результат",
+    )
+    assert len(output_ids) == 2
+    assert get_document(db, primary_id) is not None
+    assert len(_list_result_docs(db)) == 2
+    assert {doc.id for doc in list_session_documents(db, session_id)} == set(
+        output_ids
+    )
+
+
+def _list_result_docs(db: Database):
+    from catalog.storage.repo_document import list_documents
+
+    return [doc for doc in list_documents(db) if doc.kind == "result_md"]
+
+
+def test_apply_pipeline_intermediate_dict_raises(
+    db: Database, workspace: Path
+) -> None:
+    skill = SkillConfig(
+        name="pipe-dict",
+        description="dict too early",
+        system_prompt="",
+        allowed_tools=[],
+        model="test/model",
+        kind="pipeline",
+        steps=[
+            PipelineStep(
+                id="split",
+                type="script",
+                input="documents",
+                code='result = {"brief": document, "table": "x"}\n',
+            ),
+            PipelineStep(
+                id="tail",
+                type="script",
+                input="previous",
+                code="result = document\n",
+            ),
+        ],
+    )
+    skill_id = create_skill(
+        db, name=skill.name, description=skill.description, config=skill
+    )
+    input_doc_id = _ingest_input(db, workspace)
+    with pytest.raises(PipelineStepError, match="dict"):
+        asyncio.run(
+            apply_skill_collect(
+                provider=ScriptProvider([]),
+                db=db,
+                workspace_dir=str(workspace),
+                skill=skill,
+                skill_id=skill_id,
+                input_doc_ids=[input_doc_id],
+                base_tools=build_document_tools(db, workspace),
+            )
+        )
+    with db.connect() as conn:
+        row = conn.execute(
+            "SELECT status, trace_json FROM skill_run WHERE skill_id = ?",
+            (skill_id,),
+        ).fetchone()
+    assert row is not None
+    assert row["status"] == "failed"
+    assert "dict" in (row["trace_json"] or "")
+
+
+def test_apply_named_outputs_key_errors(db: Database, workspace: Path) -> None:
+    input_doc_id = _ingest_input(db, workspace)
+    cases = [
+        (
+            'result = {"brief": document, "table": "x", "extra": "y"}\n',
+            "unknown output key",
+        ),
+        (
+            'result = {"brief": document}\n',
+            "missing output key",
+        ),
+        (
+            'result = {"brief": document, "table": ""}\n',
+            "empty output value",
+        ),
+        (
+            'result = {"brief": document, "table": "x"}\n',
+            "outputs is empty",
+            [],
+        ),
+    ]
+    for item in cases:
+        code = item[0]
+        needle = item[1]
+        outputs = (
+            item[2]
+            if len(item) > 2
+            else [
+                SkillOutput(key="brief", description="Текст"),
+                SkillOutput(key="table", description="Таблица"),
+            ]
+        )
+        skill = SkillConfig(
+            name="keys",
+            description="d",
+            system_prompt="",
+            allowed_tools=[],
+            model="test/model",
+            kind="script",
+            code=code,
+            outputs=outputs,
+        )
+        skill_id = create_skill(
+            db, name=skill.name, description=skill.description, config=skill
+        )
+        result = asyncio.run(
+            apply_skill_collect(
+                provider=ScriptProvider([]),
+                db=db,
+                workspace_dir=str(workspace),
+                skill=skill,
+                skill_id=skill_id,
+                input_doc_ids=[input_doc_id],
+                base_tools=build_document_tools(db, workspace),
+            )
+        )
+        assert result.status == "failed"
+        errors = [e for e in result.trace.entries if e.kind == "error"]
+        assert errors
+        assert any(needle in str(e.data.get("error", "")) for e in errors)
+
+
+def test_apply_legacy_script_string_unchanged(
+    db: Database, workspace: Path
+) -> None:
+    skill = SkillConfig(
+        name="uppercaser",
+        description="uppercase the document",
+        system_prompt="",
+        allowed_tools=[],
+        model="test/model",
+        verify_checks=[VerifyCheck("non_empty")],
+        kind="script",
+        code="result = document.upper()\n",
+    )
+    skill_id = create_skill(
+        db, name=skill.name, description=skill.description, config=skill
+    )
+    input_doc_id = _ingest_input(db, workspace)
+    result = asyncio.run(
+        apply_skill_collect(
+            provider=ScriptProvider([]),
+            db=db,
+            workspace_dir=str(workspace),
+            skill=skill,
+            skill_id=skill_id,
+            input_doc_ids=[input_doc_id],
+            base_tools=build_document_tools(db, workspace),
+        )
+    )
+    assert result.status == "ok"
+    assert result.output_doc_id is not None
+    assert result.result_artifacts in (None, {})
+    run = get_run(db, result.run_id)
+    assert run is not None
+    assert run["output_doc_ids"] == [result.output_doc_id]
+    assert run["result_artifacts"] == {}
+
+
+def _two_output_agent(
+    *,
+    max_retries: int = 2,
+    max_iterations: int = 8,
+    verify_checks: list[VerifyCheck] | None = None,
+) -> SkillConfig:
+    return SkillConfig(
+        name="splitter",
+        description="two named outputs",
+        system_prompt="Emit both outputs.",
+        allowed_tools=["read_document"],
+        model="test/model",
+        max_iterations=max_iterations,
+        max_retries=max_retries,
+        verify_checks=(
+            verify_checks
+            if verify_checks is not None
+            else [VerifyCheck("non_empty")]
+        ),
+        outputs=[
+            SkillOutput(key="brief", description="Псевдонимизированный текст"),
+            SkillOutput(key="table", description="Таблица перекодировки"),
+        ],
+    )
+
+
+def _emit_calls(*pairs: tuple[str, str]) -> CompletionResult:
+    return CompletionResult(
+        content=None,
+        tool_calls=[
+            ToolCall(
+                id=f"e{index}",
+                name="emit_output",
+                arguments={"key": key, "text": text},
+            )
+            for index, (key, text) in enumerate(pairs, start=1)
+        ],
+        finish_reason="tool_calls",
+    )
+
+
+def _tool_names(tools: list[ToolSpec] | None) -> list[str]:
+    return [item.name for item in tools] if tools else []
+
+
+def test_emit_output_schema_rejects_unknown_key() -> None:
+    import jsonschema
+
+    from catalog.skills.emit_output import emit_output_spec
+
+    spec = emit_output_spec(
+        [
+            SkillOutput(key="brief", description="Резюме"),
+            SkillOutput(key="table", description="Таблица"),
+        ]
+    )
+    with pytest.raises(jsonschema.ValidationError, match="nope"):
+        jsonschema.validate({"key": "nope", "text": "x"}, spec.parameters)
+
+
+def test_apply_agent_two_outputs_persist_creates_two_documents(
+    db: Database, workspace: Path
+) -> None:
+    skill = _two_output_agent()
+    skill_id = create_skill(
+        db, name=skill.name, description=skill.description, config=skill
+    )
+    session_id = create_session(db)
+    input_doc_id = _ingest_input(db, workspace)
+    provider = ScriptProvider(
+        [
+            _emit_calls(("brief", "SOURCE TEXT"), ("table", "A -> a")),
+            _result("done"),
+        ]
+    )
+    result = asyncio.run(
+        apply_skill_collect(
+            provider=provider,
+            db=db,
+            workspace_dir=str(workspace),
+            skill=skill,
+            skill_id=skill_id,
+            input_doc_ids=[input_doc_id],
+            base_tools=build_document_tools(db, workspace),
+            session_id=session_id,
+        )
+    )
+    assert result.status == "ok"
+    assert result.output_doc_id is not None
+    run = get_run(db, result.run_id)
+    assert run is not None
+    assert run["output_doc_id"] == result.output_doc_id
+    assert run["output_doc_ids"] == result.output_doc_ids
+    assert len(run["output_doc_ids"]) == 2
+    assert run["output_doc_ids"][0] == run["output_doc_id"]
+    assert "SOURCE TEXT" in (result.result_text or "")
+    primary = get_document(db, run["output_doc_id"])
+    companion = get_document(db, run["output_doc_ids"][1])
+    assert primary is not None
+    assert companion is not None
+    assert companion.title == f"{skill.name} — Таблица перекодировки"
+    primary_text = (workspace / primary.path).read_text(encoding="utf-8")
+    companion_text = (workspace / companion.path).read_text(encoding="utf-8")
+    assert list(run["result_artifacts"]) == ["brief", "table"]
+    assert run["result_artifacts"]["brief"] == primary_text
+    assert run["result_artifacts"]["table"] == companion_text
+    input_stem = Path(get_document(db, input_doc_id).path).stem
+    assert f"[[{input_stem}]]" in primary_text
+    assert f"[[{Path(companion.path).stem}]]" in primary_text
+    assert f"[[{Path(primary.path).stem}]]" in companion_text
+    assert f"[[{input_stem}]]" in companion_text
+    session_docs = {doc.id for doc in list_session_documents(db, session_id)}
+    assert run["output_doc_id"] in session_docs
+    assert run["output_doc_ids"][1] in session_docs
+    assert "emit_output" not in skill.allowed_tools
+    assert "emit_output" in _tool_names(provider.seen_tools[0])
+    start = next(
+        msg.content or ""
+        for msg in provider.seen_messages[0]
+        if msg.role == "user"
+    )
+    assert "brief: Псевдонимизированный текст" in start
+    assert "table: Таблица перекодировки" in start
+
+
+def test_apply_agent_emit_output_overwrite_and_trace(
+    db: Database, workspace: Path
+) -> None:
+    skill = _two_output_agent()
+    skill_id = create_skill(
+        db, name=skill.name, description=skill.description, config=skill
+    )
+    input_doc_id = _ingest_input(db, workspace)
+    provider = ScriptProvider(
+        [
+            _emit_calls(
+                ("brief", "old"),
+                ("brief", "SOURCE TEXT"),
+                ("table", "A -> a"),
+            ),
+            _result("done"),
+        ]
+    )
+    result = asyncio.run(
+        apply_skill_collect(
+            provider=provider,
+            db=db,
+            workspace_dir=str(workspace),
+            skill=skill,
+            skill_id=skill_id,
+            input_doc_ids=[input_doc_id],
+            base_tools=build_document_tools(db, workspace),
+        )
+    )
+    assert result.status == "ok"
+    arts = result.result_artifacts or {}
+    assert list(arts) == ["brief", "table"]
+    assert "SOURCE TEXT" in arts["brief"]
+    assert "A -> a" in arts["table"]
+    calls = [
+        entry
+        for entry in result.trace.entries
+        if entry.kind == "tool_call" and entry.data.get("name") == "emit_output"
+    ]
+    results = [
+        entry
+        for entry in result.trace.entries
+        if entry.kind == "tool_result" and entry.data.get("name") == "emit_output"
+    ]
+    assert len(calls) == 3
+    assert [entry.data["arguments"]["key"] for entry in calls] == [
+        "brief",
+        "brief",
+        "table",
+    ]
+    assert [entry.data["result"]["chars"] for entry in results] == [3, 11, 6]
+    assert all(entry.data["result"]["key"] for entry in results)
+
+
+def test_apply_agent_artifacts_follow_declared_order(
+    db: Database, workspace: Path
+) -> None:
+    skill = _two_output_agent()
+    skill_id = create_skill(
+        db, name=skill.name, description=skill.description, config=skill
+    )
+    input_doc_id = _ingest_input(db, workspace)
+    provider = ScriptProvider(
+        [
+            _emit_calls(("table", "A -> a"), ("brief", "SOURCE TEXT")),
+            _result("done"),
+        ]
+    )
+    result = asyncio.run(
+        apply_skill_collect(
+            provider=provider,
+            db=db,
+            workspace_dir=str(workspace),
+            skill=skill,
+            skill_id=skill_id,
+            input_doc_ids=[input_doc_id],
+            base_tools=build_document_tools(db, workspace),
+            persist=False,
+        )
+    )
+    assert result.status == "ok"
+    assert list(result.result_artifacts or {}) == ["brief", "table"]
+    assert (result.result_artifacts or {})["brief"] == "SOURCE TEXT"
+    assert (result.result_artifacts or {})["table"] == "A -> a"
+    assert result.result_text == "SOURCE TEXT"
+
+
+def test_apply_agent_missing_output_retries_then_fills(
+    db: Database, workspace: Path
+) -> None:
+    skill = _two_output_agent(max_retries=2)
+    skill_id = create_skill(
+        db, name=skill.name, description=skill.description, config=skill
+    )
+    input_doc_id = _ingest_input(db, workspace)
+    provider = ScriptProvider(
+        [
+            _emit_calls(("brief", "SOURCE TEXT")),
+            _result("forgot table"),
+            _emit_calls(("table", "A -> a")),
+            _result("done"),
+        ]
+    )
+    result = asyncio.run(
+        apply_skill_collect(
+            provider=provider,
+            db=db,
+            workspace_dir=str(workspace),
+            skill=skill,
+            skill_id=skill_id,
+            input_doc_ids=[input_doc_id],
+            base_tools=build_document_tools(db, workspace),
+        )
+    )
+    assert result.status == "ok"
+    arts = result.result_artifacts or {}
+    assert list(arts) == ["brief", "table"]
+    assert "SOURCE TEXT" in arts["brief"]
+    assert "A -> a" in arts["table"]
+    verifies = _verify_entries(result.trace)
+    assert len(verifies) == 2
+    assert verifies[0].data["passed"] is False
+    assert any("table" in item for item in verifies[0].data["failures"])
+    retry_msgs = [
+        msg.content
+        for batch in provider.seen_messages
+        for msg in batch
+        if msg.role == "user" and (msg.content or "").startswith("verify failed")
+    ]
+    assert retry_msgs
+    assert "table" in (retry_msgs[0] or "")
+
+
+def test_apply_agent_missing_output_exhausts_retries(
+    db: Database, workspace: Path
+) -> None:
+    skill = _two_output_agent(max_retries=1)
+    skill_id = create_skill(
+        db, name=skill.name, description=skill.description, config=skill
+    )
+    input_doc_id = _ingest_input(db, workspace)
+    provider = ScriptProvider(
+        [
+            _emit_calls(("brief", "HELLO")),
+            _result("still missing"),
+            _emit_calls(("brief", "HELLO")),
+            _result("still missing"),
+        ]
+    )
+    result = asyncio.run(
+        apply_skill_collect(
+            provider=provider,
+            db=db,
+            workspace_dir=str(workspace),
+            skill=skill,
+            skill_id=skill_id,
+            input_doc_ids=[input_doc_id],
+            base_tools=build_document_tools(db, workspace),
+        )
+    )
+    assert result.status == "failed"
+    assert result.output_doc_id is None
+    assert result.result_artifacts == {"brief": "HELLO"}
+    verifies = _verify_entries(result.trace)
+    assert len(verifies) == 2
+    assert all(entry.data["passed"] is False for entry in verifies)
+    assert any("table" in item for item in verifies[-1].data["failures"])
+
+
+def test_apply_agent_unknown_emit_key_rejected_by_schema(
+    db: Database, workspace: Path
+) -> None:
+    skill = _two_output_agent()
+    skill_id = create_skill(
+        db, name=skill.name, description=skill.description, config=skill
+    )
+    input_doc_id = _ingest_input(db, workspace)
+    provider = ScriptProvider(
+        [
+            CompletionResult(
+                content=None,
+                tool_calls=[
+                    ToolCall(
+                        id="bad",
+                        name="emit_output",
+                        arguments={"key": "nope", "text": "x"},
+                    )
+                ],
+                finish_reason="tool_calls",
+            ),
+            _emit_calls(("brief", "SOURCE TEXT"), ("table", "A -> a")),
+            _result("done"),
+        ]
+    )
+    result = asyncio.run(
+        apply_skill_collect(
+            provider=provider,
+            db=db,
+            workspace_dir=str(workspace),
+            skill=skill,
+            skill_id=skill_id,
+            input_doc_ids=[input_doc_id],
+            base_tools=build_document_tools(db, workspace),
+        )
+    )
+    assert result.status == "ok"
+    arts = result.result_artifacts or {}
+    assert list(arts) == ["brief", "table"]
+    assert "SOURCE TEXT" in arts["brief"]
+    assert "A -> a" in arts["table"]
+    bad = [
+        entry
+        for entry in result.trace.entries
+        if entry.kind == "tool_result" and entry.data.get("name") == "emit_output"
+    ][0]
+    assert bad.data["ok"] is False
+    assert "invalid args" in str(bad.data["result"])
+    assert "nope" not in (result.result_artifacts or {})
+
+
+def test_apply_agent_single_output_has_no_emit_tool(
+    db: Database, workspace: Path
+) -> None:
+    skill = SkillConfig(
+        name="one-out",
+        description="one named output",
+        system_prompt="Write the brief.",
+        allowed_tools=["read_document"],
+        model="test/model",
+        max_iterations=2,
+        max_retries=0,
+        verify_checks=[VerifyCheck("non_empty")],
+        outputs=[SkillOutput(key="brief", description="Единственный выход")],
+    )
+    skill_id = create_skill(
+        db, name=skill.name, description=skill.description, config=skill
+    )
+    input_doc_id = _ingest_input(db, workspace)
+    provider = ScriptProvider([_result("just the brief")])
+    result = asyncio.run(
+        apply_skill_collect(
+            provider=provider,
+            db=db,
+            workspace_dir=str(workspace),
+            skill=skill,
+            skill_id=skill_id,
+            input_doc_ids=[input_doc_id],
+            base_tools=build_document_tools(db, workspace),
+        )
+    )
+    assert result.status == "ok"
+    assert "just the brief" in (result.result_text or "")
+    assert "emit_output" not in _tool_names(provider.seen_tools[0])
+    start = next(
+        msg.content or ""
+        for msg in provider.seen_messages[0]
+        if msg.role == "user"
+    )
+    assert "emit_output" not in start
+    assert result.result_artifacts in (None, {})
+
+
+def test_apply_pipeline_intermediate_llm_has_no_emit_tool(
+    db: Database, workspace: Path
+) -> None:
+    skill = SkillConfig(
+        name="pipe-mid",
+        description="llm then script outputs",
+        system_prompt="",
+        allowed_tools=[],
+        model="test/model",
+        kind="pipeline",
+        outputs=[
+            SkillOutput(key="brief", description="Текст"),
+            SkillOutput(key="table", description="Таблица"),
+        ],
+        steps=[
+            PipelineStep(
+                id="note",
+                type="llm",
+                input="documents",
+                system_prompt="rewrite",
+                allowed_tools=["read_document"],
+            ),
+            PipelineStep(
+                id="split",
+                type="script",
+                input="previous",
+                code='result = {"brief": document, "table": "A -> a"}\n',
+            ),
+        ],
+    )
+    skill_id = create_skill(
+        db, name=skill.name, description=skill.description, config=skill
+    )
+    input_doc_id = _ingest_input(db, workspace)
+    provider = ScriptProvider([_result("SOURCE TEXT")])
+    result = asyncio.run(
+        apply_skill_collect(
+            provider=provider,
+            db=db,
+            workspace_dir=str(workspace),
+            skill=skill,
+            skill_id=skill_id,
+            input_doc_ids=[input_doc_id],
+            base_tools=build_document_tools(db, workspace),
+        )
+    )
+    assert result.status == "ok"
+    arts = result.result_artifacts or {}
+    assert list(arts) == ["brief", "table"]
+    assert "SOURCE TEXT" in arts["brief"]
+    assert "A -> a" in arts["table"]
+    assert "emit_output" not in _tool_names(provider.seen_tools[0])
+
+
+def test_apply_pipeline_last_llm_registers_emit_output(
+    db: Database, workspace: Path
+) -> None:
+    skill = SkillConfig(
+        name="pipe-last-llm",
+        description="script then llm outputs",
+        system_prompt="",
+        allowed_tools=[],
+        model="test/model",
+        kind="pipeline",
+        outputs=[
+            SkillOutput(key="brief", description="Текст"),
+            SkillOutput(key="table", description="Таблица"),
+        ],
+        steps=[
+            PipelineStep(
+                id="prep",
+                type="script",
+                input="documents",
+                code="result = document\n",
+            ),
+            PipelineStep(
+                id="emit",
+                type="llm",
+                input="previous",
+                system_prompt="emit",
+                allowed_tools=["read_document"],
+            ),
+        ],
+    )
+    skill_id = create_skill(
+        db, name=skill.name, description=skill.description, config=skill
+    )
+    input_doc_id = _ingest_input(db, workspace)
+    provider = ScriptProvider(
+        [
+            _emit_calls(("brief", "SOURCE TEXT"), ("table", "A -> a")),
+            _result("done"),
+        ]
+    )
+    result = asyncio.run(
+        apply_skill_collect(
+            provider=provider,
+            db=db,
+            workspace_dir=str(workspace),
+            skill=skill,
+            skill_id=skill_id,
+            input_doc_ids=[input_doc_id],
+            base_tools=build_document_tools(db, workspace),
+        )
+    )
+    assert result.status == "ok"
+    arts = result.result_artifacts or {}
+    assert list(arts) == ["brief", "table"]
+    assert "SOURCE TEXT" in arts["brief"]
+    assert "A -> a" in arts["table"]
+    assert "emit_output" in _tool_names(provider.seen_tools[0])
+    start = next(
+        msg.content or ""
+        for msg in provider.seen_messages[0]
+        if msg.role == "user"
+    )
+    assert "brief: Текст" in start
+
+
+def test_apply_pipeline_last_llm_single_output_has_no_emit_tool(
+    db: Database, workspace: Path
+) -> None:
+    skill = SkillConfig(
+        name="pipe-one",
+        description="last llm one output",
+        system_prompt="",
+        allowed_tools=[],
+        model="test/model",
+        kind="pipeline",
+        verify_checks=[VerifyCheck("non_empty")],
+        outputs=[SkillOutput(key="brief", description="Текст")],
+        steps=[
+            PipelineStep(
+                id="note",
+                type="llm",
+                input="documents",
+                system_prompt="write",
+                allowed_tools=["read_document"],
+            ),
+        ],
+    )
+    skill_id = create_skill(
+        db, name=skill.name, description=skill.description, config=skill
+    )
+    input_doc_id = _ingest_input(db, workspace)
+    provider = ScriptProvider([_result("single text")])
+    result = asyncio.run(
+        apply_skill_collect(
+            provider=provider,
+            db=db,
+            workspace_dir=str(workspace),
+            skill=skill,
+            skill_id=skill_id,
+            input_doc_ids=[input_doc_id],
+            base_tools=build_document_tools(db, workspace),
+        )
+    )
+    assert result.status == "ok"
+    assert "single text" in (result.result_text or "")
+    assert "emit_output" not in _tool_names(provider.seen_tools[0])
+
+
+def test_apply_pipeline_last_skill_with_named_outputs_fails(
+    db: Database, workspace: Path
+) -> None:
+    inner = _inner_script()
+    skill = SkillConfig(
+        name="pipe-last-skill",
+        description="named outputs cannot come from a skill step",
+        system_prompt="",
+        allowed_tools=[],
+        model="test/model",
+        kind="pipeline",
+        verify_checks=[VerifyCheck("non_empty")],
+        outputs=[
+            SkillOutput(key="brief", description="Текст"),
+            SkillOutput(key="table", description="Таблица"),
+        ],
+        steps=[
+            PipelineStep(
+                id="call",
+                type="skill",
+                input="documents",
+                skill_id="inner-id",
+                skill_name=inner.name,
+                config_hash="deadbeef",
+                config=inner,
+            ),
+        ],
+    )
+    skill_id = create_skill(
+        db, name=skill.name, description=skill.description, config=skill
+    )
+    input_doc_id = _ingest_input(db, workspace)
+    result = asyncio.run(
+        apply_skill_collect(
+            provider=ScriptProvider([]),
+            db=db,
+            workspace_dir=str(workspace),
+            skill=skill,
+            skill_id=skill_id,
+            input_doc_ids=[input_doc_id],
+            base_tools=build_document_tools(db, workspace),
+        )
+    )
+    assert result.status == "failed"
+    assert result.result_artifacts in (None, {})
+    assert result.output_doc_id is None
+    errors = [entry for entry in result.trace.entries if entry.kind == "error"]
+    assert errors
+    assert any("did not produce them" in str(entry.data.get("error", "")) for entry in errors)
+
+
+def test_apply_agent_capped_keeps_emitted_outputs(
+    db: Database, workspace: Path
+) -> None:
+    skill = _two_output_agent(max_iterations=1, max_retries=0)
+    skill_id = create_skill(
+        db, name=skill.name, description=skill.description, config=skill
+    )
+    input_doc_id = _ingest_input(db, workspace)
+    provider = ScriptProvider([_emit_calls(("brief", "KEEP ME"))])
+    events = asyncio.run(
+        _collect_events(
+            apply_skill(
+                provider=provider,
+                db=db,
+                workspace_dir=str(workspace),
+                skill=skill,
+                skill_id=skill_id,
+                input_doc_ids=[input_doc_id],
+                base_tools=build_document_tools(db, workspace),
+            )
+        )
+    )
+    finish = [event for event in events if isinstance(event, FinishEvent)][-1]
+    assert finish.finish_reason == "capped"
+    with db.connect() as conn:
+        row = conn.execute(
+            "SELECT status, result_artifacts, trace_json FROM skill_run "
+            "WHERE skill_id = ?",
+            (skill_id,),
+        ).fetchone()
+    assert row is not None
+    assert row["status"] == "failed"
+    import json as _json
+
+    artifacts = _json.loads(row["result_artifacts"] or "{}")
+    assert artifacts == {"brief": "KEEP ME"}
+    trace = _json.loads(row["trace_json"] or "[]")
+    errors = [entry for entry in trace if entry.get("kind") == "error"]
+    assert errors
+    assert "capped" in str(errors[-1]["data"].get("error", ""))
+    assert "table" in str(errors[-1]["data"].get("error", ""))

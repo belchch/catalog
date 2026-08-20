@@ -88,6 +88,7 @@ class SkillOut(BaseModel):
     model: str | None = None
     reasoning: str | None = None
     estimated_llm_calls: int = 0
+    outputs_count: int = 0
 
 
 class ApplyRequest(BaseModel):
@@ -133,11 +134,13 @@ class RunOut(BaseModel):
     # rows written before the multi-doc column existed.
     input_doc_ids: list[str] | None = None
     output_doc_id: str | None = None
+    output_doc_ids: list[str] | None = None
     status: str
     # Trace is a JSON array of TraceEntry dicts (see Trace.to_json).
     trace: list | None = None
     # Raw agent/script output, kept even when persist=False (CATALOG-18).
     result_text: str | None = None
+    result_artifacts: dict[str, str] | None = None
     parent_run_id: str | None = None
 
 
@@ -357,7 +360,7 @@ class ScriptTryOut(BaseModel):
     input_len: int = 0
     output_preview: str = ""
     output_len: int = 0
-    output_kind: Literal["str", "list"] | None = None
+    output_kind: Literal["str", "list", "dict"] | None = None
     duration_ms: int = 0
     verify: dict | None = None
     line_no: int | None = None

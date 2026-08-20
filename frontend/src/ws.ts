@@ -67,9 +67,11 @@ export type ServerEvent =
       capped?: boolean
       status?: string
       output_doc_id?: string | null
+      output_doc_ids?: string[] | null
       // Raw result text (CATALOG-18) — the apply loop does not stream tokens,
       // so this is the only way the run's text reaches the client.
       result_text?: string | null
+      result_artifacts?: unknown
     }
   | { type: 'error'; message: string }
 

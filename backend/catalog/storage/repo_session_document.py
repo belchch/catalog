@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import sqlite3
 from datetime import datetime, timezone
 
 from catalog.storage.db import Database
@@ -10,29 +11,43 @@ def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-def attach_documents(db: Database, session_id: str, doc_ids: list[str]) -> list[str]:
-    if not doc_ids:
-        return []
+def _attach_documents(
+    conn: sqlite3.Connection, session_id: str, doc_ids: list[str]
+) -> list[str]:
     now = _now_iso()
     skipped: list[str] = []
     seen_missing: set[str] = set()
-    with db.connect() as conn:
-        for doc_id in doc_ids:
-            exists = conn.execute(
-                "SELECT id FROM document WHERE id = ?",
-                (doc_id,),
-            ).fetchone()
-            if exists is None:
-                if doc_id not in seen_missing:
-                    skipped.append(doc_id)
-                    seen_missing.add(doc_id)
-                continue
-            conn.execute(
-                "INSERT OR IGNORE INTO session_document(session_id, document_id, attached_at) "
-                "VALUES (?, ?, ?)",
-                (session_id, doc_id, now),
-            )
+    for doc_id in doc_ids:
+        exists = conn.execute(
+            "SELECT id FROM document WHERE id = ?",
+            (doc_id,),
+        ).fetchone()
+        if exists is None:
+            if doc_id not in seen_missing:
+                skipped.append(doc_id)
+                seen_missing.add(doc_id)
+            continue
+        conn.execute(
+            "INSERT OR IGNORE INTO session_document(session_id, document_id, attached_at) "
+            "VALUES (?, ?, ?)",
+            (session_id, doc_id, now),
+        )
     return skipped
+
+
+def attach_documents(
+    db: Database,
+    session_id: str,
+    doc_ids: list[str],
+    *,
+    conn: sqlite3.Connection | None = None,
+) -> list[str]:
+    if not doc_ids:
+        return []
+    if conn is not None:
+        return _attach_documents(conn, session_id, doc_ids)
+    with db.connect() as opened:
+        return _attach_documents(opened, session_id, doc_ids)
 
 
 def detach_documents(db: Database, session_id: str, doc_ids: list[str]) -> int:

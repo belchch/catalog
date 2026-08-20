@@ -21,9 +21,7 @@ on-screen ``result_text`` into a ``result_md`` document after the fact.
 from __future__ import annotations
 
 import asyncio
-import uuid
 from contextlib import suppress
-from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, WebSocket, WebSocketDisconnect
 
@@ -31,21 +29,12 @@ from catalog.agent.registry import ToolRegistry
 from catalog.api.deps import agent_event_to_frame, get_workspace_db, get_workspace
 from catalog.api.schemas import ApplyRequest, DocumentOut, RunCreated, RunOut
 from catalog.api.sessions import _wait_work_or_ws
-from catalog.documents.ingest import (
-    allocate_rel_path,
-    content_hash_bytes,
-    safe_filename,
-)
-from catalog.documents.obsidian import (
-    build_title_to_stem_map,
-    ensure_parent_wikilinks,
-    rewrite_wiki_links,
-)
 from catalog.documents.tools import build_document_tools
 from catalog.llm.base import LLMProvider
 from catalog.llm.factory import provider_for_skill, provider_name_for_skill
 from catalog.llm.log_context import prompt_log_context
-from catalog.skills.apply import apply_skill
+from catalog.skills.apply import apply_skill, persist_run_outputs
+from catalog.skills.config import SkillConfig
 from catalog.skills.repo_run import (
     cancel_pending_run,
     claim_run,
@@ -55,7 +44,7 @@ from catalog.skills.repo_run import (
 )
 from catalog.skills.repo_skill import get_skill
 from catalog.storage.db import Database
-from catalog.storage.repo_document import create_document, get_document
+from catalog.storage.repo_document import get_document
 from catalog.storage.repo_session import get_session
 from catalog.storage.repo_session_document import attach_documents
 
@@ -123,9 +112,11 @@ async def get_run_endpoint(run_id: str, db: Database = Depends(get_workspace_db)
         input_doc_id=row["input_doc_id"],
         input_doc_ids=row["input_doc_ids"],
         output_doc_id=row["output_doc_id"],
+        output_doc_ids=row.get("output_doc_ids") or [],
         status=row["status"],
         trace=trace,
         result_text=row["result_text"],
+        result_artifacts=row.get("result_artifacts") or {},
         parent_run_id=row["parent_run_id"],
     )
 
@@ -146,43 +137,49 @@ async def save_run_result_endpoint(
     run = get_run(db, run_id)
     if run is None:
         raise HTTPException(status_code=404, detail="run not found")
-    if run["output_doc_id"]:
+    saved_ids = list(run.get("output_doc_ids") or [])
+    if run["output_doc_id"] and run["output_doc_id"] not in saved_ids:
+        saved_ids.insert(0, run["output_doc_id"])
+    if any(get_document(db, doc_id) is not None for doc_id in saved_ids):
         raise HTTPException(status_code=409, detail="run result is already saved")
     if run["status"] != "ok" or not run["result_text"]:
         raise HTTPException(status_code=409, detail="run has no result to save")
 
-    skill = get_skill(db, run["skill_id"])
-    title = f"{skill.name} — результат" if skill is not None else "Результат прогона"
-    out_id = uuid.uuid4().hex
-    workspace_path = Path(workspace)
-    rel_path = allocate_rel_path(
-        workspace_path, safe_filename(title, ".md"), subdir="results"
+    skill_row = get_skill(db, run["skill_id"])
+    title = (
+        f"{skill_row.name} — результат" if skill_row is not None else "Результат прогона"
     )
-    file_text = rewrite_wiki_links(
-        run["result_text"], build_title_to_stem_map(db)
-    )
-    parent_stems: list[str] = []
+    docs = []
     for doc_id in run["input_doc_ids"] or []:
         parent = get_document(db, doc_id)
-        if parent is not None and parent.path:
-            parent_stems.append(Path(parent.path).stem)
-    file_text = ensure_parent_wikilinks(file_text, parent_stems)
-    dest = workspace_path / rel_path
-    dest.write_text(file_text, encoding="utf-8")
-    st = dest.stat()
-    doc = create_document(
-        db,
-        title=title,
-        path=rel_path,
-        kind="result_md",
-        doc_id=out_id,
-        mtime=st.st_mtime,
-        size=st.st_size,
-        content_hash=content_hash_bytes(file_text.encode("utf-8")),
+        if parent is not None:
+            docs.append(parent)
+    artifacts = run.get("result_artifacts") or {}
+    skill_config = (
+        skill_row.config
+        if skill_row is not None
+        else SkillConfig(
+            name="Результат прогона",
+            description="",
+            system_prompt="",
+            allowed_tools=[],
+            model="",
+        )
     )
-    set_output_doc_id(db, run_id, out_id)
-    if run["session_id"] is not None:
-        attach_documents(db, run["session_id"], [out_id])
+    primary_id, output_doc_ids, _rewritten, _rewritten_artifacts = persist_run_outputs(
+        db,
+        workspace,
+        skill=skill_config,
+        docs=docs,
+        session_id=run["session_id"],
+        primary_text=run["result_text"],
+        artifacts=artifacts,
+        primary_title=title,
+    )
+    set_output_doc_id(db, run_id, primary_id, output_doc_ids)
+    doc = get_document(db, primary_id)
+    if doc is None:
+        raise HTTPException(status_code=500, detail="failed to save run result")
 
     return DocumentOut(id=doc.id, title=doc.title, kind=doc.kind, created_at=doc.created_at)
 
@@ -332,7 +329,11 @@ async def run_stream_ws(websocket: WebSocket, run_id: str) -> None:
                 "type": "finish",
                 "status": final["status"] if final else "failed",
                 "output_doc_id": final["output_doc_id"] if final else None,
+                "output_doc_ids": (final.get("output_doc_ids") or []) if final else [],
                 "result_text": final["result_text"] if final else None,
+                "result_artifacts": (
+                    (final.get("result_artifacts") or {}) if final else {}
+                ),
             }
         )
     except WebSocketDisconnect:

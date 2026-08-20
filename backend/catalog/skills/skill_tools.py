@@ -40,6 +40,7 @@ _RESERVED = frozenset(
         "save_skill_prompt",
         "save_skill_script",
         "set_skill_meta",
+        "set_skill_outputs",
         "save_skill_steps",
         "read_skill_draft",
         "list_session_skills",
@@ -350,6 +351,7 @@ def build_session_skill_tools(
                 "depth": nested.depth,
                 "verify_failures": verify_failures,
                 "text": result.result_text,
+                "outputs": result.result_artifacts or {},
             }
 
         reg.register(

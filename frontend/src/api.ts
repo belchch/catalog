@@ -23,6 +23,7 @@ export interface SkillOut {
   model: string | null
   reasoning: string | null
   estimated_llm_calls: number
+  outputs_count?: number
 }
 
 export interface RunOut {
@@ -31,10 +32,12 @@ export interface RunOut {
   input_doc_id: string | null
   input_doc_ids: string[] | null
   output_doc_id: string | null
+  output_doc_ids?: string[] | null
   status: string
   trace: unknown[] | null
   // Raw agent/script output, kept even when persist=false (CATALOG-18).
   result_text: string | null
+  result_artifacts?: unknown
   parent_run_id: string | null
 }
 
@@ -616,7 +619,7 @@ export function updateSettings(settings: SettingsUpdate): Promise<SettingsOut> {
   })
 }
 
-export type ArtifactType = 'prompt' | 'script' | 'meta' | 'steps'
+export type ArtifactType = 'prompt' | 'script' | 'meta' | 'steps' | 'outputs'
 
 export type SkillKind = 'agent' | 'script' | 'pipeline'
 
@@ -675,6 +678,112 @@ export function parseStepsArtifact(content: string): {
     steps.push(normalizePipelineStep(item as Record<string, unknown>, i))
   }
   return { steps, parseError: null }
+}
+
+export const OUTPUT_KEY_RE = /^[a-z][a-z0-9_]{0,31}$/
+
+export const MAX_SKILL_OUTPUTS = 8
+
+export interface OutputDraft {
+  key: string
+  description: string
+}
+
+export interface OutputRowError {
+  key?: string
+  description?: string
+}
+
+export interface RunArtifact {
+  key: string
+  description?: string | null
+  text: string
+}
+
+export function parseOutputsArtifact(content: string): {
+  outputs: OutputDraft[]
+  parseError: string | null
+} {
+  const trimmed = content.trim()
+  if (!trimmed) return { outputs: [], parseError: null }
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(trimmed)
+  } catch {
+    return { outputs: [], parseError: 'outputs must be JSON' }
+  }
+  if (!Array.isArray(parsed)) {
+    return { outputs: [], parseError: 'outputs must be a JSON array' }
+  }
+  const outputs: OutputDraft[] = []
+  for (const item of parsed) {
+    if (!item || typeof item !== 'object' || Array.isArray(item)) continue
+    const rec = item as Record<string, unknown>
+    outputs.push({
+      key: typeof rec.key === 'string' ? rec.key : '',
+      description: typeof rec.description === 'string' ? rec.description : '',
+    })
+  }
+  return { outputs, parseError: null }
+}
+
+export function serializeOutputs(outputs: OutputDraft[]): string {
+  return JSON.stringify(
+    outputs.map((item) => ({
+      key: item.key.trim(),
+      description: item.description.trim(),
+    })),
+  )
+}
+
+export function validateOutputs(outputs: OutputDraft[]): {
+  ok: boolean
+  rowErrors: (OutputRowError | null)[]
+} {
+  const rowErrors: (OutputRowError | null)[] = outputs.map(() => null)
+  const seen = new Set<string>()
+  for (let i = 0; i < outputs.length; i++) {
+    const key = outputs[i].key.trim()
+    const description = outputs[i].description.trim()
+    const err: OutputRowError = {}
+    if (!key || !OUTPUT_KEY_RE.test(key)) {
+      err.key = 'ключ: только a-z, цифры и _'
+    } else if (seen.has(key)) {
+      err.key = 'такой ключ уже есть'
+    } else {
+      seen.add(key)
+    }
+    if (!description) {
+      err.description = 'описание не может быть пустым'
+    }
+    if (err.key || err.description) rowErrors[i] = err
+  }
+  return { ok: rowErrors.every((item) => item == null), rowErrors }
+}
+
+export function normalizeRunArtifacts(raw: unknown): RunArtifact[] {
+  if (Array.isArray(raw)) {
+    const out: RunArtifact[] = []
+    for (const item of raw) {
+      if (!item || typeof item !== 'object' || Array.isArray(item)) continue
+      const rec = item as Record<string, unknown>
+      if (typeof rec.key !== 'string' || typeof rec.text !== 'string') continue
+      const description =
+        typeof rec.description === 'string'
+          ? rec.description
+          : rec.description === null
+            ? null
+            : undefined
+      out.push({ key: rec.key, text: rec.text, description })
+    }
+    return out
+  }
+  if (raw && typeof raw === 'object') {
+    return Object.entries(raw as Record<string, unknown>).flatMap(([key, text]) =>
+      typeof text === 'string' ? [{ key, text }] : [],
+    )
+  }
+  return []
 }
 
 function normalizePipelineStep(
@@ -752,7 +861,7 @@ export interface ScriptTryResult {
   input_len: number
   output_preview: string
   output_len: number
-  output_kind: 'str' | 'list' | null
+  output_kind: 'str' | 'list' | 'dict' | null
   duration_ms: number
   verify: ScriptTryVerify | null
   line_no: number | null

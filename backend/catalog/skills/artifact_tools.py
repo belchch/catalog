@@ -12,13 +12,17 @@ from catalog.documents.extract import extract_text
 from catalog.llm.base import ToolSpec
 from catalog.skills.budget import SkillBudget, consume_script_try
 from catalog.skills.config import (
+    MAX_SKILL_OUTPUTS,
     PIPELINE_STEP_INPUTS,
     PIPELINE_STEP_TYPES,
     SKILL_KINDS,
     PipelineStep,
+    SkillOutput,
     VerifyCheck,
+    parse_skill_outputs,
     pipeline_step_to_dict,
     pipeline_steps_from_value,
+    skill_output_to_dict,
 )
 from catalog.skills.repo_skill import SkillRecord, get_skill
 from catalog.skills.skill_tools import config_hash
@@ -70,6 +74,82 @@ def _result_as_text(value: str | list[str]) -> str:
             return value[0]
         return "\n\n---\n\n".join(value)
     return value
+
+
+def _draft_outputs(db: Database, session_id: str) -> list[SkillOutput]:
+    row = get_artifact(db, session_id, "outputs")
+    if row is None or not row.is_valid:
+        return []
+    parsed, errors = parse_skill_outputs(row.content)
+    if errors:
+        return []
+    return parsed
+
+
+def _try_dict_allowed(
+    db: Database, session_id: str, step_index: int | None
+) -> bool:
+    if step_index is None:
+        return True
+    row = get_artifact(db, session_id, "steps")
+    if row is None:
+        return True
+    parsed, errors = parse_steps_content(row.content)
+    if errors or not parsed:
+        return True
+    return step_index == len(parsed) - 1
+
+
+def _match_try_outputs(
+    outputs: list[SkillOutput], value: dict[str, str]
+) -> dict[str, str]:
+    declared = [item.key for item in outputs]
+    if not declared:
+        raise ValueError("skill returned a dict but SkillConfig.outputs is empty")
+    if len(value) > MAX_SKILL_OUTPUTS:
+        raise ValueError(
+            f"too many output keys: {len(value)} (max {MAX_SKILL_OUTPUTS})"
+        )
+    extra = sorted(set(value) - set(declared))
+    missing = [key for key in declared if key not in value]
+    empty = [key for key in declared if not (value.get(key) or "").strip()]
+    parts: list[str] = []
+    if extra:
+        parts.append("unknown output key(s): " + ", ".join(extra))
+    if missing:
+        parts.append("missing output key(s): " + ", ".join(missing))
+    if empty:
+        parts.append("empty output value(s): " + ", ".join(empty))
+    if parts:
+        raise ValueError("; ".join(parts))
+    return {key: value[key] for key in declared}
+
+
+def _try_finalize_output(
+    raw: str | list[str] | dict[str, str],
+    outputs: list[SkillOutput],
+    *,
+    dict_allowed: bool,
+) -> tuple[str, str, str]:
+    if isinstance(raw, dict):
+        if not dict_allowed:
+            raise ValueError(
+                "named outputs are only allowed on the last pipeline step"
+            )
+        artifacts = _match_try_outputs(outputs, raw)
+        primary = artifacts[outputs[0].key]
+        if len(artifacts) == 1:
+            return primary, "dict", primary
+        preview = "\n\n---\n\n".join(
+            f"{key}:\n{artifacts[key]}" for key in artifacts
+        )
+        return preview, "dict", primary
+    if outputs and dict_allowed:
+        raise ValueError("skill declared outputs but script did not return a dict")
+    if isinstance(raw, list):
+        text = _result_as_text(raw)
+        return text, "list", text
+    return raw, "str", raw
 
 
 def _saved_slot_code(
@@ -362,13 +442,35 @@ async def run_try_skill_script(
         )
         return payload
     duration_ms = int((time.perf_counter() - started) * 1000)
-    output_kind = "list" if isinstance(output, list) else "str"
-    output_text = _result_as_text(output)
+    try:
+        output_text, output_kind, verify_text = _try_finalize_output(
+            output,
+            _draft_outputs(db, session_id),
+            dict_allowed=_try_dict_allowed(db, session_id, step_index),
+        )
+    except ValueError as exc:
+        payload = _try_payload(
+            ok=False,
+            stage="run",
+            error=str(exc),
+            input_preview=input_preview,
+            input_len=input_len,
+            duration_ms=duration_ms,
+        )
+        _persist_try_dry_run(
+            db,
+            session_id,
+            slot=slot,
+            step_index=step_index,
+            code=source,
+            payload=payload,
+        )
+        return payload
     checks = _draft_verify_checks(db, session_id)
     verify_payload = None
     stage = "run"
     if checks:
-        result = await run_verify_async(output_text, checks, db=db)
+        result = await run_verify_async(verify_text, checks, db=db)
         verify_payload = result.as_payload()
         stage = "verify"
     payload = _try_payload(
@@ -681,6 +783,35 @@ def build_artifact_tools(
         await _notify()
         return {"ok": is_valid, "artifact": artifact_payload(db, row), "error": error}
 
+    async def _set_skill_outputs(*, outputs: list[dict] | str) -> dict[str, Any]:
+        parsed, errors = parse_skill_outputs(outputs)
+        is_valid = not errors
+        error = "; ".join(errors) if errors else None
+        if isinstance(outputs, str):
+            content = (
+                json.dumps([skill_output_to_dict(item) for item in parsed], ensure_ascii=False)
+                if is_valid
+                else outputs
+            )
+        else:
+            content = json.dumps(
+                [skill_output_to_dict(item) for item in parsed]
+                if is_valid
+                else outputs,
+                ensure_ascii=False,
+            )
+        row = upsert_artifact(
+            db,
+            session_id=session_id,
+            type="outputs",
+            content=content,
+            source="llm",
+            is_valid=is_valid,
+            error=error,
+        )
+        await _notify()
+        return {"ok": is_valid, "artifact": artifact_payload(db, row), "error": error}
+
     async def _save_skill_steps(*, steps: list[dict] | dict) -> dict[str, Any]:
         errors: list[str] = []
         parsed: list[PipelineStep] = []
@@ -744,6 +875,12 @@ def build_artifact_tools(
                 out["meta"] = json.loads(meta.content)
             except (TypeError, ValueError, json.JSONDecodeError):
                 out["meta"] = None
+        outputs_row = get_artifact(db, session_id, "outputs")
+        if outputs_row is not None:
+            parsed, errors = parse_skill_outputs(outputs_row.content)
+            out["outputs"] = (
+                [skill_output_to_dict(item) for item in parsed] if not errors else None
+            )
         return out
 
     async def _try_skill_script(
@@ -850,6 +987,41 @@ def build_artifact_tools(
     )
     reg.register(
         ToolSpec(
+            name="set_skill_outputs",
+            description=(
+                "Declare named skill outputs for this session as "
+                "[{key, description}, ...]. First item is primary. "
+                "Keys must match ^[a-z][a-z0-9_]{0,31}$, be unique, "
+                "and descriptions must be non-empty. At most 8 items. "
+                "Omit or use [] for a single unnamed output. For script "
+                "skills the return dict must use these keys."
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "outputs": {
+                        "type": "array",
+                        "maxItems": 8,
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "key": {
+                                    "type": "string",
+                                    "pattern": r"^[a-z][a-z0-9_]{0,31}$",
+                                },
+                                "description": {"type": "string"},
+                            },
+                            "required": ["key", "description"],
+                        },
+                    }
+                },
+                "required": ["outputs"],
+            },
+        ),
+        _set_skill_outputs,
+    )
+    reg.register(
+        ToolSpec(
             name="save_skill_steps",
             description=(
                 "Save the pipeline steps draft for this session. Each step "
@@ -913,7 +1085,7 @@ def build_artifact_tools(
             name="read_skill_draft",
             description=(
                 "Read the current session skill draft artifacts (prompt, "
-                "script, meta, steps) including script dry_run status."
+                "script, meta, steps, outputs) including script dry_run status."
             ),
             parameters={"type": "object", "properties": {}},
         ),

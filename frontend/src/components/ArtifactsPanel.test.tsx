@@ -74,6 +74,7 @@ function renderPanel(
       onClearHighlight={() => {}}
       onSavePrompt={vi.fn()}
       onSaveMeta={vi.fn()}
+      onSaveOutputs={vi.fn(async (content: string) => art('outputs', content))}
       {...extra}
       onSaveScript={onSaveScript}
       onTryScript={onTryScript}
@@ -261,6 +262,7 @@ describe('ArtifactsPanel script dry-run', () => {
             onSavePrompt={vi.fn()}
             onSaveScript={vi.fn(async (content: string) => art('script', content))}
             onSaveMeta={vi.fn()}
+            onSaveOutputs={vi.fn(async (content: string) => art('outputs', content))}
             onTryScript={vi.fn(async () => tryResult())}
           />
         </>
@@ -317,6 +319,7 @@ describe('ArtifactsPanel script dry-run', () => {
             onSavePrompt={vi.fn()}
             onSaveScript={vi.fn(async (content: string) => art('script', content))}
             onSaveMeta={vi.fn()}
+            onSaveOutputs={vi.fn(async (content: string) => art('outputs', content))}
             onTryScript={vi.fn(async () => tryResult())}
           />
         </>
@@ -363,6 +366,109 @@ describe('ArtifactsPanel script dry-run', () => {
     await waitFor(() => {
       expect(onSaveScript).toHaveBeenCalled()
       expect(onTryScript).toHaveBeenCalledTimes(1)
+    })
+  })
+})
+
+describe('ArtifactsPanel outputs', () => {
+  it('shows the empty outputs card between Meta and Steps', () => {
+    renderPanel([art('meta', '{"kind":"agent"}')])
+    const headings = screen.getAllByRole('heading')
+    const labels = headings.map((el) => el.textContent)
+    const metaAt = labels.indexOf('Meta')
+    const outputsAt = labels.indexOf('Outputs')
+    const stepsAt = labels.indexOf('Steps')
+    expect(outputsAt).toBeGreaterThan(metaAt)
+    expect(outputsAt).toBeGreaterThan(-1)
+    if (stepsAt >= 0) expect(outputsAt).toBeLessThan(stepsAt)
+    expect(screen.getByText('Выходов нет — прогон даёт один результат.')).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Добавить выход' })).toBeTruthy()
+  })
+
+  it('renders declared outputs and marks the first as primary', () => {
+    renderPanel([
+      art(
+        'outputs',
+        JSON.stringify([
+          { key: 'brief', description: 'Резюме' },
+          { key: 'table', description: 'Таблица' },
+        ]),
+      ),
+    ])
+    expect(screen.getByDisplayValue('brief')).toBeTruthy()
+    expect(screen.getByDisplayValue('Резюме')).toBeTruthy()
+    expect(screen.getByDisplayValue('table')).toBeTruthy()
+    expect(screen.getByText('основной')).toBeTruthy()
+  })
+
+  it('moves the primary badge when a row is raised', () => {
+    renderPanel([
+      art(
+        'outputs',
+        JSON.stringify([
+          { key: 'brief', description: 'Резюме' },
+          { key: 'table', description: 'Таблица' },
+        ]),
+      ),
+    ])
+    fireEvent.click(screen.getByRole('button', { name: 'Поднять выход table' }))
+    const rows = screen.getAllByText('основной')
+    expect(rows).toHaveLength(1)
+    expect(screen.getByDisplayValue('table')).toBeTruthy()
+    const firstKey = document.getElementById('outputs-key-0') as HTMLInputElement
+    expect(firstKey.value).toBe('table')
+  })
+
+  it('does not PATCH when client validation fails', async () => {
+    const onSaveOutputs = vi.fn(async (content: string) => art('outputs', content))
+    renderPanel([art('outputs', '[]')], { onSaveOutputs })
+    fireEvent.click(screen.getByRole('button', { name: 'Добавить выход' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Сохранить outputs' }))
+    await waitFor(() => {
+      expect(screen.getByText('ключ: только a-z, цифры и _')).toBeTruthy()
+    })
+    expect(onSaveOutputs).not.toHaveBeenCalled()
+  })
+
+  it('shows a server validation error on the card', () => {
+    renderPanel([
+      art(
+        'outputs',
+        JSON.stringify([{ key: 'brief', description: 'Резюме' }]),
+        { is_valid: false, error: 'duplicate output key' },
+      ),
+    ])
+    expect(screen.getByText('duplicate output key')).toBeTruthy()
+    const card = screen.getByText('Outputs').closest('[aria-invalid="true"]')
+    expect(card).toBeTruthy()
+  })
+
+  it('disables output fields while streaming', () => {
+    renderPanel(
+      [
+        art(
+          'outputs',
+          JSON.stringify([{ key: 'brief', description: 'Резюме' }]),
+        ),
+      ],
+      { streaming: true },
+    )
+    expect((screen.getByDisplayValue('brief') as HTMLInputElement).disabled).toBe(true)
+    expect((screen.getByRole('button', { name: 'Добавить выход' }) as HTMLButtonElement).disabled).toBe(true)
+    expect((screen.getByRole('button', { name: 'Сохранить outputs' }) as HTMLButtonElement).disabled).toBe(true)
+  })
+
+  it('saves a valid outputs draft', async () => {
+    const onSaveOutputs = vi.fn(async (content: string) => art('outputs', content))
+    renderPanel([art('outputs', '[]')], { onSaveOutputs })
+    fireEvent.click(screen.getByRole('button', { name: 'Добавить выход' }))
+    fireEvent.change(screen.getByLabelText('ключ'), { target: { value: 'brief' } })
+    fireEvent.change(screen.getByLabelText('описание'), { target: { value: 'Резюме' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Сохранить outputs' }))
+    await waitFor(() => {
+      expect(onSaveOutputs).toHaveBeenCalledWith(
+        JSON.stringify([{ key: 'brief', description: 'Резюме' }]),
+      )
     })
   })
 })
