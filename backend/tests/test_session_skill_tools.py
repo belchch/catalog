@@ -22,7 +22,7 @@ from catalog.skills.budget import (
     nested_skill_hold,
     turn_deadline_seconds,
 )
-from catalog.skills.config import PipelineStep, SkillConfig, VerifyCheck
+from catalog.skills.config import PipelineStep, SkillConfig, SkillOutput, VerifyCheck
 from catalog.skills.repo_run import get_run
 from catalog.skills.repo_skill import create_skill, get_skill
 from catalog.skills.skill_tools import (
@@ -227,7 +227,9 @@ def test_session_skill_tool_runs_script_and_pins(db: Database) -> None:
         "depth",
         "verify_failures",
         "text",
+        "outputs",
     ]
+    assert out["outputs"] == {}
 
     run = get_run(db, out["run_id"])
     assert run is not None
@@ -244,6 +246,53 @@ def test_session_skill_tool_runs_script_and_pins(db: Database) -> None:
     verify = [e for e in entries if e["kind"] == "verify"]
     assert verify
     assert verify[0]["data"]["passed"] is True
+    assert list_documents(db) == []
+
+
+def test_session_skill_tool_exposes_named_outputs(db: Database) -> None:
+    sid = create_session(db)
+    config = SkillConfig(
+        name="Split Text",
+        description="named",
+        system_prompt="",
+        allowed_tools=[],
+        model="x",
+        kind="script",
+        code='result = {"brief": document.upper(), "table": "A -> a"}\n',
+        outputs=[
+            SkillOutput(key="brief", description="Текст"),
+            SkillOutput(key="table", description="Таблица"),
+        ],
+        verify_checks=[VerifyCheck(check="non_empty")],
+        input_arity=1,
+    )
+    skill_id = create_skill(
+        db,
+        name=config.name,
+        description=config.description,
+        config=config,
+        status="committed",
+    )
+    attach_skills(db, sid, [skill_id])
+    record = get_skill(db, skill_id)
+    assert record is not None
+    name = skill_tool_name(record, used=set())
+    tools = build_session_skill_tools(
+        db,
+        sid,
+        workspace_dir="/tmp",
+        base_tools=ToolRegistry(),
+    )
+    _, fn = tools.get(name)
+    assert fn is not None
+    out = asyncio.run(fn(text="hello"))
+    assert out["ok"] is True
+    assert out["text"] == "HELLO"
+    assert out["outputs"] == {"brief": "HELLO", "table": "A -> a"}
+    run = get_run(db, out["run_id"])
+    assert run is not None
+    assert run["persist"] is False
+    assert run["output_doc_id"] is None
     assert list_documents(db) == []
     spec = tools.get(name)
     assert spec is not None

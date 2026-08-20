@@ -368,6 +368,44 @@ def test_skill_run_schema_has_parent_run_id(db: Database) -> None:
     with db.connect() as conn:
         cols = {row["name"] for row in conn.execute("PRAGMA table_info(skill_run)")}
     assert "parent_run_id" in cols
+    assert "result_artifacts" in cols
+    assert "output_doc_ids" in cols
+
+
+def test_skill_run_named_outputs_migration_preserves_rows(tmp_path: Path) -> None:
+    import sqlite3
+
+    db_path = tmp_path / "legacy.db"
+    conn = sqlite3.connect(db_path)
+    conn.execute(
+        """
+        CREATE TABLE skill_run(
+          id TEXT PRIMARY KEY, skill_id TEXT NOT NULL, session_id TEXT,
+          input_doc_id TEXT, output_doc_id TEXT,
+          status TEXT NOT NULL, trace_json TEXT, started_at TEXT NOT NULL,
+          ended_at TEXT
+        )
+        """
+    )
+    conn.execute(
+        "INSERT INTO skill_run(id, skill_id, status, started_at) "
+        "VALUES ('r1', 's1', 'ok', '2026-01-01T00:00:00+00:00')"
+    )
+    conn.commit()
+    conn.close()
+
+    d = Database(str(db_path))
+    d.init_schema()
+    run = get_run(d, "r1")
+    assert run is not None
+    assert run["skill_id"] == "s1"
+    assert run["status"] == "ok"
+    assert run["result_artifacts"] == {}
+    assert run["output_doc_ids"] == []
+    with d.connect() as c:
+        cols = {row["name"] for row in c.execute("PRAGMA table_info(skill_run)")}
+    assert "result_artifacts" in cols
+    assert "output_doc_ids" in cols
 
 
 def test_delete_document_nullifies_skill_run_refs(db: Database, tmp_path: Path) -> None:

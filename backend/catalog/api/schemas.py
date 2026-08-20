@@ -133,11 +133,13 @@ class RunOut(BaseModel):
     # rows written before the multi-doc column existed.
     input_doc_ids: list[str] | None = None
     output_doc_id: str | None = None
+    output_doc_ids: list[str] | None = None
     status: str
     # Trace is a JSON array of TraceEntry dicts (see Trace.to_json).
     trace: list | None = None
     # Raw agent/script output, kept even when persist=False (CATALOG-18).
     result_text: str | None = None
+    result_artifacts: dict[str, str] | None = None
     parent_run_id: str | None = None
 
 

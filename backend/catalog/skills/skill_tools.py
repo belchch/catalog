@@ -351,6 +351,7 @@ def build_session_skill_tools(
                 "depth": nested.depth,
                 "verify_failures": verify_failures,
                 "text": result.result_text,
+                "outputs": result.result_artifacts or {},
             }
 
         reg.register(

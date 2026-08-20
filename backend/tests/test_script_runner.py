@@ -180,6 +180,24 @@ def test_run_script_main_returns_list_of_strings() -> None:
     assert out == ["ab", "x"]
 
 
+def test_run_script_result_dict_of_strings() -> None:
+    code = 'result = {"brief": document, "table": "notes"}\n'
+    out = run_script(code, "hello", memory_bytes=_TEST_MEM)
+    assert out == {"brief": "hello", "table": "notes"}
+
+
+def test_run_script_main_returns_dict_of_strings() -> None:
+    code = 'def main(document):\n    return {"brief": document.upper(), "table": "n"}\n'
+    out = run_script(code, "ab", memory_bytes=_TEST_MEM)
+    assert out == {"brief": "AB", "table": "n"}
+
+
+def test_run_script_mixed_dict_raises() -> None:
+    code = 'result = {"brief": document, "n": 1}\n'
+    with pytest.raises(ScriptRuntimeError, match="string keys"):
+        run_script(code, "hello", memory_bytes=_TEST_MEM)
+
+
 def test_run_script_result_via_print() -> None:
     code = "print(document[::-1])\n"
     out = run_script(code, "abc", memory_bytes=_TEST_MEM)

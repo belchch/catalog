@@ -66,7 +66,12 @@ from catalog.skills.budget import (
     nested_skill_hold,
     skill_hold_active,
 )
-from catalog.skills.config import PipelineStep, SkillConfig, ensure_read_document_tool
+from catalog.skills.config import (
+    MAX_SKILL_OUTPUTS,
+    PipelineStep,
+    SkillConfig,
+    ensure_read_document_tool,
+)
 from catalog.skills.repo_run import claim_run, create_run, finish_run, get_run
 from catalog.skills.script_runner import ScriptRuntimeError, run_skill_script_async
 from catalog.skills.verify import run_verify_async
@@ -81,6 +86,151 @@ PipelineValue = str | list[str]
 
 class PipelineStepError(RuntimeError):
     pass
+
+
+class NamedOutputsError(RuntimeError):
+    pass
+
+
+def _value_as_text(value: PipelineValue) -> str:
+    if isinstance(value, dict):
+        raise TypeError("named outputs dict is not a pipeline value")
+    if isinstance(value, list):
+        if len(value) == 1:
+            return value[0]
+        return "\n\n---\n\n".join(value)
+    return value
+
+
+def _value_as_documents(value: PipelineValue) -> list[str]:
+    if isinstance(value, dict):
+        raise TypeError("named outputs dict is not a pipeline value")
+    if isinstance(value, list):
+        return list(value)
+    return [value]
+
+
+def _match_named_outputs(
+    skill: SkillConfig, value: dict[str, str]
+) -> dict[str, str]:
+    declared = [item.key for item in skill.outputs]
+    if not declared:
+        raise NamedOutputsError(
+            "skill returned a dict but SkillConfig.outputs is empty"
+        )
+    if len(value) > MAX_SKILL_OUTPUTS:
+        raise NamedOutputsError(
+            f"too many output keys: {len(value)} (max {MAX_SKILL_OUTPUTS})"
+        )
+    extra = sorted(set(value) - set(declared))
+    missing = [key for key in declared if key not in value]
+    empty = [key for key in declared if not (value.get(key) or "").strip()]
+    parts: list[str] = []
+    if extra:
+        parts.append("unknown output key(s): " + ", ".join(extra))
+    if missing:
+        parts.append("missing output key(s): " + ", ".join(missing))
+    if empty:
+        parts.append("empty output value(s): " + ", ".join(empty))
+    if parts:
+        raise NamedOutputsError("; ".join(parts))
+    return {key: value[key] for key in declared}
+
+
+def _finalize_script_result(
+    skill: SkillConfig, raw: str | list[str] | dict[str, str]
+) -> tuple[str, dict[str, str]]:
+    if isinstance(raw, dict):
+        artifacts = _match_named_outputs(skill, raw)
+        return artifacts[skill.outputs[0].key], artifacts
+    if skill.outputs:
+        raise NamedOutputsError(
+            "skill declared outputs but script did not return a dict"
+        )
+    if isinstance(raw, list):
+        return _value_as_text(raw), {}
+    return raw, {}
+
+
+def _record_outputs_error(
+    trace: Trace, iteration: int, error: str, step_id: str | None = None
+) -> None:
+    data: dict[str, object] = {"outputs": True, "error": error}
+    if step_id is not None:
+        data["step_id"] = step_id
+    trace.entries.append(TraceEntry(kind="error", iteration=iteration, data=data))
+
+
+def _primary_result_title(skill: SkillConfig, docs: list) -> str:
+    if not docs:
+        return f"{skill.name} — результат"
+    if len(docs) == 1:
+        return f"{skill.name} — {docs[0].title}"
+    return f"{skill.name} — {docs[0].title} (+{len(docs) - 1})"
+
+
+def persist_run_outputs(
+    db: Database,
+    workspace_dir: str,
+    *,
+    skill: SkillConfig,
+    docs: list,
+    session_id: str | None,
+    primary_text: str,
+    artifacts: dict[str, str],
+    primary_title: str | None = None,
+) -> tuple[str, list[str], str]:
+    workspace_path = Path(workspace_dir)
+    title = primary_title or _primary_result_title(skill, docs)
+    items: list[tuple[str, str, str]] = []
+    if artifacts and skill.outputs:
+        for index, item in enumerate(skill.outputs):
+            item_title = title if index == 0 else f"{skill.name} — {item.description}"
+            items.append((item.key, item_title, artifacts[item.key]))
+    else:
+        items.append(("", title, primary_text))
+
+    allocated: list[tuple[str, str, str, str]] = []
+    for key, item_title, text in items:
+        rel_path = allocate_rel_path(
+            workspace_path,
+            safe_filename(item_title, ".md"),
+            subdir="results",
+        )
+        dest = workspace_path / rel_path
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        dest.touch()
+        allocated.append((key, item_title, text, rel_path))
+
+    stems = [Path(rel_path).stem for *_, rel_path in allocated]
+    input_stems = [Path(doc.path).stem for doc in docs]
+    title_map = build_title_to_stem_map(db)
+    doc_ids: list[str] = []
+    rewritten_primary = primary_text
+    for index, (_key, item_title, text, rel_path) in enumerate(allocated):
+        sibling_stems = [stem for i, stem in enumerate(stems) if i != index]
+        file_text = rewrite_wiki_links(text, title_map)
+        file_text = ensure_parent_wikilinks(file_text, input_stems + sibling_stems)
+        dest = workspace_path / rel_path
+        dest.write_text(file_text, encoding="utf-8")
+        st = dest.stat()
+        out_id = uuid.uuid4().hex
+        create_document(
+            db,
+            title=item_title,
+            path=rel_path,
+            kind="result_md",
+            doc_id=out_id,
+            mtime=st.st_mtime,
+            size=st.st_size,
+            content_hash=content_hash_bytes(file_text.encode("utf-8")),
+        )
+        doc_ids.append(out_id)
+        if index == 0:
+            rewritten_primary = file_text
+    if session_id is not None and doc_ids:
+        attach_documents(db, session_id, doc_ids)
+    return doc_ids[0], doc_ids, rewritten_primary
 
 
 def _config_hash(skill: SkillConfig) -> str:
@@ -99,20 +249,6 @@ def _nested_verify_failures(trace: Trace) -> list[str]:
         if entry.kind == "verify" and not entry.data.get("passed", True):
             failures.extend(str(item) for item in (entry.data.get("failures") or []))
     return failures
-
-
-def _value_as_text(value: PipelineValue) -> str:
-    if isinstance(value, list):
-        if len(value) == 1:
-            return value[0]
-        return "\n\n---\n\n".join(value)
-    return value
-
-
-def _value_as_documents(value: PipelineValue) -> list[str]:
-    if isinstance(value, list):
-        return list(value)
-    return [value]
 
 
 def _deadline_reached(trace: Trace, iteration: int) -> bool:
@@ -238,6 +374,8 @@ class ApplyResult:
     result_text: str | None
     trace: Trace
     run_id: str | None = None
+    output_doc_ids: list[str] | None = None
+    result_artifacts: dict[str, str] | None = None
 
 
 @dataclass
@@ -248,6 +386,8 @@ class _ApplyOutcome:
     status: str = "failed"
     result_text: str | None = None
     run_id: str | None = None
+    output_doc_ids: list[str] | None = None
+    result_artifacts: dict[str, str] | None = None
 
 
 async def _apply_core(
@@ -387,11 +527,13 @@ async def _apply_core(
     )
 
     last_text: str | None = None
+    last_artifacts: dict[str, str] = {}
     last_capped = False
     passed = False
     deadline_stopped = False
     pipeline_halted = False
     output_doc_id: str | None = None
+    output_doc_ids: list[str] = []
     verify_model = skill.model or fallback_model
     verify_provider = provider_for_skill(providers, provider, skill.provider)
     # ``done`` guards finish_run so it runs exactly once across the normal
@@ -425,10 +567,22 @@ async def _apply_core(
             yield script_start
             log_agent_event(script_start)
             t0 = time.perf_counter()
+            outputs_failed = False
             try:
-                text = await run_skill_script_async(skill.code, doc_texts)
-                if isinstance(text, list):
-                    text = _value_as_text(text)
+                raw = await run_skill_script_async(skill.code, doc_texts)
+                text, last_artifacts = _finalize_script_result(skill, raw)
+            except NamedOutputsError as exc:
+                script_error = ScriptEvent(
+                    stage="error", error=str(exc), duration=time.perf_counter() - t0
+                )
+                yield script_error
+                log_agent_event(script_error)
+                _record_outputs_error(trace, 1, str(exc))
+                last_text = None
+                last_artifacts = {}
+                passed = False
+                outputs_failed = True
+                text = ""
             except ScriptRuntimeError as exc:
                 script_error = ScriptEvent(
                     stage="error", error=str(exc), duration=time.perf_counter() - t0
@@ -443,43 +597,44 @@ async def _apply_core(
                     )
                 )
                 raise
-            script_done = ScriptEvent(
-                stage="done", return_value=text, duration=time.perf_counter() - t0
-            )
-            yield script_done
-            log_agent_event(script_done)
-            trace.entries.append(
-                TraceEntry(
-                    kind="script",
-                    iteration=1,
-                    data={"ok": True, "chars": len(text)},
+            if not outputs_failed:
+                script_done = ScriptEvent(
+                    stage="done", return_value=text, duration=time.perf_counter() - t0
                 )
-            )
-            last_text = text
-            if text:
-                yield TokenEvent(delta=text)
-            if _deadline_reached(trace, 1):
-                deadline_stopped = True
-                last_capped = True
-            else:
-                result = await run_verify_async(
-                    text or "",
-                    skill.verify_checks,
-                    db=db,
-                    provider=verify_provider,
-                    model=verify_model,
-                )
-                verify_event = VerifyEvent(iteration=1, result=result)
-                yield verify_event
-                log_agent_event(verify_event)
+                yield script_done
+                log_agent_event(script_done)
                 trace.entries.append(
                     TraceEntry(
-                        kind="verify",
+                        kind="script",
                         iteration=1,
-                        data=result.as_payload(),
+                        data={"ok": True, "chars": len(text)},
                     )
                 )
-                passed = result.passed
+                last_text = text
+                if text:
+                    yield TokenEvent(delta=text)
+                if _deadline_reached(trace, 1):
+                    deadline_stopped = True
+                    last_capped = True
+                else:
+                    result = await run_verify_async(
+                        text or "",
+                        skill.verify_checks,
+                        db=db,
+                        provider=verify_provider,
+                        model=verify_model,
+                    )
+                    verify_event = VerifyEvent(iteration=1, result=result)
+                    yield verify_event
+                    log_agent_event(verify_event)
+                    trace.entries.append(
+                        TraceEntry(
+                            kind="verify",
+                            iteration=1,
+                            data=result.as_payload(),
+                        )
+                    )
+                    passed = result.passed
         elif skill.kind == "pipeline":
             current: PipelineValue | None = None
             for index, step in enumerate(skill.steps):
@@ -497,7 +652,7 @@ async def _apply_core(
                     log_agent_event(script_start)
                     t0 = time.perf_counter()
                     try:
-                        text = await run_skill_script_async(
+                        raw = await run_skill_script_async(
                             step.code, _value_as_documents(step_input)
                         )
                     except ScriptRuntimeError as exc:
@@ -521,7 +676,58 @@ async def _apply_core(
                             )
                         )
                         raise
-                    display = _value_as_text(text)
+                    is_last = index == len(skill.steps) - 1
+                    if isinstance(raw, dict) and not is_last:
+                        message = (
+                            f"pipeline step {step.id!r} returned a dict; "
+                            "named outputs are only allowed on the last step"
+                        )
+                        script_error = ScriptEvent(
+                            stage="error",
+                            error=message,
+                            duration=time.perf_counter() - t0,
+                            step_id=step.id,
+                        )
+                        yield script_error
+                        log_agent_event(script_error)
+                        trace.entries.append(
+                            TraceEntry(
+                                kind="error",
+                                iteration=index + 1,
+                                data={
+                                    "outputs": True,
+                                    "error": message,
+                                    "step_id": step.id,
+                                },
+                            )
+                        )
+                        raise PipelineStepError(message)
+                    if is_last:
+                        try:
+                            display, last_artifacts = _finalize_script_result(
+                                skill, raw
+                            )
+                        except NamedOutputsError as exc:
+                            script_error = ScriptEvent(
+                                stage="error",
+                                error=str(exc),
+                                duration=time.perf_counter() - t0,
+                                step_id=step.id,
+                            )
+                            yield script_error
+                            log_agent_event(script_error)
+                            _record_outputs_error(
+                                trace, index + 1, str(exc), step.id
+                            )
+                            last_text = None
+                            last_artifacts = {}
+                            passed = False
+                            pipeline_halted = True
+                            break
+                        current = display
+                    else:
+                        display = _value_as_text(raw)
+                        current = raw
                     script_done = ScriptEvent(
                         stage="done",
                         return_value=display,
@@ -541,7 +747,6 @@ async def _apply_core(
                             },
                         )
                     )
-                    current = text
                     last_text = display
                 elif step.type == "llm":
                     step_tools = base_tools.filter(
@@ -840,6 +1045,16 @@ async def _apply_core(
             ):
                 deadline_stopped = True
                 last_capped = True
+            if not deadline_stopped and not pipeline_halted and skill.outputs and not last_artifacts:
+                message = (
+                    "skill declared outputs but the last pipeline step "
+                    "did not return a dict"
+                )
+                _record_outputs_error(trace, max(len(skill.steps), 1), message)
+                last_text = None
+                last_artifacts = {}
+                passed = False
+                pipeline_halted = True
             if not deadline_stopped and not pipeline_halted:
                 final_text = last_text or ""
                 if last_text:
@@ -1000,45 +1215,20 @@ async def _apply_core(
         # "preview" mode leaves the result on screen, materialized later via
         # POST /runs/{id}/save if the user chooses to).
         if passed and persist and docs:
-            if len(docs) == 1:
-                result_title = f"{skill.name} — {docs[0].title}"
-            else:
-                result_title = f"{skill.name} — {docs[0].title} (+{len(docs) - 1})"
-            out_id = uuid.uuid4().hex
-            workspace_path = Path(workspace_dir)
-            rel_path = allocate_rel_path(
-                workspace_path,
-                safe_filename(result_title, ".md"),
-                subdir="results",
-            )
-            last_text = rewrite_wiki_links(
-                last_text or "", build_title_to_stem_map(db)
-            )
-            last_text = ensure_parent_wikilinks(
-                last_text,
-                [Path(d.path).stem for d in docs],
-            )
-            dest = workspace_path / rel_path
-            dest.write_text(last_text, encoding="utf-8")
-            st = dest.stat()
-            create_document(
+            output_doc_id, output_doc_ids, last_text = persist_run_outputs(
                 db,
-                title=result_title,
-                path=rel_path,
-                kind="result_md",
-                doc_id=out_id,
-                mtime=st.st_mtime,
-                size=st.st_size,
-                content_hash=content_hash_bytes(
-                    last_text.encode("utf-8")
-                ),
+                workspace_dir,
+                skill=skill,
+                docs=docs,
+                session_id=session_id,
+                primary_text=last_text or "",
+                artifacts=last_artifacts,
             )
-            output_doc_id = out_id
-            if session_id is not None:
-                attach_documents(db, session_id, [out_id])
-            logger.info("apply_skill persisted output_doc_id=%s", out_id)
+            logger.info("apply_skill persisted output_doc_id=%s", output_doc_id)
 
         status = "ok" if passed else "failed"
+        stored_artifacts = last_artifacts or None
+        stored_doc_ids = output_doc_ids or None
 
         # 6. Record outcome (normal path). ``result_text`` is stored
         # regardless of ``persist`` so a preview run can still be saved later.
@@ -1049,12 +1239,16 @@ async def _apply_core(
             output_doc_id=output_doc_id,
             trace=trace,
             result_text=last_text,
+            result_artifacts=stored_artifacts,
+            output_doc_ids=stored_doc_ids,
         )
         done = True
 
         outcome.output_doc_id = output_doc_id
+        outcome.output_doc_ids = stored_doc_ids
         outcome.status = status
         outcome.result_text = last_text
+        outcome.result_artifacts = stored_artifacts
 
         logger.info(
             "apply_skill done status=%s output_doc_id=%s", status, output_doc_id
@@ -1262,6 +1456,8 @@ async def apply_skill_collect(
         result_text=outcome.result_text,
         trace=trace,
         run_id=outcome.run_id,
+        output_doc_ids=outcome.output_doc_ids,
+        result_artifacts=outcome.result_artifacts,
     )
 
 

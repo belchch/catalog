@@ -97,6 +97,45 @@ def cancel_pending_run(db: Database, run_id: str) -> bool:
         return int(cur.rowcount) == 1
 
 
+def _json_or_none(value: object) -> str | None:
+    if value is None:
+        return None
+    return json.dumps(value, ensure_ascii=False)
+
+
+def _row_field(row: object, name: str) -> object:
+    try:
+        return row[name]  # type: ignore[index]
+    except (KeyError, IndexError):
+        return None
+
+
+def _parse_str_dict(row: object, name: str) -> dict[str, str]:
+    raw = _row_field(row, name)
+    if not raw:
+        return {}
+    try:
+        data = json.loads(raw)
+    except (json.JSONDecodeError, TypeError):
+        return {}
+    if not isinstance(data, dict):
+        return {}
+    return {str(key): "" if value is None else str(value) for key, value in data.items()}
+
+
+def _parse_str_list(row: object, name: str) -> list[str]:
+    raw = _row_field(row, name)
+    if not raw:
+        return []
+    try:
+        data = json.loads(raw)
+    except (json.JSONDecodeError, TypeError):
+        return []
+    if not isinstance(data, list):
+        return []
+    return [str(item) for item in data]
+
+
 def finish_run(
     db: Database,
     run_id: str,
@@ -105,21 +144,39 @@ def finish_run(
     output_doc_id: str | None,
     trace: Trace,
     result_text: str | None = None,
+    result_artifacts: dict[str, str] | None = None,
+    output_doc_ids: list[str] | None = None,
 ) -> None:
     now = _now_iso()
     with db.connect() as conn:
         conn.execute(
             "UPDATE skill_run SET status = ?, output_doc_id = ?, "
-            "trace_json = ?, ended_at = ?, result_text = ? WHERE id = ?",
-            (status, output_doc_id, trace.to_json(), now, result_text, run_id),
+            "trace_json = ?, ended_at = ?, result_text = ?, "
+            "result_artifacts = ?, output_doc_ids = ? WHERE id = ?",
+            (
+                status,
+                output_doc_id,
+                trace.to_json(),
+                now,
+                result_text,
+                _json_or_none(result_artifacts),
+                _json_or_none(output_doc_ids),
+                run_id,
+            ),
         )
 
 
-def set_output_doc_id(db: Database, run_id: str, output_doc_id: str) -> None:
+def set_output_doc_id(
+    db: Database,
+    run_id: str,
+    output_doc_id: str,
+    output_doc_ids: list[str] | None = None,
+) -> None:
+    ids = list(output_doc_ids) if output_doc_ids is not None else [output_doc_id]
     with db.connect() as conn:
         conn.execute(
-            "UPDATE skill_run SET output_doc_id = ? WHERE id = ?",
-            (output_doc_id, run_id),
+            "UPDATE skill_run SET output_doc_id = ?, output_doc_ids = ? WHERE id = ?",
+            (output_doc_id, json.dumps(ids, ensure_ascii=False), run_id),
         )
 
 
@@ -179,7 +236,8 @@ def get_run(db: Database, run_id: str) -> dict | None:
         row = conn.execute(
             "SELECT id, skill_id, session_id, input_doc_id, input_doc_ids, "
             "output_doc_id, status, trace_json, started_at, ended_at, "
-            "persist, result_text, user_prompt, parent_run_id "
+            "persist, result_text, result_artifacts, output_doc_ids, "
+            "user_prompt, parent_run_id "
             "FROM skill_run WHERE id = ?",  # noqa: S608
             (run_id,),
         ).fetchone()
@@ -200,6 +258,8 @@ def get_run(db: Database, run_id: str) -> dict | None:
         parent_run_id = row["parent_run_id"]
     except (KeyError, IndexError):
         parent_run_id = None
+    result_artifacts = _parse_str_dict(row, "result_artifacts")
+    output_doc_ids = _parse_str_list(row, "output_doc_ids")
     return {
         "id": row["id"],
         "skill_id": row["skill_id"],
@@ -207,12 +267,14 @@ def get_run(db: Database, run_id: str) -> dict | None:
         "input_doc_id": row["input_doc_id"],
         "input_doc_ids": input_doc_ids,
         "output_doc_id": row["output_doc_id"],
+        "output_doc_ids": output_doc_ids,
         "status": row["status"],
         "trace_json": row["trace_json"],
         "started_at": row["started_at"],
         "ended_at": row["ended_at"],
         "persist": bool(row["persist"]) if row["persist"] is not None else True,
         "result_text": row["result_text"],
+        "result_artifacts": result_artifacts,
         "user_prompt": row["user_prompt"],
         "parent_run_id": parent_run_id,
     }

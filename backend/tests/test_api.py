@@ -14,7 +14,8 @@ from pathlib import Path
 from catalog.documents.tools import build_document_tools
 from catalog.llm.base import CompletionResult, ToolCall
 
-from catalog.skills.config import SkillConfig, VerifyCheck, compute_tags
+from catalog.skills.apply import apply_skill_collect
+from catalog.skills.config import SkillConfig, SkillOutput, VerifyCheck, compute_tags
 from catalog.skills.repo_skill import create_skill, get_skill, update_status
 from catalog.storage.repo_document import get_document
 from catalog.storage.repo_message import add_message, list_messages
@@ -2045,7 +2046,9 @@ def test_apply_preview_mode_skips_document_creation(client, provider, db) -> Non
     assert finish["type"] == "finish"
     assert finish["status"] == "ok"
     assert finish["output_doc_id"] is None
+    assert finish["output_doc_ids"] == []
     assert finish["result_text"] == "# Result\n\nOn-screen only."
+    assert finish["result_artifacts"] == {}
 
     run = client.get(f"/runs/{run_id}").json()
     assert run["status"] == "ok"
@@ -2484,3 +2487,65 @@ def test_export_docx_filter_allows_write_tool(client, db) -> None:
     assert subset.names() == ["export_docx"]
     spec = subset.specs()[0]
     assert spec.side == "write"
+
+
+def test_named_outputs_preview_save_creates_both_documents(client, db) -> None:
+    workspace = Path(client.app.state.workspace)
+    doc_id = _upload(client, "input.md", b"source text")
+    skill = SkillConfig(
+        name="splitter",
+        description="two outputs",
+        system_prompt="",
+        allowed_tools=[],
+        model="test/model",
+        kind="script",
+        code='result = {"brief": document.upper(), "table": "A -> a"}\n',
+        outputs=[
+            SkillOutput(key="brief", description="Текст"),
+            SkillOutput(key="table", description="Таблица"),
+        ],
+        verify_checks=[VerifyCheck("non_empty")],
+    )
+    skill_id = create_skill(
+        db,
+        name=skill.name,
+        description=skill.description,
+        config=skill,
+        status="committed",
+    )
+    result = asyncio.run(
+        apply_skill_collect(
+            provider=client.app.state.provider,
+            db=db,
+            workspace_dir=str(workspace),
+            skill=skill,
+            skill_id=skill_id,
+            input_doc_ids=[doc_id],
+            base_tools=build_document_tools(db, workspace),
+            persist=False,
+        )
+    )
+    assert result.status == "ok"
+    assert result.output_doc_id is None
+    run_id = result.run_id
+    assert run_id is not None
+
+    run = client.get(f"/runs/{run_id}").json()
+    assert run["output_doc_id"] is None
+    assert run["output_doc_ids"] == []
+    assert run["result_artifacts"] == {"brief": "SOURCE TEXT", "table": "A -> a"}
+    assert all(d["kind"] != "result_md" for d in client.get("/documents").json())
+
+    resp = client.post(f"/runs/{run_id}/save")
+    assert resp.status_code == 200, resp.text
+    saved = resp.json()
+    assert saved["kind"] == "result_md"
+    run_after = client.get(f"/runs/{run_id}").json()
+    assert run_after["output_doc_id"] == saved["id"]
+    assert len(run_after["output_doc_ids"]) == 2
+    assert run_after["output_doc_ids"][0] == saved["id"]
+    docs = client.get("/documents").json()
+    result_docs = [d for d in docs if d["kind"] == "result_md"]
+    assert len(result_docs) == 2
+    resp2 = client.post(f"/runs/{run_id}/save")
+    assert resp2.status_code == 409

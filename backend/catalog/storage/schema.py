@@ -102,6 +102,8 @@ CREATE TABLE IF NOT EXISTS skill_run(
   trace_json TEXT, started_at TEXT NOT NULL, ended_at TEXT,
   persist INTEGER NOT NULL DEFAULT 1,                            -- 1 = auto-persist result_md (CATALOG-18)
   result_text TEXT,                                              -- raw agent/script output, kept even when persist=0
+  result_artifacts TEXT,                                         -- JSON object key→text (CATALOG-145)
+  output_doc_ids TEXT,                                           -- JSON array of result doc ids, primary first
   user_prompt TEXT,
   parent_run_id TEXT                                             -- nested skill-as-tool run (ADR-0019)
 );
@@ -168,5 +170,15 @@ ADDITIVE_MIGRATIONS: list[tuple[str, str, str]] = [
         "skill_run",
         "parent_run_id",
         "ALTER TABLE skill_run ADD COLUMN parent_run_id TEXT",
+    ),
+    (
+        "skill_run",
+        "result_artifacts",
+        "ALTER TABLE skill_run ADD COLUMN result_artifacts TEXT",
+    ),
+    (
+        "skill_run",
+        "output_doc_ids",
+        "ALTER TABLE skill_run ADD COLUMN output_doc_ids TEXT",
     ),
 ]
