@@ -61,7 +61,13 @@ from catalog.skills.artifact_tools import (
     validate_pipeline_steps,
 )
 from catalog.skills.budget import SkillBudget, estimate_skill_llm_calls, make_turn_budget
-from catalog.skills.config import SKILL_KINDS, compute_tags, pipeline_step_to_dict
+from catalog.skills.config import (
+    SKILL_KINDS,
+    compute_tags,
+    parse_skill_outputs,
+    pipeline_step_to_dict,
+    skill_output_to_dict,
+)
 from catalog.skills.repo_skill import get_skill
 from catalog.skills.skill_tools import SkillCallContext, build_session_skill_tools
 from catalog.skills.script_runner import (
@@ -116,6 +122,12 @@ PLANNER_SYSTEM_PROMPT = (
     "для skill укажи skill_id прикреплённого committed-скилла — id в "
     "списке привязанных скиллов или через list_session_skills; затем "
     "save_skill_script / save_skill_prompt по шагам). "
+    "Если скилл должен вернуть несколько документов с разными ролями — "
+    "объяви их через set_skill_outputs: список {key, description}, "
+    "не больше 8, ключ ^[a-z][a-z0-9_]{0,31}$, первый элемент — primary. "
+    "Описания пиши так, чтобы их понял и человек, и автор кода. "
+    "Ключи сверяются с фактическим возвратом; для script верни dict "
+    "с теми же ключами. Один безымянный выход объявлять не нужно. "
     "Для kind=script: "
     + SCRIPT_CODE_CONTRACT_RU
     + ". "
@@ -639,6 +651,27 @@ async def patch_session_artifact_endpoint(
             content=json.dumps(payload, ensure_ascii=False)
             if parsed or not errors
             else req.content,
+            source="user",
+            is_valid=not errors,
+            error="; ".join(errors) if errors else None,
+        )
+        return _artifact_out(db, row)
+
+    if artifact_type == "outputs":
+        parsed, errors = parse_skill_outputs(req.content)
+        content = (
+            json.dumps(
+                [skill_output_to_dict(item) for item in parsed],
+                ensure_ascii=False,
+            )
+            if not errors
+            else req.content
+        )
+        row = upsert_artifact(
+            db,
+            session_id=session_id,
+            type="outputs",
+            content=content,
             source="user",
             is_valid=not errors,
             error="; ".join(errors) if errors else None,

@@ -59,8 +59,11 @@ from catalog.skills.config import (
     VerifyCheck,
     compute_tags,
     ensure_read_document_tool,
+    parse_skill_outputs,
     pipeline_step_to_dict,
     pipeline_steps_from_value,
+    skill_output_to_dict,
+    skill_outputs_from_value,
 )
 from catalog.skills.repo_skill import (
     SkillRecord,
@@ -379,6 +382,7 @@ def _args_to_config(args: dict, default_model: str) -> SkillConfig:
         provider=args.get("provider") or "",
         reasoning=args.get("reasoning") or "",
         steps=pipeline_steps_from_value(args.get("steps")),
+        outputs=skill_outputs_from_value(args.get("outputs")),
     )
 
 
@@ -450,6 +454,10 @@ def _validate_config(
             config.verify_checks, available_checks=available_checks
         )
     )
+    _, output_errors = parse_skill_outputs(
+        [skill_output_to_dict(item) for item in config.outputs]
+    )
+    errors.extend(output_errors)
     if db is not None and session_id is not None:
         errors.extend(_dry_run_gate_errors(db, session_id, config))
     return errors
@@ -610,6 +618,23 @@ def _build_skill_from_artifacts(
             )
         args["system_prompt"] = prompt.content
         args["code"] = ""
+
+    outputs_row = get_artifact(db, session_id, "outputs")
+    if outputs_row is None:
+        args["outputs"] = []
+    elif not outputs_row.is_valid:
+        raise HTTPException(
+            status_code=422,
+            detail=f"outputs are invalid: {outputs_row.error or 'validation failed'}",
+        )
+    else:
+        parsed_outputs, output_errors = parse_skill_outputs(outputs_row.content)
+        if output_errors:
+            raise HTTPException(
+                status_code=422,
+                detail="outputs artifact is invalid: " + "; ".join(output_errors),
+            )
+        args["outputs"] = [skill_output_to_dict(item) for item in parsed_outputs]
 
     try:
         config = _args_to_config(args, model_default)
@@ -945,6 +970,19 @@ def seed_session_artifacts_from_skill(
                 is_valid=is_valid,
                 error=error,
             )
+    if config.outputs:
+        upsert_artifact(
+            db,
+            session_id=session_id,
+            type="outputs",
+            content=json.dumps(
+                [skill_output_to_dict(item) for item in config.outputs],
+                ensure_ascii=False,
+            ),
+            source="user",
+            is_valid=True,
+            error=None,
+        )
 
 
 def _preview(config: SkillConfig) -> SkillPreview:
@@ -983,6 +1021,9 @@ def _format_skill_for_edit(record: SkillRecord) -> str:
     if config.verify_checks:
         checks = ", ".join(vc.check for vc in config.verify_checks)
         lines.append(f"- verify_checks: {checks}")
+    if config.outputs:
+        declared = ", ".join(item.key for item in config.outputs)
+        lines.append(f"- outputs: {declared}")
     lines.append(
         "Черновик prompt/script уже засеян в панели артефактов "
         "(смотри через read_skill_draft). Не дублируй полный текст в чат."
@@ -990,7 +1031,8 @@ def _format_skill_for_edit(record: SkillRecord) -> str:
     lines.append(
         "Обсуди с пользователем изменения и обновляй черновик инструментами "
         "set_skill_meta и save_skill_prompt (для agent) или save_skill_script "
-        "(для script) или save_skill_steps (для pipeline)."
+        "(для script) или save_skill_steps (для pipeline). "
+        "Именованные выходы — set_skill_outputs."
     )
     return "\n".join(lines)
 

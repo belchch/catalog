@@ -40,6 +40,7 @@ _RESERVED = frozenset(
         "save_skill_prompt",
         "save_skill_script",
         "set_skill_meta",
+        "set_skill_outputs",
         "save_skill_steps",
         "read_skill_draft",
         "list_session_skills",

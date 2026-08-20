@@ -10,7 +10,7 @@ import pytest
 from catalog.documents.ingest import ingest_file
 from catalog.documents.tools import build_document_tools
 from catalog.llm.base import CompletionResult, ToolCall
-from catalog.api.sessions import _planner_system_prompt
+from catalog.api.sessions import PLANNER_SYSTEM_PROMPT, _planner_system_prompt
 from catalog.skills.artifact_tools import build_artifact_tools
 from catalog.skills.budget import (
     SCRIPT_TRIES_PER_TURN,
@@ -21,7 +21,7 @@ from catalog.skills.budget import (
 )
 from catalog.skills.skill_tools import _RESERVED, config_hash
 from catalog.skills.verify import registered_checks, verify_checks_params_hint
-from catalog.skills.config import PipelineStep, SkillConfig, VerifyCheck
+from catalog.skills.config import PipelineStep, SkillConfig, SkillOutput, VerifyCheck
 from catalog.skills.repo_skill import create_skill, get_skill, update_skill
 from catalog.storage.db import Database
 from catalog.storage.repo_document import list_documents
@@ -389,6 +389,7 @@ def test_build_from_artifacts_without_llm(client, provider, db) -> None:
     skill = get_skill(db, resp.json()["skill_id"])
     assert skill is not None
     assert skill.config.system_prompt == "Summarize the document."
+    assert skill.config.outputs == []
 
 
 def test_build_script_from_artifacts(client, provider, db) -> None:
@@ -2065,3 +2066,278 @@ def test_failed_try_of_saved_code_updates_dry_run(client, db) -> None:
     assert script["dry_run"]["ok"] is False
     assert script["dry_run"]["sha256"] == code_sha256(bad)
     assert script["dry_run"]["stage"] == "validate"
+
+
+def _outputs_payload(*pairs: tuple[str, str]) -> list[dict]:
+    return [{"key": key, "description": description} for key, description in pairs]
+
+
+def test_set_skill_outputs_writes_valid_artifact(mem_db: Database) -> None:
+    session_id = create_session(mem_db)
+    tools = build_artifact_tools(
+        mem_db, session_id, available_tools=["read_document"]
+    )
+    spec, set_outputs = tools.get("set_skill_outputs")
+    assert spec.name == "set_skill_outputs"
+    assert "set_skill_outputs" in _RESERVED
+
+    async def _run():
+        return await set_outputs(
+            outputs=_outputs_payload(
+                ("brief", "Краткое резюме"),
+                ("table", "Таблица перекодировки"),
+            )
+        )
+
+    result = asyncio.run(_run())
+    assert result["ok"] is True
+    assert result["error"] is None
+    row = get_artifact(mem_db, session_id, "outputs")
+    assert row is not None
+    assert row.is_valid is True
+    assert row.source == "llm"
+    parsed = json.loads(row.content)
+    assert [item["key"] for item in parsed] == ["brief", "table"]
+
+
+def test_set_skill_outputs_rejects_invalid_cases(mem_db: Database) -> None:
+    session_id = create_session(mem_db)
+    tools = build_artifact_tools(
+        mem_db, session_id, available_tools=["read_document"]
+    )
+    _, set_outputs = tools.get("set_skill_outputs")
+
+    cases = [
+        ("{not json", "json"),
+        (_outputs_payload(("brief", "a"), ("brief", "b")), "duplicate"),
+        (_outputs_payload(("Brief", "резюме")), "key"),
+        (_outputs_payload(("brief", "   ")), "description"),
+        (
+            _outputs_payload(
+                *[(f"out_{index}", f"item {index}") for index in range(9)]
+            ),
+            "at most 8",
+        ),
+    ]
+
+    async def _run(payload):
+        return await set_outputs(outputs=payload)
+
+    for payload, needle in cases:
+        result = asyncio.run(_run(payload))
+        assert result["ok"] is False, needle
+        assert needle in (result.get("error") or "").lower()
+        row = get_artifact(mem_db, session_id, "outputs")
+        assert row is not None
+        assert row.is_valid is False
+        assert row.error
+
+
+def test_read_skill_draft_includes_parsed_outputs(mem_db: Database) -> None:
+    session_id = create_session(mem_db)
+    tools = build_artifact_tools(
+        mem_db, session_id, available_tools=["read_document"]
+    )
+    _, set_outputs = tools.get("set_skill_outputs")
+    _, read_draft = tools.get("read_skill_draft")
+
+    async def _run():
+        await set_outputs(outputs=_outputs_payload(("brief", "Резюме")))
+        return await read_draft()
+
+    draft = asyncio.run(_run())
+    assert draft["outputs"] == [{"key": "brief", "description": "Резюме"}]
+    types = [item["type"] for item in draft["artifacts"]]
+    assert "outputs" in types
+
+
+def test_patch_artifacts_outputs_valid(client) -> None:
+    session_id = client.post("/sessions").json()["id"]
+    resp = client.patch(
+        f"/sessions/{session_id}/artifacts/outputs",
+        json={
+            "content": json.dumps(
+                _outputs_payload(("brief", "Резюме"), ("table", "Таблица")),
+                ensure_ascii=False,
+            )
+        },
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["type"] == "outputs"
+    assert body["is_valid"] is True
+    assert body["source"] == "user"
+    listed = client.get(f"/sessions/{session_id}/artifacts").json()
+    assert any(item["type"] == "outputs" for item in listed)
+
+
+def test_patch_artifacts_outputs_rejects_invalid(client) -> None:
+    session_id = client.post("/sessions").json()["id"]
+    cases = [
+        ("{not json", "json"),
+        (
+            json.dumps(_outputs_payload(("brief", "a"), ("brief", "b"))),
+            "duplicate",
+        ),
+        (json.dumps(_outputs_payload(("1bad", "x"))), "key"),
+        (json.dumps(_outputs_payload(("brief", ""))), "description"),
+        (
+            json.dumps(
+                _outputs_payload(
+                    *[(f"out_{index}", f"item {index}") for index in range(9)]
+                )
+            ),
+            "at most 8",
+        ),
+    ]
+    for content, needle in cases:
+        resp = client.patch(
+            f"/sessions/{session_id}/artifacts/outputs",
+            json={"content": content},
+        )
+        assert resp.status_code == 200, needle
+        body = resp.json()
+        assert body["is_valid"] is False, needle
+        assert needle in (body["error"] or "").lower()
+        assert body["source"] == "user"
+
+
+def test_build_from_artifacts_copies_outputs(client, provider, db) -> None:
+    session_id = client.post("/sessions").json()["id"]
+    client.patch(
+        f"/sessions/{session_id}/skill-meta",
+        json={
+            "name": "WithOutputs",
+            "description": "packed outputs",
+            "kind": "agent",
+            "allowed_tools": ["read_document"],
+        },
+    )
+    client.patch(
+        f"/sessions/{session_id}/artifacts/prompt",
+        json={"content": "Write a brief and a table."},
+    )
+    client.patch(
+        f"/sessions/{session_id}/artifacts/outputs",
+        json={
+            "content": json.dumps(
+                _outputs_payload(("brief", "Резюме"), ("table", "Таблица")),
+                ensure_ascii=False,
+            )
+        },
+    )
+    provider.script = []
+    resp = client.post(f"/sessions/{session_id}/skills")
+    assert resp.status_code == 200, resp.text
+    skill = get_skill(db, resp.json()["skill_id"])
+    assert skill is not None
+    assert [item.key for item in skill.config.outputs] == ["brief", "table"]
+    assert skill.config.outputs[0].description == "Резюме"
+
+
+def test_build_rejects_invalid_outputs(client, provider, db) -> None:
+    session_id = client.post("/sessions").json()["id"]
+    client.patch(
+        f"/sessions/{session_id}/skill-meta",
+        json={
+            "name": "BadOutputs",
+            "description": "invalid outputs",
+            "kind": "agent",
+            "allowed_tools": ["read_document"],
+        },
+    )
+    client.patch(
+        f"/sessions/{session_id}/artifacts/prompt",
+        json={"content": "Summarize."},
+    )
+    client.patch(
+        f"/sessions/{session_id}/artifacts/outputs",
+        json={"content": json.dumps(_outputs_payload(("brief", "a"), ("brief", "b")))},
+    )
+    provider.script = []
+    resp = client.post(f"/sessions/{session_id}/skills")
+    assert resp.status_code == 422
+    assert "outputs" in (resp.json().get("detail") or "").lower()
+    assert provider.requests == []
+
+
+def test_edit_seeds_outputs(client, db) -> None:
+    config = SkillConfig(
+        name="Original",
+        description="test skill",
+        system_prompt="You summarize.",
+        allowed_tools=["read_document"],
+        model="test/model",
+        outputs=[
+            SkillOutput(key="brief", description="Резюме"),
+            SkillOutput(key="table", description="Таблица"),
+        ],
+    )
+    skill_id = create_skill(
+        db,
+        name=config.name,
+        description=config.description,
+        config=config,
+        status="committed",
+    )
+    resp = client.post(f"/skills/{skill_id}/edit")
+    assert resp.status_code == 200, resp.text
+    session_id = resp.json()["session_id"]
+    arts = {
+        a["type"]: a for a in client.get(f"/sessions/{session_id}/artifacts").json()
+    }
+    assert "outputs" in arts
+    assert arts["outputs"]["is_valid"] is True
+    parsed = json.loads(arts["outputs"]["content"])
+    assert [item["key"] for item in parsed] == ["brief", "table"]
+    seed = list_messages(db, session_id)[0]["content"]
+    assert "brief" in seed
+    assert "set_skill_outputs" in seed
+
+
+def test_planner_prompt_mentions_set_skill_outputs() -> None:
+    assert "set_skill_outputs" in PLANNER_SYSTEM_PROMPT
+    assert "primary" in PLANNER_SYSTEM_PROMPT.lower()
+    assert "dict" in PLANNER_SYSTEM_PROMPT
+
+
+def test_ws_set_skill_outputs_emits_session_artifacts(client, provider) -> None:
+    session_id = client.post("/sessions").json()["id"]
+    provider.script = [
+        CompletionResult(
+            content=None,
+            tool_calls=[
+                ToolCall(
+                    id="out-1",
+                    name="set_skill_outputs",
+                    arguments={
+                        "outputs": _outputs_payload(("brief", "Резюме")),
+                    },
+                )
+            ],
+            finish_reason="stop",
+        ),
+        CompletionResult(
+            content="Обновил выходы.",
+            tool_calls=[],
+            finish_reason="stop",
+        ),
+    ]
+    with client.websocket_connect(f"/sessions/{session_id}") as ws:
+        assert ws.receive_json()["type"] == "suggestions"
+        ws.send_text("сохрани выходы")
+        frames: list[dict] = []
+        while True:
+            frame = ws.receive_json()
+            frames.append(frame)
+            if frame.get("type") == "finish":
+                break
+
+    art_frames = [f for f in frames if f.get("type") == "session_artifacts"]
+    assert art_frames, f"expected session_artifacts in {[f.get('type') for f in frames]}"
+    outputs = [
+        a for a in art_frames[-1]["artifacts"] if a.get("type") == "outputs"
+    ]
+    assert outputs
+    assert outputs[0]["source"] == "llm"
+    assert json.loads(outputs[0]["content"])[0]["key"] == "brief"

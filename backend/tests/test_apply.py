@@ -39,10 +39,12 @@ from catalog.skills.artifact_tools import (
 from catalog.skills.config import (
     PipelineStep,
     SkillConfig,
+    SkillOutput,
     VerifyCheck,
     pipeline_step_from_dict,
     pipeline_step_to_dict,
 )
+from catalog.skills.skill_tools import config_hash
 from catalog.skills.repo_run import get_run
 from catalog.skills.repo_skill import create_skill, get_skill
 from catalog.storage.db import Database
@@ -1215,6 +1217,85 @@ def test_skill_config_kind_roundtrip() -> None:
     assert legacy.kind == "agent"
     assert legacy.code == ""
     assert legacy.steps == []
+    assert legacy.outputs == []
+
+
+def test_skill_config_outputs_roundtrip() -> None:
+    skill = SkillConfig(
+        name="multi",
+        description="d",
+        system_prompt="",
+        allowed_tools=[],
+        model="m",
+        outputs=[
+            SkillOutput(key="brief", description="Краткое резюме"),
+            SkillOutput(key="table", description="Таблица перекодировки"),
+        ],
+    )
+    restored = SkillConfig.from_json(skill.to_json())
+    assert [item.key for item in restored.outputs] == ["brief", "table"]
+    assert restored.outputs[0].description == "Краткое резюме"
+    assert restored.outputs[1].description == "Таблица перекодировки"
+
+
+def test_skill_config_outputs_missing_key_defaults_empty() -> None:
+    legacy = SkillConfig.from_json(
+        '{"name":"x","description":"d","system_prompt":"","allowed_tools":[],'
+        '"model":"m","temperature":0,"max_iterations":1,"max_retries":0,'
+        '"verify_checks":[],"output_kind":"md"}'
+    )
+    assert legacy.outputs == []
+    empty = SkillConfig(
+        name="x",
+        description="d",
+        system_prompt="",
+        allowed_tools=[],
+        model="m",
+    )
+    assert "outputs" not in empty.to_json()
+    assert SkillConfig.from_json(empty.to_json()).outputs == []
+
+
+def test_config_hash_changes_when_outputs_change() -> None:
+    base = SkillConfig(
+        name="x",
+        description="d",
+        system_prompt="",
+        allowed_tools=[],
+        model="m",
+    )
+    changed = SkillConfig(
+        name="x",
+        description="d",
+        system_prompt="",
+        allowed_tools=[],
+        model="m",
+        outputs=[SkillOutput(key="brief", description="Резюме")],
+    )
+    assert config_hash(base.to_json()) != config_hash(changed.to_json())
+    reordered = SkillConfig(
+        name="x",
+        description="d",
+        system_prompt="",
+        allowed_tools=[],
+        model="m",
+        outputs=[
+            SkillOutput(key="table", description="Таблица"),
+            SkillOutput(key="brief", description="Резюме"),
+        ],
+    )
+    two = SkillConfig(
+        name="x",
+        description="d",
+        system_prompt="",
+        allowed_tools=[],
+        model="m",
+        outputs=[
+            SkillOutput(key="brief", description="Резюме"),
+            SkillOutput(key="table", description="Таблица"),
+        ],
+    )
+    assert config_hash(two.to_json()) != config_hash(reordered.to_json())
 
 
 def _pipeline_skill() -> SkillConfig:

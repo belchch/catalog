@@ -9,11 +9,78 @@ table so a committed skill is fully reproducible from its row alone.
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass, field
 
 SKILL_KINDS = ("agent", "script", "pipeline")
 PIPELINE_STEP_TYPES = ("script", "llm", "skill")
 PIPELINE_STEP_INPUTS = ("documents", "previous")
+OUTPUT_KEY_RE = re.compile(r"^[a-z][a-z0-9_]{0,31}$")
+MAX_SKILL_OUTPUTS = 8
+
+
+@dataclass
+class SkillOutput:
+    key: str
+    description: str
+
+
+def skill_output_to_dict(item: SkillOutput) -> dict:
+    return {"key": item.key, "description": item.description}
+
+
+def parse_skill_outputs(value: object) -> tuple[list[SkillOutput], list[str]]:
+    if value is None:
+        return [], []
+    raw = value
+    if isinstance(value, str):
+        text = value.strip()
+        if not text:
+            return [], ["outputs must be JSON"]
+        try:
+            raw = json.loads(text)
+        except (TypeError, ValueError, json.JSONDecodeError) as exc:
+            return [], [f"outputs must be JSON: {exc}"]
+    if not isinstance(raw, list):
+        return [], ["outputs must be a JSON array"]
+    if len(raw) > MAX_SKILL_OUTPUTS:
+        return [], [f"outputs must have at most {MAX_SKILL_OUTPUTS} items"]
+    items: list[SkillOutput] = []
+    errors: list[str] = []
+    seen: set[str] = set()
+    for index, entry in enumerate(raw):
+        label = f"outputs[{index}]"
+        if not isinstance(entry, dict):
+            errors.append(f"{label} must be an object")
+            continue
+        key_raw = entry.get("key")
+        key = key_raw.strip() if isinstance(key_raw, str) else ""
+        key_ok = False
+        if not key or OUTPUT_KEY_RE.fullmatch(key) is None:
+            errors.append(f"{label}.key must match ^[a-z][a-z0-9_]{{0,31}}$")
+        elif key in seen:
+            errors.append(f"duplicate output key: {key!r}")
+        else:
+            seen.add(key)
+            key_ok = True
+        desc_raw = entry.get("description")
+        if not isinstance(desc_raw, str):
+            errors.append(f"{label}.description must be a non-empty string")
+            description = ""
+        else:
+            description = desc_raw.strip()
+            if not description:
+                errors.append(f"{label}.description must be non-empty")
+        if key_ok and description:
+            items.append(SkillOutput(key=key, description=description))
+    return items, errors
+
+
+def skill_outputs_from_value(value: object) -> list[SkillOutput]:
+    items, errors = parse_skill_outputs(value)
+    if errors:
+        raise ValueError("; ".join(errors))
+    return items
 
 
 @dataclass
@@ -187,34 +254,35 @@ class SkillConfig:
     # Selected reasoning variant (CATALOG-6), e.g. ``"low"``/``"medium"``/
     # ``"high"`` for a reasoning-capable model. Empty = no explicit reasoning.
     reasoning: str = ""
+    outputs: list[SkillOutput] = field(default_factory=list)
 
     def to_json(self) -> str:
         """Serialize to a JSON string (stable, utf-8 friendly)."""
-        return json.dumps(
-            {
-                "name": self.name,
-                "description": self.description,
-                "system_prompt": self.system_prompt,
-                "allowed_tools": list(self.allowed_tools),
-                "model": self.model,
-                "temperature": self.temperature,
-                "max_iterations": self.max_iterations,
-                "max_retries": self.max_retries,
-                "verify_checks": [
-                    {"check": c.check, "params": dict(c.params)}
-                    for c in self.verify_checks
-                ],
-                "output_kind": self.output_kind,
-                "kind": self.kind,
-                "code": self.code,
-                "non_determinism_reason": self.non_determinism_reason,
-                "input_arity": self.input_arity,
-                "provider": self.provider,
-                "reasoning": self.reasoning,
-                "steps": [pipeline_step_to_dict(s) for s in self.steps],
-            },
-            ensure_ascii=False,
-        )
+        payload = {
+            "name": self.name,
+            "description": self.description,
+            "system_prompt": self.system_prompt,
+            "allowed_tools": list(self.allowed_tools),
+            "model": self.model,
+            "temperature": self.temperature,
+            "max_iterations": self.max_iterations,
+            "max_retries": self.max_retries,
+            "verify_checks": [
+                {"check": c.check, "params": dict(c.params)}
+                for c in self.verify_checks
+            ],
+            "output_kind": self.output_kind,
+            "kind": self.kind,
+            "code": self.code,
+            "non_determinism_reason": self.non_determinism_reason,
+            "input_arity": self.input_arity,
+            "provider": self.provider,
+            "reasoning": self.reasoning,
+            "steps": [pipeline_step_to_dict(s) for s in self.steps],
+        }
+        if self.outputs:
+            payload["outputs"] = [skill_output_to_dict(item) for item in self.outputs]
+        return json.dumps(payload, ensure_ascii=False)
 
     @classmethod
     def from_json(cls, s: str) -> SkillConfig:
@@ -248,6 +316,7 @@ class SkillConfig:
             provider=data.get("provider", ""),
             reasoning=data.get("reasoning", ""),
             steps=pipeline_steps_from_value(data.get("steps")),
+            outputs=skill_outputs_from_value(data.get("outputs")),
         )
 
 

@@ -107,7 +107,7 @@ CREATE TABLE IF NOT EXISTS skill_run(
 );
 CREATE TABLE IF NOT EXISTS session_artifact(
   session_id TEXT NOT NULL,
-  type TEXT NOT NULL,           -- 'prompt' | 'script' | 'meta' | 'steps'
+  type TEXT NOT NULL,           -- 'prompt' | 'script' | 'meta' | 'steps' | 'outputs'
   content TEXT NOT NULL,        -- text for prompt/script; JSON for meta
   is_valid INTEGER NOT NULL DEFAULT 1,
   error TEXT,                   -- validation message (script/meta)

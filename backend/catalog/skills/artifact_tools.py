@@ -17,8 +17,10 @@ from catalog.skills.config import (
     SKILL_KINDS,
     PipelineStep,
     VerifyCheck,
+    parse_skill_outputs,
     pipeline_step_to_dict,
     pipeline_steps_from_value,
+    skill_output_to_dict,
 )
 from catalog.skills.repo_skill import SkillRecord, get_skill
 from catalog.skills.skill_tools import config_hash
@@ -681,6 +683,35 @@ def build_artifact_tools(
         await _notify()
         return {"ok": is_valid, "artifact": artifact_payload(db, row), "error": error}
 
+    async def _set_skill_outputs(*, outputs: list[dict] | str) -> dict[str, Any]:
+        parsed, errors = parse_skill_outputs(outputs)
+        is_valid = not errors
+        error = "; ".join(errors) if errors else None
+        if isinstance(outputs, str):
+            content = (
+                json.dumps([skill_output_to_dict(item) for item in parsed], ensure_ascii=False)
+                if is_valid
+                else outputs
+            )
+        else:
+            content = json.dumps(
+                [skill_output_to_dict(item) for item in parsed]
+                if is_valid
+                else outputs,
+                ensure_ascii=False,
+            )
+        row = upsert_artifact(
+            db,
+            session_id=session_id,
+            type="outputs",
+            content=content,
+            source="llm",
+            is_valid=is_valid,
+            error=error,
+        )
+        await _notify()
+        return {"ok": is_valid, "artifact": artifact_payload(db, row), "error": error}
+
     async def _save_skill_steps(*, steps: list[dict] | dict) -> dict[str, Any]:
         errors: list[str] = []
         parsed: list[PipelineStep] = []
@@ -744,6 +775,12 @@ def build_artifact_tools(
                 out["meta"] = json.loads(meta.content)
             except (TypeError, ValueError, json.JSONDecodeError):
                 out["meta"] = None
+        outputs_row = get_artifact(db, session_id, "outputs")
+        if outputs_row is not None:
+            parsed, errors = parse_skill_outputs(outputs_row.content)
+            out["outputs"] = (
+                [skill_output_to_dict(item) for item in parsed] if not errors else None
+            )
         return out
 
     async def _try_skill_script(
@@ -850,6 +887,41 @@ def build_artifact_tools(
     )
     reg.register(
         ToolSpec(
+            name="set_skill_outputs",
+            description=(
+                "Declare named skill outputs for this session as "
+                "[{key, description}, ...]. First item is primary. "
+                "Keys must match ^[a-z][a-z0-9_]{0,31}$, be unique, "
+                "and descriptions must be non-empty. At most 8 items. "
+                "Omit or use [] for a single unnamed output. For script "
+                "skills the return dict must use these keys."
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "outputs": {
+                        "type": "array",
+                        "maxItems": 8,
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "key": {
+                                    "type": "string",
+                                    "pattern": r"^[a-z][a-z0-9_]{0,31}$",
+                                },
+                                "description": {"type": "string"},
+                            },
+                            "required": ["key", "description"],
+                        },
+                    }
+                },
+                "required": ["outputs"],
+            },
+        ),
+        _set_skill_outputs,
+    )
+    reg.register(
+        ToolSpec(
             name="save_skill_steps",
             description=(
                 "Save the pipeline steps draft for this session. Each step "
@@ -913,7 +985,7 @@ def build_artifact_tools(
             name="read_skill_draft",
             description=(
                 "Read the current session skill draft artifacts (prompt, "
-                "script, meta, steps) including script dry_run status."
+                "script, meta, steps, outputs) including script dry_run status."
             ),
             parameters={"type": "object", "properties": {}},
         ),
