@@ -180,9 +180,23 @@ def _named_outputs_required(skill: SkillConfig) -> bool:
     last = skill.steps[-1]
     if last.type == "script":
         return True
-    if last.type == "llm":
+    if last.type in ("llm", "skill"):
         return uses_emit_output(skill.outputs)
     return False
+
+
+def _output_persist_keys(
+    skill: SkillConfig, artifacts: dict[str, str], primary_text: str
+) -> list[str]:
+    artifact_keys = list(artifacts)
+    declared_keys = [item.key for item in skill.outputs]
+    if declared_keys and set(declared_keys) == set(artifact_keys):
+        return declared_keys
+    if primary_text:
+        for key in artifact_keys:
+            if artifacts[key] == primary_text:
+                return [key] + [item for item in artifact_keys if item != key]
+    return artifact_keys
 
 
 def _verify_retry_content(failures: list[str]) -> str:
@@ -211,10 +225,18 @@ def persist_run_outputs(
     workspace_path = Path(workspace_dir)
     title = primary_title or _primary_result_title(skill, docs)
     items: list[tuple[str, str, str]] = []
-    if artifacts and skill.outputs:
-        for index, item in enumerate(skill.outputs):
-            item_title = title if index == 0 else f"{skill.name} — {item.description}"
-            items.append((item.key, item_title, artifacts[item.key]))
+    declared = {item.key: item for item in skill.outputs}
+    persist_keys = _output_persist_keys(skill, artifacts, primary_text)
+    if persist_keys:
+        for index, key in enumerate(persist_keys):
+            item = declared.get(key)
+            if index == 0:
+                item_title = title
+            elif item is not None:
+                item_title = f"{skill.name} — {item.description}"
+            else:
+                item_title = f"{skill.name} — {key}"
+            items.append((key, item_title, artifacts[key]))
     else:
         items.append(("", title, primary_text))
 
@@ -1148,7 +1170,7 @@ async def _apply_core(
             ):
                 message = (
                     "skill declared outputs but the last pipeline step "
-                    "did not return a dict"
+                    "did not produce them"
                 )
                 _record_outputs_error(trace, max(len(skill.steps), 1), message)
                 last_text = None
@@ -1409,6 +1431,7 @@ async def _apply_core(
                 output_doc_id=None,
                 trace=trace,
                 result_text=last_text,
+                result_artifacts=emit_artifacts or last_artifacts or None,
             )
             done = True
         outcome.status = "cancelled"
@@ -1426,6 +1449,7 @@ async def _apply_core(
                 output_doc_id=None,
                 trace=trace,
                 result_text=last_text,
+                result_artifacts=emit_artifacts or last_artifacts or None,
             )
             done = True
         raise
@@ -1440,6 +1464,7 @@ async def _apply_core(
                 output_doc_id=None,
                 trace=trace,
                 result_text=last_text,
+                result_artifacts=emit_artifacts or last_artifacts or None,
             )
             done = True
 
