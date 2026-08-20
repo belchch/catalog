@@ -1,0 +1,72 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="360" viewBox="0 0 1200 360" role="img" aria-labelledby="dlTitle dlDesc">
+  <title id="dlTitle">Catalog document loop</title>
+  <desc id="dlDesc">Catalog reads office documents, processes them as Markdown, and exports back to Word with an export self-check.</desc>
+  <defs>
+    <filter id="dlShadow" x="-20%" y="-40%" width="140%" height="200%">
+      <feDropShadow dx="0" dy="2" stdDeviation="5" flood-color="#0f2b46" flood-opacity="0.07"/>
+    </filter>
+  </defs>
+  <rect x="0.5" y="0.5" width="1199" height="359" rx="24" fill="#fbfcfe" stroke="#e4e9f0"/>
+  <g font-family="Inter, -apple-system, 'Segoe UI', sans-serif">
+    <text x="64" y="62" fill="#16324c" font-size="25" font-weight="650">Word in, Word out</text>
+    <text x="64" y="92" fill="#64748b" font-size="15.5">Inside — Markdown, source links, and a verifiable export.</text>
+    <g stroke="#9fb0c1" stroke-width="2.5" fill="none" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M265 222L273 230L265 238"/>
+      <path d="M485 222L493 230L485 238"/>
+      <path d="M705 222L713 230L705 238"/>
+      <path d="M925 222L933 230L925 238"/>
+    </g>
+    <g filter="url(#dlShadow)">
+      <g transform="translate(64 145)">
+        <rect width="190" height="170" rx="16" fill="#ffffff" stroke="#e4e9f0"/>
+        <rect x="16" y="16" width="44" height="44" rx="12" fill="#2b6cb0"/>
+        <text x="38" y="46" fill="#ffffff" text-anchor="middle" font-size="19" font-weight="800">W</text>
+        <text x="16" y="92" fill="#16324c" font-size="16.5" font-weight="650">Documents</text>
+        <g transform="translate(16 106)">
+          <rect width="46" height="22" rx="11" fill="#eaf4fc"/>
+          <text x="23" y="15" fill="#1d5f92" text-anchor="middle" font-size="10" font-weight="700">DOCX</text>
+          <rect x="52" width="44" height="22" rx="11" fill="#e5f6ec"/>
+          <text x="74" y="15" fill="#276749" text-anchor="middle" font-size="10" font-weight="700">XLSX</text>
+          <rect x="102" width="38" height="22" rx="11" fill="#fdecea"/>
+          <text x="121" y="15" fill="#a63d2e" text-anchor="middle" font-size="10" font-weight="700">PDF</text>
+        </g>
+        <text x="16" y="152" fill="#8b98a9" font-size="12">+ CSV and Markdown</text>
+      </g>
+      <g transform="translate(284 145)">
+        <rect width="190" height="170" rx="16" fill="#ffffff" stroke="#e4e9f0"/>
+        <rect x="16" y="16" width="44" height="44" rx="12" fill="#e2f6f4"/>
+        <path d="M29 31H47M29 38H47M29 45H41" stroke="#147d83" stroke-width="2" stroke-linecap="round"/>
+        <text x="16" y="92" fill="#16324c" font-size="16.5" font-weight="650">Extract</text>
+        <text x="16" y="116" fill="#8b98a9" font-size="12.5">text and tables</text>
+        <text x="16" y="136" fill="#8b98a9" font-size="12.5">in original order</text>
+      </g>
+      <g transform="translate(504 145)">
+        <rect width="190" height="170" rx="16" fill="#eaf4fc" stroke="#a8d2ee"/>
+        <rect x="16" y="16" width="44" height="44" rx="12" fill="#1d83c4"/>
+        <path d="M29 39l6 6 12-13" fill="none" stroke="#ffffff" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/>
+        <text x="16" y="92" fill="#16324c" font-size="16.5" font-weight="700">Skill</text>
+        <g transform="translate(16 104)">
+          <rect width="158" height="50" rx="10" fill="#ffffff" stroke="#bcd9ee"/>
+          <text x="12" y="21" fill="#33475c" font-size="12.5" font-weight="650">Markdown</text>
+          <text x="12" y="39" fill="#6d4fc4" font-size="11">+ [[source links]]</text>
+        </g>
+      </g>
+      <g transform="translate(724 145)">
+        <rect width="190" height="170" rx="16" fill="#ffffff" stroke="#e4e9f0"/>
+        <rect x="16" y="16" width="44" height="44" rx="12" fill="#2b6cb0"/>
+        <text x="38" y="46" fill="#ffffff" text-anchor="middle" font-size="19" font-weight="800">W</text>
+        <text x="16" y="92" fill="#16324c" font-size="16.5" font-weight="650">DOCX</text>
+        <text x="16" y="116" fill="#8b98a9" font-size="12.5">from a customer template</text>
+        <text x="16" y="136" fill="#8b98a9" font-size="12.5">tables and headings</text>
+      </g>
+      <g transform="translate(944 145)">
+        <rect width="190" height="170" rx="16" fill="#ffffff" stroke="#b2e2c5"/>
+        <rect x="16" y="16" width="44" height="44" rx="12" fill="#e5f6ec"/>
+        <path d="M28 39l7 7 14-15" fill="none" stroke="#2f855a" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/>
+        <text x="16" y="92" fill="#16324c" font-size="16.5" font-weight="650">Self-check</text>
+        <text x="16" y="116" fill="#8b98a9" font-size="12.5">re-read and</text>
+        <text x="16" y="136" fill="#8b98a9" font-size="12.5">structure check</text>
+      </g>
+    </g>
+  </g>
+</svg>
