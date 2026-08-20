@@ -15,7 +15,7 @@ You describe a task in chat, refine the plan, and save it as a skill. A skill ca
 
 ## How it works
 
-![From documents to a verified result](docs/assets/workflow.svg)
+![From documents to a verified result](docs/assets/workflow.en.svg)
 
 1. Open a folder with documents.
 2. Describe the desired result in chat.
@@ -68,7 +68,7 @@ Each LLM step can use its own model, provider, and allowed tools.
 
 A saved skill can be attached to a session. The model can then call it the same way it calls a system tool.
 
-![Attaching skills and nested skill calls](docs/assets/skill-composition.svg)
+![Attaching skills and nested skill calls](docs/assets/skill-composition.en.svg)
 
 On a nested call, Catalog:
 
@@ -90,7 +90,7 @@ The model currently has three built-in tools:
 
 A skill only gets the tools listed in its `allowed_tools`. If the config names an unknown tool, execution does not start.
 
-![System registry and skill permissions](docs/assets/tool-registry.svg)
+![System registry and skill permissions](docs/assets/tool-registry.en.svg)
 
 ### Extending with plugins
 
@@ -118,7 +118,7 @@ Built-in checks cover:
 
 You can also add a semantic check through an LLM judge. In the UI and the trace it is shown separately from deterministic checks.
 
-![Result verification loop](docs/assets/verification.svg)
+![Result verification loop](docs/assets/verification.en.svg)
 
 The trace shows skill steps, tool calls, tool responses, model reasoning, check results, and nested runs.
 
@@ -134,7 +134,7 @@ A Catalog workspace is an ordinary user folder.
 - The result keeps links to the source documents.
 - The same folder can be opened in Obsidian.
 
-![Workspace layout and Obsidian integration](docs/assets/workspace.svg)
+![Workspace layout and Obsidian integration](docs/assets/workspace.en.svg)
 
 A references section is appended to the result:
 
@@ -166,7 +166,7 @@ Export supports:
 - keeping the source list;
 - re-reading the produced file and checking its structure.
 
-![Document processing and export loop](docs/assets/document-loop.svg)
+![Document processing and export loop](docs/assets/document-loop.en.svg)
 
 ![Exporting a result to DOCX](docs/assets/docx-export.png)
 
