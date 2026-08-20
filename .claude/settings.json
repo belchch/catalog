@@ -23,5 +23,20 @@
         ]
       }
     ]
+  },
+  "permissions": {
+    "defaultMode": "acceptEdits",
+    "allow": [
+      "Bash(git:*)",
+      "Bash(gh:*)",
+      "Bash(ruff:*)",
+      "Bash(pytest:*)",
+      "Bash(pnpm run:*)",
+      "Bash(curl:*)",
+      "Bash(python3:*)",
+      "Bash(mkdir:*)",
+      "Bash(mv:*)",
+      "Bash(date:*)"
+    ]
   }
 }
