@@ -72,9 +72,16 @@ from catalog.skills.config import (
     SkillConfig,
     ensure_read_document_tool,
 )
+from catalog.skills.emit_output import (
+    named_output_failures,
+    named_outputs_prompt,
+    primary_output_text,
+    register_emit_output,
+    uses_emit_output,
+)
 from catalog.skills.repo_run import claim_run, create_run, finish_run, get_run
 from catalog.skills.script_runner import ScriptRuntimeError, run_skill_script_async
-from catalog.skills.verify import run_verify_async
+from catalog.skills.verify import VerifyResult, run_verify_async
 from catalog.storage.db import Database
 from catalog.storage.repo_document import create_document, get_document
 from catalog.storage.repo_session_document import attach_documents
@@ -159,6 +166,27 @@ def _record_outputs_error(
     if step_id is not None:
         data["step_id"] = step_id
     trace.entries.append(TraceEntry(kind="error", iteration=iteration, data=data))
+
+
+def _named_outputs_required(skill: SkillConfig) -> bool:
+    if not skill.outputs:
+        return False
+    if skill.kind == "script":
+        return True
+    if skill.kind == "agent":
+        return uses_emit_output(skill.outputs)
+    if not skill.steps:
+        return False
+    last = skill.steps[-1]
+    if last.type == "script":
+        return True
+    if last.type == "llm":
+        return uses_emit_output(skill.outputs)
+    return False
+
+
+def _verify_retry_content(failures: list[str]) -> str:
+    return "verify failed: " + "; ".join(failures) + ". Исправь и повтори."
 
 
 def _primary_result_title(skill: SkillConfig, docs: list) -> str:
@@ -473,6 +501,9 @@ async def _apply_core(
         tools = base_tools.filter(ensure_read_document_tool(skill.allowed_tools))
     else:
         tools = base_tools.filter(skill.allowed_tools)
+    emit_artifacts: dict[str, str] = {}
+    if skill.kind == "agent" and uses_emit_output(skill.outputs):
+        register_emit_output(tools, skill.outputs, emit_artifacts)
 
     if not texts_mode:
         doc_texts = [
@@ -752,6 +783,13 @@ async def _apply_core(
                     step_tools = base_tools.filter(
                         ensure_read_document_tool(step.allowed_tools)
                     )
+                    is_last = index == len(skill.steps) - 1
+                    step_emits = is_last and uses_emit_output(skill.outputs)
+                    step_artifacts: dict[str, str] = {}
+                    if step_emits:
+                        register_emit_output(
+                            step_tools, skill.outputs, step_artifacts
+                        )
                     start_content = _pipeline_llm_user_content(
                         step_input=step_input,
                         from_documents=from_documents,
@@ -764,43 +802,100 @@ async def _apply_core(
                             f"{start_content}\n\nУточнение к заданию:\n"
                             f"{runtime_prompt}"
                         )
+                    if step_emits:
+                        start_content = (
+                            f"{start_content}{named_outputs_prompt(skill.outputs)}"
+                        )
                     messages: list[Message] = [
                         Message(role="user", content=start_content)
                     ]
-                    text = None
-                    capped = False
-                    before = len(trace.entries)
                     step_provider = provider_for_skill(
                         providers, provider, step.provider or skill.provider
                     )
-                    async for event in _run_agent_core(
-                        provider=step_provider,
-                        model=step.model or skill.model or fallback_model,
-                        system_prompt=step.system_prompt,
-                        messages=messages,
-                        tools=step_tools,
-                        temperature=skill.temperature,
-                        max_iterations=skill.max_iterations,
-                        use_stream=False,
-                        trace=trace,
-                        reasoning=step.reasoning or skill.reasoning,
-                    ):
-                        tagged = _with_step_id(event, step.id)
-                        yield tagged
-                        if isinstance(event, FinishEvent):
-                            text = event.text
-                            capped = event.capped
-                            if event.finish_reason == "deadline":
-                                deadline_stopped = True
-                    for entry in trace.entries[before:]:
-                        entry.data["step_id"] = step.id
-                    current = text or ""
-                    last_text = current
-                    if deadline_stopped:
-                        last_capped = True
+                    llm_attempts = skill.max_retries + 1 if step_emits else 1
+                    for llm_try in range(llm_attempts):
+                        text = None
+                        capped = False
+                        before = len(trace.entries)
+                        async for event in _run_agent_core(
+                            provider=step_provider,
+                            model=step.model or skill.model or fallback_model,
+                            system_prompt=step.system_prompt,
+                            messages=messages,
+                            tools=step_tools,
+                            temperature=skill.temperature,
+                            max_iterations=skill.max_iterations,
+                            use_stream=False,
+                            trace=trace,
+                            reasoning=step.reasoning or skill.reasoning,
+                        ):
+                            tagged = _with_step_id(event, step.id)
+                            yield tagged
+                            if isinstance(event, FinishEvent):
+                                text = event.text
+                                capped = event.capped
+                                if event.finish_reason == "deadline":
+                                    deadline_stopped = True
+                        for entry in trace.entries[before:]:
+                            entry.data["step_id"] = step.id
+                        if step_emits:
+                            last_artifacts = dict(step_artifacts)
+                            last_text = primary_output_text(
+                                skill.outputs, step_artifacts, text
+                            )
+                            current = last_text or ""
+                        else:
+                            current = text or ""
+                            last_text = current
+                        if deadline_stopped:
+                            last_capped = True
+                            break
+                        if not step_emits:
+                            if is_last:
+                                last_capped = capped
+                            break
+                        output_failures = named_output_failures(
+                            skill.outputs, step_artifacts
+                        )
+                        if not output_failures:
+                            last_capped = capped
+                            break
+                        result = VerifyResult(
+                            passed=False, failures=output_failures, checks=[]
+                        )
+                        verify_event = VerifyEvent(
+                            iteration=llm_try + 1, result=result
+                        )
+                        yield verify_event
+                        log_agent_event(verify_event)
+                        trace.entries.append(
+                            TraceEntry(
+                                kind="verify",
+                                iteration=llm_try + 1,
+                                data=result.as_payload(),
+                            )
+                        )
+                        if capped or llm_try >= skill.max_retries:
+                            reason = "; ".join(output_failures)
+                            if capped:
+                                last_capped = True
+                                reason = "capped: " + reason
+                            _record_outputs_error(
+                                trace, index + 1, reason, step.id
+                            )
+                            pipeline_halted = True
+                            break
+                        messages.append(
+                            Message(role="assistant", content=text or "")
+                        )
+                        messages.append(
+                            Message(
+                                role="user",
+                                content=_verify_retry_content(output_failures),
+                            )
+                        )
+                    if deadline_stopped or pipeline_halted:
                         break
-                    if index == len(skill.steps) - 1:
-                        last_capped = capped
                 elif step.type == "skill":
                     nested_skill = step.config
                     if nested_skill is None:
@@ -1045,7 +1140,12 @@ async def _apply_core(
             ):
                 deadline_stopped = True
                 last_capped = True
-            if not deadline_stopped and not pipeline_halted and skill.outputs and not last_artifacts:
+            if (
+                not deadline_stopped
+                and not pipeline_halted
+                and _named_outputs_required(skill)
+                and not last_artifacts
+            ):
                 message = (
                     "skill declared outputs but the last pipeline step "
                     "did not return a dict"
@@ -1125,6 +1225,8 @@ async def _apply_core(
                 start_content = (
                     f"{start_content}\n\nУточнение к заданию:\n{runtime_prompt}"
                 )
+            if uses_emit_output(skill.outputs):
+                start_content = f"{start_content}{named_outputs_prompt(skill.outputs)}"
             user_msg = Message(role="user", content=start_content)
             messages: list[Message] = [user_msg]
             run_provider = provider_for_skill(providers, provider, skill.provider)
@@ -1160,6 +1262,12 @@ async def _apply_core(
 
                 last_text = text
                 last_capped = capped
+                agent_emits = uses_emit_output(skill.outputs)
+                if agent_emits:
+                    last_artifacts = dict(emit_artifacts)
+                    last_text = primary_output_text(
+                        skill.outputs, emit_artifacts, text
+                    )
                 if last_text:
                     yield TokenEvent(delta=last_text)
                 if deadline_stopped:
@@ -1169,13 +1277,23 @@ async def _apply_core(
                     last_capped = True
                     break
 
-                result = await run_verify_async(
-                    text or "",
-                    skill.verify_checks,
-                    db=db,
-                    provider=verify_provider,
-                    model=verify_model,
+                output_failures = (
+                    named_output_failures(skill.outputs, emit_artifacts)
+                    if agent_emits
+                    else []
                 )
+                if output_failures:
+                    result = VerifyResult(
+                        passed=False, failures=output_failures, checks=[]
+                    )
+                else:
+                    result = await run_verify_async(
+                        last_text or "",
+                        skill.verify_checks,
+                        db=db,
+                        provider=verify_provider,
+                        model=verify_model,
+                    )
                 verify_event = VerifyEvent(iteration=r + 1, result=result)
                 yield verify_event
                 log_agent_event(verify_event)
@@ -1191,7 +1309,12 @@ async def _apply_core(
                     passed = True
                     break
 
-                # Feed verify failures back for the next attempt (if any left).
+                if agent_emits and capped and output_failures:
+                    _record_outputs_error(
+                        trace, r + 1, "capped: " + "; ".join(output_failures)
+                    )
+                    break
+
                 if r < skill.max_retries:
                     logger.info(
                         "verify failed, retry %d/%d failures=%s",
@@ -1203,11 +1326,7 @@ async def _apply_core(
                     messages.append(
                         Message(
                             role="user",
-                            content=(
-                                "verify failed: "
-                                + "; ".join(result.failures)
-                                + ". Исправь и повтори."
-                            ),
+                            content=_verify_retry_content(list(result.failures)),
                         )
                     )
 
