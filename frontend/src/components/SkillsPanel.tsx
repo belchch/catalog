@@ -137,6 +137,41 @@ function arityLabel(arity: InputArity): { symbol: string; title: string } {
   return { symbol: '∗', title: 'Несколько документов' }
 }
 
+// CATALOG-156: множественность объявленных выходов скилла выражается словом
+// в подписи кнопки и числом в тултипе — второй счётчик рядом с суффиксом
+// входных документов (K) не заводится.
+function declaredOutputs(skill: SkillOut): number {
+  return Math.max(1, skill.outputs_count ?? 1)
+}
+
+function hasMultipleOutputs(skill: SkillOut): boolean {
+  return declaredOutputs(skill) > 1
+}
+
+function outputsCountPhrase(skill: SkillOut): string {
+  const count = declaredOutputs(skill)
+  return skill.outputs_has_collection === true ? `${count} и более` : `${count}`
+}
+
+function inputCountSuffix(inputCount: number): string {
+  return inputCount > 1 ? ` (${inputCount})` : ''
+}
+
+function applyLabel(base: 'В док' | 'На экран', skill: SkillOut, inputCount: number): string {
+  const marker = base === 'В док' && hasMultipleOutputs(skill) ? ' · несколько' : ''
+  return `${base}${marker}${inputCountSuffix(inputCount)}`
+}
+
+function applyTitle(mode: ApplyMode, skill: SkillOut): string {
+  const multiple = hasMultipleOutputs(skill)
+  if (mode === 'persist') {
+    if (!multiple) return 'Результат сразу сохраняется в новый документ'
+    return `Результат сразу сохраняется в новые документы; выходов у скилла — ${outputsCountPhrase(skill)}`
+  }
+  if (!multiple) return 'Результат выводится на экран; документ можно сохранить отдельно'
+  return `Результат выводится на экран; документы можно сохранить отдельно; выходов у скилла — ${outputsCountPhrase(skill)}`
+}
+
 function skillMatchesQuery(skill: SkillOut, query: string): boolean {
   const q = query.trim().toLowerCase()
   if (!q) return true
@@ -792,7 +827,7 @@ export function SkillsPanel({
                                 type="button"
                                 className="btn-primary text-[11px]"
                                 disabled={!valid || documents.length === 0}
-                                title="Результат сразу сохраняется в новый документ"
+                                title={applyTitle('persist', s)}
                                 onClick={() =>
                                   valid &&
                                   onApply(
@@ -803,13 +838,13 @@ export function SkillsPanel({
                                   )
                                 }
                               >
-                                В док{docIds.length > 1 ? ` (${docIds.length})` : ''}
+                                {applyLabel('В док', s, docIds.length)}
                               </button>
                               <button
                                 type="button"
                                 className="btn-secondary text-[11px]"
                                 disabled={!valid || documents.length === 0}
-                                title="Результат выводится на экран; документ можно сохранить отдельно"
+                                title={applyTitle('preview', s)}
                                 onClick={() =>
                                   valid &&
                                   onApply(
@@ -820,7 +855,7 @@ export function SkillsPanel({
                                   )
                                 }
                               >
-                                На экран{docIds.length > 1 ? ` (${docIds.length})` : ''}
+                                {applyLabel('На экран', s, docIds.length)}
                               </button>
                             </div>
                           </div>
