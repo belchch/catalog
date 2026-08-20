@@ -140,7 +140,9 @@ class RunOut(BaseModel):
     trace: list | None = None
     # Raw agent/script output, kept even when persist=False (CATALOG-18).
     result_text: str | None = None
-    result_artifacts: dict[str, str] | None = None
+    # ADR-0025: a ``multiple`` output key's value is list[str] (one element
+    # per persisted document); a regular key's value is str.
+    result_artifacts: dict[str, str | list[str]] | None = None
     parent_run_id: str | None = None
 
 
@@ -360,7 +362,9 @@ class ScriptTryOut(BaseModel):
     input_len: int = 0
     output_preview: str = ""
     output_len: int = 0
-    output_kind: Literal["str", "list", "dict"] | None = None
+    output_kind: Literal["str", "list", "dict", "collection"] | None = None
+    # ADR-0025: element count when output_kind == "collection"; None otherwise.
+    output_count: int | None = None
     duration_ms: int = 0
     verify: dict | None = None
     line_no: int | None = None

@@ -33,7 +33,7 @@ from catalog.documents.tools import build_document_tools
 from catalog.llm.base import LLMProvider
 from catalog.llm.factory import provider_for_skill, provider_name_for_skill
 from catalog.llm.log_context import prompt_log_context
-from catalog.skills.apply import apply_skill, persist_run_outputs
+from catalog.skills.apply import CollectionLimitError, apply_skill, persist_run_outputs
 from catalog.skills.config import SkillConfig
 from catalog.skills.repo_run import (
     cancel_pending_run,
@@ -166,16 +166,21 @@ async def save_run_result_endpoint(
             model="",
         )
     )
-    primary_id, output_doc_ids, _rewritten, _rewritten_artifacts = persist_run_outputs(
-        db,
-        workspace,
-        skill=skill_config,
-        docs=docs,
-        session_id=run["session_id"],
-        primary_text=run["result_text"],
-        artifacts=artifacts,
-        primary_title=title,
-    )
+    try:
+        primary_id, output_doc_ids, _rewritten, _rewritten_artifacts = (
+            persist_run_outputs(
+                db,
+                workspace,
+                skill=skill_config,
+                docs=docs,
+                session_id=run["session_id"],
+                primary_text=run["result_text"],
+                artifacts=artifacts,
+                primary_title=title,
+            )
+        )
+    except CollectionLimitError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     set_output_doc_id(db, run_id, primary_id, output_doc_ids)
     doc = get_document(db, primary_id)
     if doc is None:

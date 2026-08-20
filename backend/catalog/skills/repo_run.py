@@ -110,7 +110,13 @@ def _row_field(row: object, name: str) -> object:
         return None
 
 
-def _parse_str_dict(row: object, name: str) -> dict[str, str]:
+def _parse_str_dict(row: object, name: str) -> dict[str, str | list[str]]:
+    """Parse a ``result_artifacts``-shaped JSON column.
+
+    ADR-0025: a value is either a plain string or a ``list[str]`` (a
+    ``multiple`` output — one element per persisted document); list values
+    are preserved as lists, not stringified.
+    """
     raw = _row_field(row, name)
     if not raw:
         return {}
@@ -120,7 +126,13 @@ def _parse_str_dict(row: object, name: str) -> dict[str, str]:
         return {}
     if not isinstance(data, dict):
         return {}
-    return {str(key): "" if value is None else str(value) for key, value in data.items()}
+    result: dict[str, str | list[str]] = {}
+    for key, value in data.items():
+        if isinstance(value, list):
+            result[str(key)] = [str(item) for item in value]
+        else:
+            result[str(key)] = "" if value is None else str(value)
+    return result
 
 
 def _parse_str_list(row: object, name: str) -> list[str]:
@@ -144,7 +156,7 @@ def finish_run(
     output_doc_id: str | None,
     trace: Trace,
     result_text: str | None = None,
-    result_artifacts: dict[str, str] | None = None,
+    result_artifacts: dict[str, str | list[str]] | None = None,
     output_doc_ids: list[str] | None = None,
 ) -> None:
     now = _now_iso()

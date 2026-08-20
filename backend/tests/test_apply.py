@@ -3801,3 +3801,511 @@ def test_apply_agent_capped_keeps_emitted_outputs(
     assert errors
     assert "capped" in str(errors[-1]["data"].get("error", ""))
     assert "table" in str(errors[-1]["data"].get("error", ""))
+
+
+# --------------------------------------------------------------------------- #
+# ADR-0025: collection (``multiple``) outputs — CATALOG-153
+# --------------------------------------------------------------------------- #
+
+
+def test_skill_output_multiple_roundtrip() -> None:
+    import json as _json
+
+    skill = SkillConfig(
+        name="collection",
+        description="d",
+        system_prompt="",
+        allowed_tools=[],
+        model="m",
+        outputs=[
+            SkillOutput(key="index", description="Оглавление"),
+            SkillOutput(key="chapters", description="Глава", multiple=True),
+        ],
+    )
+    payload = _json.loads(skill.to_json())
+    assert "multiple" not in payload["outputs"][0]
+    assert payload["outputs"][1]["multiple"] is True
+    restored = SkillConfig.from_json(skill.to_json())
+    assert restored.outputs[0].multiple is False
+    assert restored.outputs[1].multiple is True
+
+
+def test_skill_output_to_dict_omits_multiple_when_false() -> None:
+    from catalog.skills.config import skill_output_to_dict
+
+    plain = SkillOutput(key="brief", description="Текст")
+    assert "multiple" not in skill_output_to_dict(plain)
+    collection = SkillOutput(key="chapters", description="Глава", multiple=True)
+    assert skill_output_to_dict(collection)["multiple"] is True
+
+
+def test_skill_output_multiple_must_be_bool() -> None:
+    from catalog.skills.config import parse_skill_outputs
+
+    parsed, errors = parse_skill_outputs(
+        [{"key": "chapters", "description": "Глава", "multiple": "yes"}]
+    )
+    assert parsed == []
+    assert any("multiple must be a boolean" in e for e in errors)
+
+
+def test_config_hash_unaffected_by_non_multiple_outputs() -> None:
+    # DoD: to_json for a skill without any collection output is unchanged by
+    # ADR-0025 — old config_hash values are not invalidated.
+    skill = SkillConfig(
+        name="x",
+        description="d",
+        system_prompt="",
+        allowed_tools=[],
+        model="m",
+        outputs=[SkillOutput(key="brief", description="Резюме")],
+    )
+    assert '"multiple"' not in skill.to_json()
+
+
+def _collection_script(code: str, *, multiple_only: bool = True) -> SkillConfig:
+    outputs = (
+        [SkillOutput(key="chapters", description="Глава", multiple=True)]
+        if multiple_only
+        else [
+            SkillOutput(key="brief", description="Текст"),
+        ]
+    )
+    return SkillConfig(
+        name="chaptered",
+        description="collection output",
+        system_prompt="",
+        allowed_tools=[],
+        model="test/model",
+        kind="script",
+        code=code,
+        outputs=outputs,
+    )
+
+
+def test_apply_collection_type_errors_have_distinct_reasons(
+    db: Database, workspace: Path
+) -> None:
+    cases = [
+        ('result = {"chapters": []}\n', "empty output value(s): chapters", True),
+        (
+            'result = {"chapters": ["ok", "  "]}\n',
+            "empty output element(s): chapters",
+            True,
+        ),
+        (
+            'result = {"chapters": "not a list"}\n',
+            "expected list for output key(s): chapters",
+            True,
+        ),
+        (
+            'result = {"brief": ["a", "b"]}\n',
+            "expected text for output key(s): brief",
+            False,
+        ),
+    ]
+    for code, needle, multiple_only in cases:
+        skill = _collection_script(code, multiple_only=multiple_only)
+        skill_id = create_skill(
+            db, name=skill.name, description=skill.description, config=skill
+        )
+        input_doc_id = _ingest_input(db, workspace)
+        result = asyncio.run(
+            apply_skill_collect(
+                provider=ScriptProvider([]),
+                db=db,
+                workspace_dir=str(workspace),
+                skill=skill,
+                skill_id=skill_id,
+                input_doc_ids=[input_doc_id],
+                base_tools=build_document_tools(db, workspace),
+            )
+        )
+        assert result.status == "failed"
+        errors = [e for e in result.trace.entries if e.kind == "error"]
+        assert errors
+        assert any(needle in str(e.data.get("error", "")) for e in errors), (
+            f"expected {needle!r} in {[e.data for e in errors]}"
+        )
+    # The four reasons above are pairwise distinct strings.
+    assert len({needle for _, needle, _ in cases}) == 4
+
+
+def test_apply_script_collection_over_limit_fails_before_any_write(
+    db: Database, workspace: Path
+) -> None:
+    from catalog.skills.config import MAX_COLLECTION_DOCUMENTS
+
+    code = (
+        f"chapters = [str(i) for i in range({MAX_COLLECTION_DOCUMENTS + 1})]\n"
+        "result = {'chapters': chapters}\n"
+    )
+    skill = _collection_script(code)
+    skill_id = create_skill(
+        db, name=skill.name, description=skill.description, config=skill
+    )
+    input_doc_id = _ingest_input(db, workspace)
+    result = asyncio.run(
+        apply_skill_collect(
+            provider=ScriptProvider([]),
+            db=db,
+            workspace_dir=str(workspace),
+            skill=skill,
+            skill_id=skill_id,
+            input_doc_ids=[input_doc_id],
+            base_tools=build_document_tools(db, workspace),
+        )
+    )
+    assert result.status == "failed"
+    assert result.output_doc_id is None
+    assert result.output_doc_ids in (None, [])
+    errors = [e for e in result.trace.entries if e.kind == "error"]
+    assert errors
+    assert any(
+        "too many collection documents" in str(e.data.get("error", ""))
+        for e in errors
+    )
+    results_dir = workspace / "results"
+    assert not results_dir.exists() or list(results_dir.glob("*.md")) == []
+
+
+def test_apply_script_list_without_outputs_still_one_document(
+    db: Database, workspace: Path
+) -> None:
+    """Regression (ADR-0025): a skill with an empty ``outputs`` declaration
+    that returns a plain ``list[str]`` still yields ONE joined document — the
+    N-document split only fires for a declared ``multiple`` key."""
+    skill = SkillConfig(
+        name="list-no-outputs",
+        description="legacy list result without declared outputs",
+        system_prompt="",
+        allowed_tools=[],
+        model="test/model",
+        kind="script",
+        code='result = ["Part A", "Part B"]\n',
+    )
+    skill_id = create_skill(
+        db, name=skill.name, description=skill.description, config=skill
+    )
+    input_doc_id = _ingest_input(db, workspace)
+    result = asyncio.run(
+        apply_skill_collect(
+            provider=ScriptProvider([]),
+            db=db,
+            workspace_dir=str(workspace),
+            skill=skill,
+            skill_id=skill_id,
+            input_doc_ids=[input_doc_id],
+            base_tools=build_document_tools(db, workspace),
+        )
+    )
+    assert result.status == "ok"
+    assert result.output_doc_id is not None
+    assert result.output_doc_ids == [result.output_doc_id]
+    assert "Part A" in (result.result_text or "")
+    assert "Part B" in (result.result_text or "")
+    assert "\n\n---\n\n" in (result.result_text or "")
+
+
+def _index_and_chapters_agent(
+    *, max_retries: int = 0, max_iterations: int = 6
+) -> SkillConfig:
+    return SkillConfig(
+        name="chaptered-agent",
+        description="index + collection output",
+        system_prompt="Split into chapters via emit_output.",
+        allowed_tools=["read_document"],
+        model="test/model",
+        max_iterations=max_iterations,
+        max_retries=max_retries,
+        verify_checks=[VerifyCheck("non_empty")],
+        outputs=[
+            SkillOutput(key="index", description="Оглавление"),
+            SkillOutput(key="chapters", description="Глава", multiple=True),
+        ],
+    )
+
+
+def test_uses_emit_output_true_for_single_collection_output() -> None:
+    from catalog.skills.emit_output import uses_emit_output
+
+    single_collection = [SkillOutput(key="chapters", description="Глава", multiple=True)]
+    assert uses_emit_output(single_collection) is True
+    single_plain = [SkillOutput(key="brief", description="Текст")]
+    assert uses_emit_output(single_plain) is False
+
+
+def test_apply_agent_collection_output_accumulates_across_calls(
+    db: Database, workspace: Path
+) -> None:
+    skill = _index_and_chapters_agent(max_retries=0, max_iterations=8)
+    skill_id = create_skill(
+        db, name=skill.name, description=skill.description, config=skill
+    )
+    session_id = create_session(db)
+    input_doc_id = _ingest_input(db, workspace)
+    provider = ScriptProvider(
+        [
+            _emit_calls(("index", "Оглавление")),
+            _emit_calls(("chapters", "# Глава 1\nA")),
+            _emit_calls(("chapters", "# Глава 2\nB")),
+            _result("done"),
+        ]
+    )
+    result = asyncio.run(
+        apply_skill_collect(
+            provider=provider,
+            db=db,
+            workspace_dir=str(workspace),
+            skill=skill,
+            skill_id=skill_id,
+            input_doc_ids=[input_doc_id],
+            base_tools=build_document_tools(db, workspace),
+            session_id=session_id,
+        )
+    )
+    assert result.status == "ok"
+    assert "emit_output" in _tool_names(provider.seen_tools[0])
+    run = get_run(db, result.run_id)
+    assert run is not None
+    # Persist rewrites wiki-links into the file text, so compare by prefix
+    # rather than exact equality.
+    assert len(run["result_artifacts"]["chapters"]) == 2
+    assert run["result_artifacts"]["chapters"][0].startswith("# Глава 1\nA")
+    assert run["result_artifacts"]["chapters"][1].startswith("# Глава 2\nB")
+    assert run["result_artifacts"]["index"].startswith("Оглавление")
+    assert len(run["output_doc_ids"]) == 3
+    assert run["output_doc_ids"][0] == run["output_doc_id"]
+    # emit_output reports the running element count for a multiple key.
+    counts = [
+        entry.data["result"]["count"]
+        for entry in result.trace.entries
+        if entry.kind == "tool_result"
+        and entry.data.get("name") == "emit_output"
+        and entry.data.get("result", {}).get("key") == "chapters"
+    ]
+    assert counts == [1, 2]
+
+
+def test_apply_agent_empty_collection_retries_then_succeeds(
+    db: Database, workspace: Path
+) -> None:
+    """DoD: an empty collection is fed back through the existing verify-retry
+    loop instead of failing the run outright."""
+    skill = _index_and_chapters_agent(max_retries=1, max_iterations=8)
+    skill_id = create_skill(
+        db, name=skill.name, description=skill.description, config=skill
+    )
+    input_doc_id = _ingest_input(db, workspace)
+    provider = ScriptProvider(
+        [
+            _emit_calls(("index", "Оглавление")),
+            _result("nothing else"),  # first attempt: chapters stays missing
+            _emit_calls(("chapters", "# Глава 1\nA")),
+            _result("done"),
+        ]
+    )
+    result = asyncio.run(
+        apply_skill_collect(
+            provider=provider,
+            db=db,
+            workspace_dir=str(workspace),
+            skill=skill,
+            skill_id=skill_id,
+            input_doc_ids=[input_doc_id],
+            base_tools=build_document_tools(db, workspace),
+        )
+    )
+    assert result.status == "ok"
+    arts = result.result_artifacts or {}
+    assert len(arts["chapters"]) == 1
+    assert arts["chapters"][0].startswith("# Глава 1\nA")
+    verify_entries = [e for e in result.trace.entries if e.kind == "verify"]
+    assert any(not e.data.get("passed", True) for e in verify_entries)
+
+
+def test_apply_agent_capped_reports_collected_element_count(
+    db: Database, workspace: Path
+) -> None:
+    skill = _index_and_chapters_agent(max_retries=0, max_iterations=1)
+    skill_id = create_skill(
+        db, name=skill.name, description=skill.description, config=skill
+    )
+    input_doc_id = _ingest_input(db, workspace)
+    provider = ScriptProvider([_emit_calls(("chapters", "# Глава 1\nA"))])
+    events = asyncio.run(
+        _collect_events(
+            apply_skill(
+                provider=provider,
+                db=db,
+                workspace_dir=str(workspace),
+                skill=skill,
+                skill_id=skill_id,
+                input_doc_ids=[input_doc_id],
+                base_tools=build_document_tools(db, workspace),
+            )
+        )
+    )
+    finish = [event for event in events if isinstance(event, FinishEvent)][-1]
+    assert finish.finish_reason == "capped"
+    with db.connect() as conn:
+        row = conn.execute(
+            "SELECT status, result_artifacts, trace_json FROM skill_run "
+            "WHERE skill_id = ?",
+            (skill_id,),
+        ).fetchone()
+    assert row is not None
+    assert row["status"] == "failed"
+    import json as _json
+
+    artifacts = _json.loads(row["result_artifacts"] or "{}")
+    assert artifacts == {"chapters": ["# Глава 1\nA"]}
+    trace = _json.loads(row["trace_json"] or "[]")
+    errors = [entry for entry in trace if entry.get("kind") == "error"]
+    assert errors
+    last_error = str(errors[-1]["data"].get("error", ""))
+    assert "capped" in last_error
+    assert "missing output key(s): index" in last_error
+    assert "collected: chapters=1" in last_error
+
+
+def _sole_collection_agent(
+    *, max_retries: int = 0, max_iterations: int = 8
+) -> SkillConfig:
+    return SkillConfig(
+        name="chapters-only",
+        description="single collection output",
+        system_prompt="Split into chapters via emit_output.",
+        allowed_tools=["read_document"],
+        model="test/model",
+        max_iterations=max_iterations,
+        max_retries=max_retries,
+        verify_checks=[VerifyCheck("non_empty")],
+        outputs=[SkillOutput(key="chapters", description="Глава", multiple=True)],
+    )
+
+
+def test_apply_agent_primary_collection_persists_n_docs_and_joins_text(
+    db: Database, workspace: Path
+) -> None:
+    """ADR-0025 Decision 3: ``outputs[0].multiple`` is allowed — ``result_text``
+    is the joined text of every element, while persist still expands the same
+    value into N documents."""
+    skill = _sole_collection_agent()
+    skill_id = create_skill(
+        db, name=skill.name, description=skill.description, config=skill
+    )
+    input_doc_id = _ingest_input(db, workspace)
+    provider = ScriptProvider(
+        [
+            _emit_calls(("chapters", "# Глава 1\nA")),
+            _emit_calls(("chapters", "# Глава 2\nB")),
+            _result("done"),
+        ]
+    )
+    result = asyncio.run(
+        apply_skill_collect(
+            provider=provider,
+            db=db,
+            workspace_dir=str(workspace),
+            skill=skill,
+            skill_id=skill_id,
+            input_doc_ids=[input_doc_id],
+            base_tools=build_document_tools(db, workspace),
+        )
+    )
+    assert result.status == "ok"
+    assert result.output_doc_ids is not None
+    assert len(result.output_doc_ids) == 2
+    assert result.output_doc_id == result.output_doc_ids[0]
+    assert "Глава 1" in (result.result_text or "")
+    assert "Глава 2" in (result.result_text or "")
+    assert "\n\n---\n\n" in (result.result_text or "")
+
+
+def test_apply_pipeline_intermediate_list_only_final_step_persists(
+    db: Database, workspace: Path
+) -> None:
+    """A raw list[str] passed between pipeline steps (ADR-0018 territory) is
+    never itself persisted — only the *last* step's declared ``multiple`` key
+    expands into documents."""
+    skill = SkillConfig(
+        name="pipe-collection",
+        description="intermediate list, final collection",
+        system_prompt="",
+        allowed_tools=[],
+        model="test/model",
+        kind="pipeline",
+        outputs=[SkillOutput(key="chapters", description="Глава", multiple=True)],
+        steps=[
+            PipelineStep(
+                id="split",
+                type="script",
+                input="documents",
+                code="result = document.split(' ')\n",
+            ),
+            PipelineStep(
+                id="wrap",
+                type="script",
+                input="previous",
+                code="result = {'chapters': documents}\n",
+            ),
+        ],
+    )
+    skill_id = create_skill(
+        db, name=skill.name, description=skill.description, config=skill
+    )
+    input_doc_id = _ingest_input(db, workspace)  # content: b"source text"
+    result = asyncio.run(
+        apply_skill_collect(
+            provider=ScriptProvider([]),
+            db=db,
+            workspace_dir=str(workspace),
+            skill=skill,
+            skill_id=skill_id,
+            input_doc_ids=[input_doc_id],
+            base_tools=build_document_tools(db, workspace),
+        )
+    )
+    assert result.status == "ok"
+    assert result.output_doc_ids is not None
+    assert len(result.output_doc_ids) == 2  # "source", "text"
+
+
+def test_get_run_reads_legacy_string_only_result_artifacts(db: Database) -> None:
+    """DoD: old skill_run.result_artifacts rows (all-string values, written
+    before ADR-0025) are read back without a schema migration."""
+    import json as _json
+
+    from catalog.skills.repo_run import create_run
+
+    run_id = create_run(
+        db, skill_id="legacy-skill", session_id=None, input_doc_ids=["doc-1"]
+    )
+    with db.connect() as conn:
+        conn.execute(
+            "UPDATE skill_run SET status = 'ok', result_artifacts = ? WHERE id = ?",
+            (_json.dumps({"brief": "text", "table": "A -> a"}), run_id),
+        )
+    row = get_run(db, run_id)
+    assert row is not None
+    assert row["result_artifacts"] == {"brief": "text", "table": "A -> a"}
+    assert all(isinstance(v, str) for v in row["result_artifacts"].values())
+
+
+def test_get_run_reads_collection_result_artifacts_as_list(db: Database) -> None:
+    import json as _json
+
+    from catalog.skills.repo_run import create_run
+
+    run_id = create_run(
+        db, skill_id="collection-skill", session_id=None, input_doc_ids=["doc-1"]
+    )
+    with db.connect() as conn:
+        conn.execute(
+            "UPDATE skill_run SET status = 'ok', result_artifacts = ? WHERE id = ?",
+            (_json.dumps({"chapters": ["a", "b", "c"]}), run_id),
+        )
+    row = get_run(db, run_id)
+    assert row is not None
+    assert row["result_artifacts"] == {"chapters": ["a", "b", "c"]}

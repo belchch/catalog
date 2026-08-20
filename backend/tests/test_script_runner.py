@@ -198,6 +198,19 @@ def test_run_script_mixed_dict_raises() -> None:
         run_script(code, "hello", memory_bytes=_TEST_MEM)
 
 
+def test_run_script_dict_with_list_value_ok() -> None:
+    """ADR-0025: a dict value may be list[str] (a ``multiple`` output)."""
+    code = 'result = {"brief": document, "chapters": ["a", "b", "c"]}\n'
+    out = run_script(code, "hello", memory_bytes=_TEST_MEM)
+    assert out == {"brief": "hello", "chapters": ["a", "b", "c"]}
+
+
+def test_run_script_dict_with_non_string_list_element_raises() -> None:
+    code = 'result = {"chapters": ["a", 1]}\n'
+    with pytest.raises(ScriptRuntimeError, match="string keys"):
+        run_script(code, "hello", memory_bytes=_TEST_MEM)
+
+
 def test_run_script_result_via_print() -> None:
     code = "print(document[::-1])\n"
     out = run_script(code, "abc", memory_bytes=_TEST_MEM)

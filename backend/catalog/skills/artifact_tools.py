@@ -76,6 +76,12 @@ def _result_as_text(value: str | list[str]) -> str:
     return value
 
 
+def _collection_preview(value: list[str]) -> str:
+    return "\n\n---\n\n".join(
+        f"[{i + 1}/{len(value)}]\n{item}" for i, item in enumerate(value)
+    )
+
+
 def _draft_outputs(db: Database, session_id: str) -> list[SkillOutput]:
     row = get_artifact(db, session_id, "outputs")
     if row is None or not row.is_valid:
@@ -101,9 +107,10 @@ def _try_dict_allowed(
 
 
 def _match_try_outputs(
-    outputs: list[SkillOutput], value: dict[str, str]
-) -> dict[str, str]:
-    declared = [item.key for item in outputs]
+    outputs: list[SkillOutput], value: dict[str, str | list[str]]
+) -> dict[str, str | list[str]]:
+    declared_items = {item.key: item for item in outputs}
+    declared = list(declared_items)
     if not declared:
         raise ValueError("skill returned a dict but SkillConfig.outputs is empty")
     if len(value) > MAX_SKILL_OUTPUTS:
@@ -112,44 +119,79 @@ def _match_try_outputs(
         )
     extra = sorted(set(value) - set(declared))
     missing = [key for key in declared if key not in value]
-    empty = [key for key in declared if not (value.get(key) or "").strip()]
+    expected_list: list[str] = []
+    expected_text: list[str] = []
+    empty: list[str] = []
+    empty_element: list[str] = []
+    for key in declared:
+        if key not in value:
+            continue
+        item = declared_items[key]
+        raw_value = value[key]
+        if item.multiple:
+            if not isinstance(raw_value, list):
+                expected_list.append(key)
+            elif not raw_value:
+                empty.append(key)
+            elif any(not (elem or "").strip() for elem in raw_value):
+                empty_element.append(key)
+        else:
+            if isinstance(raw_value, list):
+                expected_text.append(key)
+            elif not (raw_value or "").strip():
+                empty.append(key)
     parts: list[str] = []
     if extra:
         parts.append("unknown output key(s): " + ", ".join(extra))
     if missing:
         parts.append("missing output key(s): " + ", ".join(missing))
+    if expected_list:
+        parts.append("expected list for output key(s): " + ", ".join(expected_list))
+    if expected_text:
+        parts.append("expected text for output key(s): " + ", ".join(expected_text))
     if empty:
         parts.append("empty output value(s): " + ", ".join(empty))
+    if empty_element:
+        parts.append("empty output element(s): " + ", ".join(empty_element))
     if parts:
         raise ValueError("; ".join(parts))
     return {key: value[key] for key in declared}
 
 
 def _try_finalize_output(
-    raw: str | list[str] | dict[str, str],
+    raw: str | list[str] | dict[str, str | list[str]],
     outputs: list[SkillOutput],
     *,
     dict_allowed: bool,
-) -> tuple[str, str, str]:
+) -> tuple[str, str, str, int | None]:
     if isinstance(raw, dict):
         if not dict_allowed:
             raise ValueError(
                 "named outputs are only allowed on the last pipeline step"
             )
         artifacts = _match_try_outputs(outputs, raw)
-        primary = artifacts[outputs[0].key]
+        primary_item = outputs[0]
+        primary_value = artifacts[primary_item.key]
+        primary = _result_as_text(primary_value)
         if len(artifacts) == 1:
-            return primary, "dict", primary
+            if primary_item.multiple and isinstance(primary_value, list):
+                return (
+                    _collection_preview(primary_value),
+                    "collection",
+                    primary,
+                    len(primary_value),
+                )
+            return primary, "dict", primary, None
         preview = "\n\n---\n\n".join(
-            f"{key}:\n{artifacts[key]}" for key in artifacts
+            f"{key}:\n{_result_as_text(artifacts[key])}" for key in artifacts
         )
-        return preview, "dict", primary
+        return preview, "dict", primary, None
     if outputs and dict_allowed:
         raise ValueError("skill declared outputs but script did not return a dict")
     if isinstance(raw, list):
         text = _result_as_text(raw)
-        return text, "list", text
-    return raw, "str", raw
+        return text, "list", text, None
+    return raw, "str", raw, None
 
 
 def _saved_slot_code(
@@ -259,6 +301,9 @@ def _try_payload(
     output_preview: str = "",
     output_len: int = 0,
     output_kind: str | None = None,
+    # ADR-0025: element count for a collection output (``output_kind ==
+    # "collection"``) or a plain list result; ``None`` for str/dict.
+    output_count: int | None = None,
     duration_ms: int = 0,
     verify: dict | None = None,
     line_no: int | None = None,
@@ -273,6 +318,7 @@ def _try_payload(
         "output_preview": output_preview,
         "output_len": output_len,
         "output_kind": output_kind,
+        "output_count": output_count,
         "duration_ms": duration_ms,
         "verify": verify,
         "line_no": line_no,
@@ -443,7 +489,7 @@ async def run_try_skill_script(
         return payload
     duration_ms = int((time.perf_counter() - started) * 1000)
     try:
-        output_text, output_kind, verify_text = _try_finalize_output(
+        output_text, output_kind, verify_text, output_count = _try_finalize_output(
             output,
             _draft_outputs(db, session_id),
             dict_allowed=_try_dict_allowed(db, session_id, step_index),
@@ -481,6 +527,7 @@ async def run_try_skill_script(
         output_preview=_preview_text(output_text),
         output_len=len(output_text),
         output_kind=output_kind,
+        output_count=output_count,
         duration_ms=duration_ms,
         verify=verify_payload,
     )
@@ -990,11 +1037,18 @@ def build_artifact_tools(
             name="set_skill_outputs",
             description=(
                 "Declare named skill outputs for this session as "
-                "[{key, description}, ...]. First item is primary. "
+                "[{key, description, multiple?}, ...]. First item is primary. "
                 "Keys must match ^[a-z][a-z0-9_]{0,31}$, be unique, "
                 "and descriptions must be non-empty. At most 8 items. "
                 "Omit or use [] for a single unnamed output. For script "
-                "skills the return dict must use these keys."
+                "skills the return dict must use these keys. "
+                "multiple:true marks a key as a collection whose element "
+                "count depends on the input (e.g. one per chapter): script "
+                "returns list[str] for that key, agent calls emit_output "
+                "once per element (calls accumulate into a list). Use "
+                "multiple for 'how many depends on the input', not for "
+                "distinct roles (e.g. text + table) — those are separate "
+                "non-multiple keys."
             ),
             parameters={
                 "type": "object",
@@ -1010,6 +1064,14 @@ def build_artifact_tools(
                                     "pattern": r"^[a-z][a-z0-9_]{0,31}$",
                                 },
                                 "description": {"type": "string"},
+                                "multiple": {
+                                    "type": "boolean",
+                                    "description": (
+                                        "True if this key persists as N "
+                                        "documents (element count unknown "
+                                        "until run time)."
+                                    ),
+                                },
                             },
                             "required": ["key", "description"],
                         },

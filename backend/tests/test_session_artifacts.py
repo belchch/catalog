@@ -1571,6 +1571,35 @@ def test_try_skill_script_named_outputs_dict_ok(
     assert script["dry_run"]["stage"] == "verify"
 
 
+def test_try_skill_script_collection_output_shows_kind_and_count(
+    mem_db: Database, tmp_path: Path
+) -> None:
+    session_id = create_session(mem_db)
+    doc = ingest_file(mem_db, tmp_path, filename="note.md", content=b"hello world")
+    attach_documents(mem_db, session_id, [doc.id])
+    tools = _artifact_try_tools(mem_db, session_id, workspace=str(tmp_path))
+    _, save_script = tools.get("save_skill_script")
+    _, set_outputs = tools.get("set_skill_outputs")
+    _, try_fn = tools.get("try_skill_script")
+    code = 'result = {"chapters": ["# Глава 1\\nA", "# Глава 2\\nB", "# Глава 3\\nC"]}\n'
+
+    async def _run():
+        await set_outputs(
+            outputs=[
+                {"key": "chapters", "description": "Глава", "multiple": True}
+            ]
+        )
+        await save_script(code=code)
+        return await try_fn()
+
+    result = asyncio.run(_run())
+    assert result["ok"] is True
+    assert result["output_kind"] == "collection"
+    assert result["output_count"] == 3
+    assert "Глава 1" in result["output_preview"]
+    assert "Глава 3" in result["output_preview"]
+
+
 def test_try_skill_script_dict_without_outputs_fails(
     mem_db: Database, tmp_path: Path
 ) -> None:

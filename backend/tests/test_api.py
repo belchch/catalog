@@ -2620,6 +2620,139 @@ def test_named_outputs_save_blocked_while_companion_remains(client, db) -> None:
     assert len(result_docs) == 2
 
 
+def _chapters_skill() -> SkillConfig:
+    """A script skill with one plain output (``index``) and one collection
+    output (``chapters``, ``multiple=True``) — the ADR-0025 ``split_by_chapters``
+    shape: 1 index doc + N chapter docs, N unknown until run time."""
+    code = (
+        "chapters = [\n"
+        "    '# Глава 1\\nA',\n"
+        "    '# Глава 2\\nB',\n"
+        "    '# Повтор\\nC',\n"
+        "    '# Повтор\\nD',\n"
+        "    '# Глава 5\\nE',\n"
+        "    '# Глава 6\\nF',\n"
+        "    '# Глава 7\\nG',\n"
+        "]\n"
+        "result = {\n"
+        "    'index': 'Оглавление на ' + str(len(chapters)) + ' глав',\n"
+        "    'chapters': chapters,\n"
+        "}\n"
+    )
+    return SkillConfig(
+        name="split-chapters",
+        description="index + chapters collection",
+        system_prompt="",
+        allowed_tools=[],
+        model="test/model",
+        kind="script",
+        code=code,
+        verify_checks=[VerifyCheck("non_empty")],
+        outputs=[
+            SkillOutput(key="index", description="Оглавление"),
+            SkillOutput(key="chapters", description="Глава", multiple=True),
+        ],
+    )
+
+
+def test_collection_output_persist_creates_n_documents(client, db) -> None:
+    workspace = Path(client.app.state.workspace)
+    doc_id = _upload(client, "input.md", b"source text")
+    skill = _chapters_skill()
+    skill_id = create_skill(
+        db,
+        name=skill.name,
+        description=skill.description,
+        config=skill,
+        status="committed",
+    )
+    result = asyncio.run(
+        apply_skill_collect(
+            provider=client.app.state.provider,
+            db=db,
+            workspace_dir=str(workspace),
+            skill=skill,
+            skill_id=skill_id,
+            input_doc_ids=[doc_id],
+            base_tools=build_document_tools(db, workspace),
+        )
+    )
+    assert result.status == "ok"
+    assert result.output_doc_ids is not None
+    assert len(result.output_doc_ids) == 8
+    assert result.output_doc_id == result.output_doc_ids[0]
+
+    run = client.get(f"/runs/{result.run_id}").json()
+    assert run["output_doc_ids"] == result.output_doc_ids
+    assert run["result_artifacts"]["index"].startswith("Оглавление на 7")
+    assert isinstance(run["result_artifacts"]["chapters"], list)
+    assert len(run["result_artifacts"]["chapters"]) == 7
+
+    docs = [get_document(db, did) for did in result.output_doc_ids]
+    assert all(d is not None for d in docs)
+    titles = [d.title for d in docs]
+    # Primary (index) is first and keeps the run-level title; chapters take
+    # their title from their own first markdown heading — not "— главы N".
+    assert titles[1] == "Глава 1"
+    assert titles[2] == "Глава 2"
+    assert titles[3] == "Повтор"
+    assert titles[4] == "Повтор"
+    assert titles[5] == "Глава 5"
+    assert titles[6] == "Глава 6"
+    assert titles[7] == "Глава 7"
+    # Identical headings ("Повтор" twice) must not collide on disk.
+    paths = {d.path for d in docs}
+    assert len(paths) == 8
+
+
+def test_collection_output_preview_then_save_creates_n_documents(
+    client, db
+) -> None:
+    workspace = Path(client.app.state.workspace)
+    doc_id = _upload(client, "input.md", b"source text")
+    skill = _chapters_skill()
+    skill_id = create_skill(
+        db,
+        name=skill.name,
+        description=skill.description,
+        config=skill,
+        status="committed",
+    )
+    result = asyncio.run(
+        apply_skill_collect(
+            provider=client.app.state.provider,
+            db=db,
+            workspace_dir=str(workspace),
+            skill=skill,
+            skill_id=skill_id,
+            input_doc_ids=[doc_id],
+            base_tools=build_document_tools(db, workspace),
+            persist=False,
+        )
+    )
+    assert result.status == "ok"
+    assert result.output_doc_id is None
+    run_id = result.run_id
+    assert run_id is not None
+
+    run = client.get(f"/runs/{run_id}").json()
+    assert run["output_doc_id"] is None
+    assert run["output_doc_ids"] == []
+    assert all(d["kind"] != "result_md" for d in client.get("/documents").json())
+
+    resp = client.post(f"/runs/{run_id}/save")
+    assert resp.status_code == 200, resp.text
+    run_after = client.get(f"/runs/{run_id}").json()
+    assert len(run_after["output_doc_ids"]) == 8
+    assert run_after["output_doc_id"] == run_after["output_doc_ids"][0]
+    result_docs = [
+        d for d in client.get("/documents").json() if d["kind"] == "result_md"
+    ]
+    assert len(result_docs) == 8
+    resp2 = client.post(f"/runs/{run_id}/save")
+    assert resp2.status_code == 409
+
+
 def test_named_outputs_save_survives_skill_output_edit(client, db) -> None:
     workspace = Path(client.app.state.workspace)
     doc_id = _upload(client, "input.md", b"source text")

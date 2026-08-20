@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import hashlib
 import logging
+import re
 import time
 import uuid
 from asyncio import CancelledError
@@ -67,9 +68,11 @@ from catalog.skills.budget import (
     skill_hold_active,
 )
 from catalog.skills.config import (
+    MAX_COLLECTION_DOCUMENTS,
     MAX_SKILL_OUTPUTS,
     PipelineStep,
     SkillConfig,
+    SkillOutput,
     ensure_read_document_tool,
 )
 from catalog.skills.emit_output import (
@@ -89,6 +92,12 @@ from catalog.storage.repo_session_document import attach_documents
 logger = logging.getLogger("catalog.skills.apply")
 
 PipelineValue = str | list[str]
+# ADR-0025: the value of a single named output. A ``multiple`` key's value is
+# ``list[str]`` (one element per document to persist); a regular key's value
+# is ``str``. Structurally identical to ``PipelineValue`` but named separately
+# because the two live at different semantic layers (a pipeline step's whole
+# value vs. one entry of an ``artifacts`` dict).
+ArtifactValue = str | list[str]
 
 
 class PipelineStepError(RuntimeError):
@@ -97,6 +106,12 @@ class PipelineStepError(RuntimeError):
 
 class NamedOutputsError(RuntimeError):
     pass
+
+
+class CollectionLimitError(RuntimeError):
+    """Raised when a run would persist more collection documents than
+    ``MAX_COLLECTION_DOCUMENTS`` allows (ADR-0025). Always raised *before* any
+    file is written, so a run failing this check leaves no partial output."""
 
 
 def _value_as_text(value: PipelineValue) -> str:
@@ -118,9 +133,19 @@ def _value_as_documents(value: PipelineValue) -> list[str]:
 
 
 def _match_named_outputs(
-    skill: SkillConfig, value: dict[str, str]
-) -> dict[str, str]:
-    declared = [item.key for item in skill.outputs]
+    skill: SkillConfig, value: dict[str, ArtifactValue]
+) -> dict[str, ArtifactValue]:
+    """Validate a script/agent result dict against ``skill.outputs`` (ADR-0025).
+
+    Beyond the pre-existing ``unknown``/``missing``/``empty`` checks, each
+    present key's *value type* is now checked against its declaration:
+    ``multiple`` requires a non-empty ``list[str]`` with no blank elements;
+    a regular key requires a non-empty ``str``. A type mismatch is reported
+    separately from ``empty`` so ``[]`` and "string instead of a list" surface
+    distinct, actionable reasons in the trace.
+    """
+    declared_items = {item.key: item for item in skill.outputs}
+    declared = list(declared_items)
     if not declared:
         raise NamedOutputsError(
             "skill returned a dict but SkillConfig.outputs is empty"
@@ -131,25 +156,55 @@ def _match_named_outputs(
         )
     extra = sorted(set(value) - set(declared))
     missing = [key for key in declared if key not in value]
-    empty = [key for key in declared if not (value.get(key) or "").strip()]
+    expected_list: list[str] = []
+    expected_text: list[str] = []
+    empty: list[str] = []
+    empty_element: list[str] = []
+    for key in declared:
+        if key not in value:
+            continue
+        item = declared_items[key]
+        raw_value = value[key]
+        if item.multiple:
+            if not isinstance(raw_value, list):
+                expected_list.append(key)
+            elif not raw_value:
+                empty.append(key)
+            elif any(not (elem or "").strip() for elem in raw_value):
+                empty_element.append(key)
+        else:
+            if isinstance(raw_value, list):
+                expected_text.append(key)
+            elif not (raw_value or "").strip():
+                empty.append(key)
     parts: list[str] = []
     if extra:
         parts.append("unknown output key(s): " + ", ".join(extra))
     if missing:
         parts.append("missing output key(s): " + ", ".join(missing))
+    if expected_list:
+        parts.append("expected list for output key(s): " + ", ".join(expected_list))
+    if expected_text:
+        parts.append("expected text for output key(s): " + ", ".join(expected_text))
     if empty:
         parts.append("empty output value(s): " + ", ".join(empty))
+    if empty_element:
+        parts.append("empty output element(s): " + ", ".join(empty_element))
     if parts:
         raise NamedOutputsError("; ".join(parts))
     return {key: value[key] for key in declared}
 
 
 def _finalize_script_result(
-    skill: SkillConfig, raw: str | list[str] | dict[str, str]
-) -> tuple[str, dict[str, str]]:
+    skill: SkillConfig, raw: str | list[str] | dict[str, ArtifactValue]
+) -> tuple[str, dict[str, ArtifactValue]]:
     if isinstance(raw, dict):
         artifacts = _match_named_outputs(skill, raw)
-        return artifacts[skill.outputs[0].key], artifacts
+        # ADR-0025 (Decision 3): a collection primary (outputs[0].multiple)
+        # has two representations of the same value — the joined text here
+        # (verify / pipeline value / skill-as-tool) and the N-document split
+        # in persist_run_outputs, which reads ``artifacts`` unmodified.
+        return _value_as_text(artifacts[skill.outputs[0].key]), artifacts
     if skill.outputs:
         raise NamedOutputsError(
             "skill declared outputs but script did not return a dict"
@@ -186,7 +241,7 @@ def _named_outputs_required(skill: SkillConfig) -> bool:
 
 
 def _output_persist_keys(
-    skill: SkillConfig, artifacts: dict[str, str], primary_text: str
+    skill: SkillConfig, artifacts: dict[str, ArtifactValue], primary_text: str
 ) -> list[str]:
     artifact_keys = list(artifacts)
     declared_keys = [item.key for item in skill.outputs]
@@ -194,14 +249,17 @@ def _output_persist_keys(
         return declared_keys
     if primary_text:
         for key in artifact_keys:
-            if artifacts[key] == primary_text:
+            # ``_value_as_text`` (not ``==``) so a collection value (list)
+            # compares against the joined primary text instead of always
+            # failing the equality check.
+            if _value_as_text(artifacts[key]) == primary_text:
                 return [key] + [item for item in artifact_keys if item != key]
     return artifact_keys
 
 
 def _ordered_artifacts(
-    skill: SkillConfig, artifacts: dict[str, str]
-) -> dict[str, str]:
+    skill: SkillConfig, artifacts: dict[str, ArtifactValue]
+) -> dict[str, ArtifactValue]:
     if not artifacts:
         return {}
     declared = [item.key for item in skill.outputs if item.key in artifacts]
@@ -209,6 +267,21 @@ def _ordered_artifacts(
         key for key in artifacts if key not in {item.key for item in skill.outputs}
     ]
     return {key: artifacts[key] for key in declared + leftover}
+
+
+def _collection_counts_note(
+    skill: SkillConfig, artifacts: dict[str, ArtifactValue]
+) -> str:
+    """"; collected: key=N, ..." for every declared ``multiple`` key so a
+    ``capped`` failure while an agent skill was mid-collection reports how
+    many elements it had already accumulated, instead of just a missing/empty
+    key name."""
+    counts = [
+        f"{item.key}={len(artifacts.get(item.key) or [])}"
+        for item in skill.outputs
+        if item.multiple
+    ]
+    return "; collected: " + ", ".join(counts) if counts else ""
 
 
 def _verify_retry_content(failures: list[str]) -> str:
@@ -223,6 +296,29 @@ def _primary_result_title(skill: SkillConfig, docs: list) -> str:
     return f"{skill.name} — {docs[0].title} (+{len(docs) - 1})"
 
 
+# ADR-0025 (Decision 7): a collection element's title is its first markdown
+# heading line, if present; otherwise a positional fallback.
+_MD_HEADING_RE = re.compile(r"^#{1,6}[ \t]+(.+?)\s*$", re.MULTILINE)
+
+
+def _first_markdown_heading(text: str) -> str | None:
+    match = _MD_HEADING_RE.search(text)
+    if match is None:
+        return None
+    heading = match.group(1).strip()
+    return heading or None
+
+
+def _collection_item_title(
+    skill: SkillConfig, item: SkillOutput | None, key: str, text: str, position: int
+) -> str:
+    heading = _first_markdown_heading(text)
+    if heading:
+        return heading
+    description = item.description if item is not None else key
+    return f"{skill.name} — {description} {position + 1}"
+
+
 def persist_run_outputs(
     db: Database,
     workspace_dir: str,
@@ -231,9 +327,9 @@ def persist_run_outputs(
     docs: list,
     session_id: str | None,
     primary_text: str,
-    artifacts: dict[str, str],
+    artifacts: dict[str, ArtifactValue],
     primary_title: str | None = None,
-) -> tuple[str, list[str], str, dict[str, str]]:
+) -> tuple[str, list[str], str, dict[str, ArtifactValue]]:
     workspace_path = Path(workspace_dir)
     title = primary_title or _primary_result_title(skill, docs)
     items: list[tuple[str, str, str]] = []
@@ -242,15 +338,45 @@ def persist_run_outputs(
     if persist_keys:
         for index, key in enumerate(persist_keys):
             item = declared.get(key)
-            if index == 0:
-                item_title = title
-            elif item is not None:
-                item_title = f"{skill.name} — {item.description}"
+            value = artifacts[key]
+            if item is not None and item.multiple:
+                # ADR-0025 (Decision 2/7): a collection key expands into N
+                # documents, one per element. The first element of the first
+                # persist key inherits the run-level title (today's
+                # ``index == 0`` semantics); every other element titles
+                # itself from its own first markdown heading, else a
+                # positional fallback.
+                elements = value if isinstance(value, list) else [value]
+                for pos, element_text in enumerate(elements):
+                    if index == 0 and pos == 0:
+                        item_title = title
+                    else:
+                        item_title = _collection_item_title(
+                            skill, item, key, element_text, pos
+                        )
+                    items.append((key, item_title, element_text))
             else:
-                item_title = f"{skill.name} — {key}"
-            items.append((key, item_title, artifacts[key]))
+                # Defensive: a stale/undeclared key from an earlier run may
+                # still carry a list value — collapse it to text instead of
+                # writing a non-string as a document body.
+                text = _value_as_text(value) if isinstance(value, list) else value
+                if index == 0:
+                    item_title = title
+                elif item is not None:
+                    item_title = f"{skill.name} — {item.description}"
+                else:
+                    item_title = f"{skill.name} — {key}"
+                items.append((key, item_title, text))
     else:
         items.append(("", title, primary_text))
+
+    if len(items) > MAX_COLLECTION_DOCUMENTS:
+        # ADR-0025 (Decision 5): checked before any allocate_rel_path/touch
+        # below so an over-limit run leaves no partial output on disk.
+        raise CollectionLimitError(
+            f"too many collection documents: {len(items)} "
+            f"(max {MAX_COLLECTION_DOCUMENTS})"
+        )
 
     allocated: list[tuple[str, str, str, str]] = []
     try:
@@ -266,13 +392,22 @@ def persist_run_outputs(
             allocated.append((key, item_title, text, rel_path))
 
         stems = [Path(rel_path).stem for *_, rel_path in allocated]
+        keys_by_index = [key for key, *_ in allocated]
         input_stems = [Path(doc.path).stem for doc in docs]
         title_map = build_title_to_stem_map(db)
         prepared: list[tuple[str, str, str, str, str]] = []
         rewritten_primary = primary_text
-        rewritten_artifacts: dict[str, str] = {}
+        rewritten_artifacts: dict[str, ArtifactValue] = {}
         for index, (_key, item_title, text, rel_path) in enumerate(allocated):
-            sibling_stems = [stem for i, stem in enumerate(stems) if i != index]
+            # ADR-0025 (Consequences: wiki-links): a collection element links
+            # only to the other top-level results (primary + companions),
+            # never to its own peer elements — exclude same-key siblings, not
+            # just self.
+            sibling_stems = [
+                stem
+                for i, stem in enumerate(stems)
+                if i != index and (not _key or keys_by_index[i] != _key)
+            ]
             file_text = rewrite_wiki_links(text, title_map)
             file_text = ensure_parent_wikilinks(
                 file_text, input_stems + sibling_stems
@@ -282,9 +417,25 @@ def persist_run_outputs(
             out_id = uuid.uuid4().hex
             prepared.append((_key, item_title, file_text, rel_path, out_id))
             if _key:
-                rewritten_artifacts[_key] = file_text
+                key_item = declared.get(_key)
+                if key_item is not None and key_item.multiple:
+                    bucket = rewritten_artifacts.get(_key)
+                    if not isinstance(bucket, list):
+                        bucket = []
+                        rewritten_artifacts[_key] = bucket
+                    bucket.append(file_text)
+                else:
+                    rewritten_artifacts[_key] = file_text
             if index == 0:
                 rewritten_primary = file_text
+
+        if persist_keys:
+            primary_key = persist_keys[0]
+            primary_item = declared.get(primary_key)
+            if primary_item is not None and primary_item.multiple:
+                primary_value = rewritten_artifacts.get(primary_key)
+                if isinstance(primary_value, list) and primary_value:
+                    rewritten_primary = _value_as_text(primary_value)
 
         doc_ids = [out_id for *_, out_id in prepared]
         with db.connect() as conn:
@@ -454,7 +605,7 @@ class ApplyResult:
     trace: Trace
     run_id: str | None = None
     output_doc_ids: list[str] | None = None
-    result_artifacts: dict[str, str] | None = None
+    result_artifacts: dict[str, ArtifactValue] | None = None
 
 
 @dataclass
@@ -466,7 +617,7 @@ class _ApplyOutcome:
     result_text: str | None = None
     run_id: str | None = None
     output_doc_ids: list[str] | None = None
-    result_artifacts: dict[str, str] | None = None
+    result_artifacts: dict[str, ArtifactValue] | None = None
 
 
 async def _apply_core(
@@ -552,7 +703,7 @@ async def _apply_core(
         tools = base_tools.filter(ensure_read_document_tool(skill.allowed_tools))
     else:
         tools = base_tools.filter(skill.allowed_tools)
-    emit_artifacts: dict[str, str] = {}
+    emit_artifacts: dict[str, ArtifactValue] = {}
     if skill.kind == "agent" and uses_emit_output(skill.outputs):
         register_emit_output(tools, skill.outputs, emit_artifacts)
 
@@ -609,7 +760,7 @@ async def _apply_core(
     )
 
     last_text: str | None = None
-    last_artifacts: dict[str, str] = {}
+    last_artifacts: dict[str, ArtifactValue] = {}
     last_capped = False
     passed = False
     deadline_stopped = False
@@ -836,7 +987,7 @@ async def _apply_core(
                     )
                     is_last = index == len(skill.steps) - 1
                     step_emits = is_last and uses_emit_output(skill.outputs)
-                    step_artifacts: dict[str, str] = {}
+                    step_artifacts: dict[str, ArtifactValue] = {}
                     if step_emits:
                         register_emit_output(
                             step_tools, skill.outputs, step_artifacts
@@ -932,7 +1083,9 @@ async def _apply_core(
                             reason = "; ".join(output_failures)
                             if capped:
                                 last_capped = True
-                                reason = "capped: " + reason
+                                reason = "capped: " + reason + _collection_counts_note(
+                                    skill, step_artifacts
+                                )
                             _record_outputs_error(
                                 trace, index + 1, reason, step.id
                             )
@@ -1363,9 +1516,12 @@ async def _apply_core(
                     break
 
                 if agent_emits and capped and output_failures:
-                    _record_outputs_error(
-                        trace, r + 1, "capped: " + "; ".join(output_failures)
+                    reason = (
+                        "capped: "
+                        + "; ".join(output_failures)
+                        + _collection_counts_note(skill, emit_artifacts)
                     )
+                    _record_outputs_error(trace, r + 1, reason)
                     break
 
                 if r < skill.max_retries:
@@ -1387,18 +1543,31 @@ async def _apply_core(
         # "preview" mode leaves the result on screen, materialized later via
         # POST /runs/{id}/save if the user chooses to).
         if passed and persist and docs:
-            output_doc_id, output_doc_ids, last_text, last_artifacts = (
-                persist_run_outputs(
-                    db,
-                    workspace_dir,
-                    skill=skill,
-                    docs=docs,
-                    session_id=session_id,
-                    primary_text=last_text or "",
-                    artifacts=last_artifacts,
+            try:
+                output_doc_id, output_doc_ids, last_text, last_artifacts = (
+                    persist_run_outputs(
+                        db,
+                        workspace_dir,
+                        skill=skill,
+                        docs=docs,
+                        session_id=session_id,
+                        primary_text=last_text or "",
+                        artifacts=last_artifacts,
+                    )
                 )
-            )
-            logger.info("apply_skill persisted output_doc_id=%s", output_doc_id)
+                logger.info(
+                    "apply_skill persisted output_doc_id=%s", output_doc_id
+                )
+            except CollectionLimitError as exc:
+                # ADR-0025 (Decision 5): fail-closed, no partial output — the
+                # limit check inside persist_run_outputs already ran before
+                # any file was written.
+                _record_outputs_error(trace, 1, str(exc))
+                passed = False
+                last_text = None
+                last_artifacts = {}
+                output_doc_id = None
+                output_doc_ids = []
 
         status = "ok" if passed else "failed"
         stored_artifacts = last_artifacts or None

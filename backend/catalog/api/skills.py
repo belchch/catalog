@@ -1022,7 +1022,10 @@ def _format_skill_for_edit(record: SkillRecord) -> str:
         checks = ", ".join(vc.check for vc in config.verify_checks)
         lines.append(f"- verify_checks: {checks}")
     if config.outputs:
-        declared = ", ".join(item.key for item in config.outputs)
+        declared = ", ".join(
+            f"{item.key}[]" if item.multiple else item.key
+            for item in config.outputs
+        )
         lines.append(f"- outputs: {declared}")
     lines.append(
         "Черновик prompt/script уже засеян в панели артефактов "
