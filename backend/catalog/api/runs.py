@@ -163,7 +163,7 @@ async def save_run_result_endpoint(
             model="",
         )
     )
-    primary_id, output_doc_ids, _rewritten = persist_run_outputs(
+    primary_id, output_doc_ids, _rewritten, _rewritten_artifacts = persist_run_outputs(
         db,
         workspace,
         skill=skill_config,

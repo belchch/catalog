@@ -199,6 +199,18 @@ def _output_persist_keys(
     return artifact_keys
 
 
+def _ordered_artifacts(
+    skill: SkillConfig, artifacts: dict[str, str]
+) -> dict[str, str]:
+    if not artifacts:
+        return {}
+    declared = [item.key for item in skill.outputs if item.key in artifacts]
+    leftover = [
+        key for key in artifacts if key not in {item.key for item in skill.outputs}
+    ]
+    return {key: artifacts[key] for key in declared + leftover}
+
+
 def _verify_retry_content(failures: list[str]) -> str:
     return "verify failed: " + "; ".join(failures) + ". Исправь и повтори."
 
@@ -221,7 +233,7 @@ def persist_run_outputs(
     primary_text: str,
     artifacts: dict[str, str],
     primary_title: str | None = None,
-) -> tuple[str, list[str], str]:
+) -> tuple[str, list[str], str, dict[str, str]]:
     workspace_path = Path(workspace_dir)
     title = primary_title or _primary_result_title(skill, docs)
     items: list[tuple[str, str, str]] = []
@@ -257,6 +269,7 @@ def persist_run_outputs(
     title_map = build_title_to_stem_map(db)
     doc_ids: list[str] = []
     rewritten_primary = primary_text
+    rewritten_artifacts: dict[str, str] = {}
     for index, (_key, item_title, text, rel_path) in enumerate(allocated):
         sibling_stems = [stem for i, stem in enumerate(stems) if i != index]
         file_text = rewrite_wiki_links(text, title_map)
@@ -276,11 +289,13 @@ def persist_run_outputs(
             content_hash=content_hash_bytes(file_text.encode("utf-8")),
         )
         doc_ids.append(out_id)
+        if _key:
+            rewritten_artifacts[_key] = file_text
         if index == 0:
             rewritten_primary = file_text
     if session_id is not None and doc_ids:
         attach_documents(db, session_id, doc_ids)
-    return doc_ids[0], doc_ids, rewritten_primary
+    return doc_ids[0], doc_ids, rewritten_primary, rewritten_artifacts
 
 
 def _config_hash(skill: SkillConfig) -> str:
@@ -861,7 +876,9 @@ async def _apply_core(
                         for entry in trace.entries[before:]:
                             entry.data["step_id"] = step.id
                         if step_emits:
-                            last_artifacts = dict(step_artifacts)
+                            last_artifacts = _ordered_artifacts(
+                                skill, step_artifacts
+                            )
                             last_text = primary_output_text(
                                 skill.outputs, step_artifacts, text
                             )
@@ -1286,7 +1303,7 @@ async def _apply_core(
                 last_capped = capped
                 agent_emits = uses_emit_output(skill.outputs)
                 if agent_emits:
-                    last_artifacts = dict(emit_artifacts)
+                    last_artifacts = _ordered_artifacts(skill, emit_artifacts)
                     last_text = primary_output_text(
                         skill.outputs, emit_artifacts, text
                     )
@@ -1356,14 +1373,16 @@ async def _apply_core(
         # "preview" mode leaves the result on screen, materialized later via
         # POST /runs/{id}/save if the user chooses to).
         if passed and persist and docs:
-            output_doc_id, output_doc_ids, last_text = persist_run_outputs(
-                db,
-                workspace_dir,
-                skill=skill,
-                docs=docs,
-                session_id=session_id,
-                primary_text=last_text or "",
-                artifacts=last_artifacts,
+            output_doc_id, output_doc_ids, last_text, last_artifacts = (
+                persist_run_outputs(
+                    db,
+                    workspace_dir,
+                    skill=skill,
+                    docs=docs,
+                    session_id=session_id,
+                    primary_text=last_text or "",
+                    artifacts=last_artifacts,
+                )
             )
             logger.info("apply_skill persisted output_doc_id=%s", output_doc_id)
 
@@ -1431,7 +1450,10 @@ async def _apply_core(
                 output_doc_id=None,
                 trace=trace,
                 result_text=last_text,
-                result_artifacts=emit_artifacts or last_artifacts or None,
+                result_artifacts=_ordered_artifacts(
+                    skill, emit_artifacts or last_artifacts
+                )
+                or None,
             )
             done = True
         outcome.status = "cancelled"
@@ -1449,7 +1471,10 @@ async def _apply_core(
                 output_doc_id=None,
                 trace=trace,
                 result_text=last_text,
-                result_artifacts=emit_artifacts or last_artifacts or None,
+                result_artifacts=_ordered_artifacts(
+                    skill, emit_artifacts or last_artifacts
+                )
+                or None,
             )
             done = True
         raise
@@ -1464,7 +1489,10 @@ async def _apply_core(
                 output_doc_id=None,
                 trace=trace,
                 result_text=last_text,
-                result_artifacts=emit_artifacts or last_artifacts or None,
+                result_artifacts=_ordered_artifacts(
+                    skill, emit_artifacts or last_artifacts
+                )
+                or None,
             )
             done = True
 

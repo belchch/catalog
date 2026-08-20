@@ -2805,10 +2805,6 @@ def test_apply_script_two_outputs_persist_creates_two_documents(
     assert run["output_doc_ids"] == result.output_doc_ids
     assert len(run["output_doc_ids"]) == 2
     assert run["output_doc_ids"][0] == run["output_doc_id"]
-    assert run["result_artifacts"] == {
-        "brief": "SOURCE TEXT",
-        "table": "A -> a",
-    }
     assert "SOURCE TEXT" in (result.result_text or "")
     primary = get_document(db, run["output_doc_id"])
     companion = get_document(db, run["output_doc_ids"][1])
@@ -2817,6 +2813,9 @@ def test_apply_script_two_outputs_persist_creates_two_documents(
     assert companion.title == f"{skill.name} — Таблица перекодировки"
     primary_text = (workspace / primary.path).read_text(encoding="utf-8")
     companion_text = (workspace / companion.path).read_text(encoding="utf-8")
+    assert list(run["result_artifacts"]) == ["brief", "table"]
+    assert run["result_artifacts"]["brief"] == primary_text
+    assert run["result_artifacts"]["table"] == companion_text
     input_stem = Path(get_document(db, input_doc_id).path).stem
     assert f"[[{input_stem}]]" in primary_text
     assert f"[[{Path(companion.path).stem}]]" in primary_text
@@ -2864,7 +2863,7 @@ def test_apply_script_two_outputs_preview_then_save(
     assert all(doc.kind != "result_md" for doc in _list_result_docs(db))
 
     docs = [get_document(db, input_doc_id)]
-    primary_id, output_ids, _text = persist_run_outputs(
+    primary_id, output_ids, _text, _rewritten = persist_run_outputs(
         db,
         str(workspace),
         skill=skill,
@@ -2899,7 +2898,7 @@ def test_persist_run_outputs_keeps_artifacts_when_skill_outputs_change(
         code="result = document\n",
         outputs=[SkillOutput(key="summary", description="Новый выход")],
     )
-    primary_id, output_ids, _text = persist_run_outputs(
+    primary_id, output_ids, _text, _rewritten = persist_run_outputs(
         db,
         str(workspace),
         skill=changed,
@@ -2931,7 +2930,7 @@ def test_persist_run_outputs_keeps_artifacts_without_skill_outputs(
         allowed_tools=[],
         model="",
     )
-    primary_id, output_ids, _text = persist_run_outputs(
+    primary_id, output_ids, _text, _rewritten = persist_run_outputs(
         db,
         str(workspace),
         skill=fallback,
@@ -3198,10 +3197,6 @@ def test_apply_agent_two_outputs_persist_creates_two_documents(
     assert run["output_doc_ids"] == result.output_doc_ids
     assert len(run["output_doc_ids"]) == 2
     assert run["output_doc_ids"][0] == run["output_doc_id"]
-    assert run["result_artifacts"] == {
-        "brief": "SOURCE TEXT",
-        "table": "A -> a",
-    }
     assert "SOURCE TEXT" in (result.result_text or "")
     primary = get_document(db, run["output_doc_id"])
     companion = get_document(db, run["output_doc_ids"][1])
@@ -3210,6 +3205,9 @@ def test_apply_agent_two_outputs_persist_creates_two_documents(
     assert companion.title == f"{skill.name} — Таблица перекодировки"
     primary_text = (workspace / primary.path).read_text(encoding="utf-8")
     companion_text = (workspace / companion.path).read_text(encoding="utf-8")
+    assert list(run["result_artifacts"]) == ["brief", "table"]
+    assert run["result_artifacts"]["brief"] == primary_text
+    assert run["result_artifacts"]["table"] == companion_text
     input_stem = Path(get_document(db, input_doc_id).path).stem
     assert f"[[{input_stem}]]" in primary_text
     assert f"[[{Path(companion.path).stem}]]" in primary_text
@@ -3259,10 +3257,10 @@ def test_apply_agent_emit_output_overwrite_and_trace(
         )
     )
     assert result.status == "ok"
-    assert result.result_artifacts == {
-        "brief": "SOURCE TEXT",
-        "table": "A -> a",
-    }
+    arts = result.result_artifacts or {}
+    assert list(arts) == ["brief", "table"]
+    assert "SOURCE TEXT" in arts["brief"]
+    assert "A -> a" in arts["table"]
     calls = [
         entry
         for entry in result.trace.entries
@@ -3281,6 +3279,39 @@ def test_apply_agent_emit_output_overwrite_and_trace(
     ]
     assert [entry.data["result"]["chars"] for entry in results] == [3, 11, 6]
     assert all(entry.data["result"]["key"] for entry in results)
+
+
+def test_apply_agent_artifacts_follow_declared_order(
+    db: Database, workspace: Path
+) -> None:
+    skill = _two_output_agent()
+    skill_id = create_skill(
+        db, name=skill.name, description=skill.description, config=skill
+    )
+    input_doc_id = _ingest_input(db, workspace)
+    provider = ScriptProvider(
+        [
+            _emit_calls(("table", "A -> a"), ("brief", "SOURCE TEXT")),
+            _result("done"),
+        ]
+    )
+    result = asyncio.run(
+        apply_skill_collect(
+            provider=provider,
+            db=db,
+            workspace_dir=str(workspace),
+            skill=skill,
+            skill_id=skill_id,
+            input_doc_ids=[input_doc_id],
+            base_tools=build_document_tools(db, workspace),
+            persist=False,
+        )
+    )
+    assert result.status == "ok"
+    assert list(result.result_artifacts or {}) == ["brief", "table"]
+    assert (result.result_artifacts or {})["brief"] == "SOURCE TEXT"
+    assert (result.result_artifacts or {})["table"] == "A -> a"
+    assert result.result_text == "SOURCE TEXT"
 
 
 def test_apply_agent_missing_output_retries_then_fills(
@@ -3311,10 +3342,10 @@ def test_apply_agent_missing_output_retries_then_fills(
         )
     )
     assert result.status == "ok"
-    assert result.result_artifacts == {
-        "brief": "SOURCE TEXT",
-        "table": "A -> a",
-    }
+    arts = result.result_artifacts or {}
+    assert list(arts) == ["brief", "table"]
+    assert "SOURCE TEXT" in arts["brief"]
+    assert "A -> a" in arts["table"]
     verifies = _verify_entries(result.trace)
     assert len(verifies) == 2
     assert verifies[0].data["passed"] is False
@@ -3402,10 +3433,10 @@ def test_apply_agent_unknown_emit_key_rejected_by_schema(
         )
     )
     assert result.status == "ok"
-    assert result.result_artifacts == {
-        "brief": "SOURCE TEXT",
-        "table": "A -> a",
-    }
+    arts = result.result_artifacts or {}
+    assert list(arts) == ["brief", "table"]
+    assert "SOURCE TEXT" in arts["brief"]
+    assert "A -> a" in arts["table"]
     bad = [
         entry
         for entry in result.trace.entries
@@ -3505,10 +3536,10 @@ def test_apply_pipeline_intermediate_llm_has_no_emit_tool(
         )
     )
     assert result.status == "ok"
-    assert result.result_artifacts == {
-        "brief": "SOURCE TEXT",
-        "table": "A -> a",
-    }
+    arts = result.result_artifacts or {}
+    assert list(arts) == ["brief", "table"]
+    assert "SOURCE TEXT" in arts["brief"]
+    assert "A -> a" in arts["table"]
     assert "emit_output" not in _tool_names(provider.seen_tools[0])
 
 
@@ -3564,10 +3595,10 @@ def test_apply_pipeline_last_llm_registers_emit_output(
         )
     )
     assert result.status == "ok"
-    assert result.result_artifacts == {
-        "brief": "SOURCE TEXT",
-        "table": "A -> a",
-    }
+    arts = result.result_artifacts or {}
+    assert list(arts) == ["brief", "table"]
+    assert "SOURCE TEXT" in arts["brief"]
+    assert "A -> a" in arts["table"]
     assert "emit_output" in _tool_names(provider.seen_tools[0])
     start = next(
         msg.content or ""
