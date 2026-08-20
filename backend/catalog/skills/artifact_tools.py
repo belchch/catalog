@@ -247,8 +247,9 @@ def _try_finalize_output(
         # planner still needs to see the split before build, so report the
         # total element count across *every* declared collection key
         # (ADR-0025 Decision 5 defines the budget as the sum over all
-        # ``multiple`` keys, mirrored by ``_collection_document_count`` on
-        # the enforcement path), not just the first one, or a second
+        # ``multiple`` keys, mirrored by ``_collection_element_count`` /
+        # ``persist_run_outputs`` on the enforcement path), not just the first
+        # one, or a second
         # collection key's elements silently vanish from the dry-run count.
         collection_lengths = [
             len(artifacts[item.key])

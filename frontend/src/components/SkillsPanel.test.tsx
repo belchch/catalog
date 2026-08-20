@@ -172,4 +172,29 @@ describe('SkillsPanel apply buttons wording (CATALOG-156)', () => {
     const persist = screen.getByRole('button', { name: 'В док · несколько' })
     expect(persist.title).toContain('3 и более')
   })
+
+  it('marks a single-key collection output (outputs_count: 1) as multiple, not one document', () => {
+    renderPanel(
+      [
+        skill({
+          id: 's-single-collection',
+          name: 'ПоГлавам',
+          outputs_count: 1,
+          outputs_has_collection: true,
+          input_arity: 1,
+        }),
+      ],
+      [doc('d1', 'Документ A')],
+    )
+    selectSkill('ПоГлавам')
+    pickSingleDoc('Документ A')
+
+    const persist = screen.getByRole('button', { name: 'В док · несколько' })
+    expect(persist.title).not.toContain('новый документ')
+    expect(persist.title).toContain('1 и более')
+
+    const preview = screen.getByRole('button', { name: 'На экран' })
+    expect(preview.title).not.toContain('документ можно сохранить')
+    expect(preview.title).toContain('1 и более')
+  })
 })

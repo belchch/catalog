@@ -145,7 +145,11 @@ function declaredOutputs(skill: SkillOut): number {
 }
 
 function hasMultipleOutputs(skill: SkillOut): boolean {
-  return declaredOutputs(skill) > 1
+  // A collection output (``outputs_has_collection``) can produce more than
+  // one document even when only one output key is declared (e.g.
+  // ``split_by_chapters``: a single ``multiple`` key) — the declared-key
+  // count alone (``declaredOutputs``) misses that case.
+  return declaredOutputs(skill) > 1 || skill.outputs_has_collection === true
 }
 
 function outputsCountPhrase(skill: SkillOut): string {

@@ -257,31 +257,32 @@ def _output_persist_keys(
     return artifact_keys
 
 
-def _collection_document_count(
+def _collection_element_count(
     skill: SkillConfig, artifacts: dict[str, ArtifactValue], primary_text: str
 ) -> int:
-    """Count of documents ``persist_run_outputs`` would create for this
-    result, without allocating anything on disk.
+    """Sum of elements across every ``multiple`` (collection) key this
+    result would persist, without allocating anything on disk.
 
-    Mirrors the ``items`` construction in :func:`persist_run_outputs`
-    (one document per plain key, one per element of a ``multiple`` key's
-    list). Used to enforce ``MAX_COLLECTION_DOCUMENTS`` in "на экран" mode
-    too, not only when ``persist=True`` — ADR-0025 Decision 5 requires the
-    run itself to finish ``failed`` with an explicit reason, not just the
-    later ``POST /runs/{id}/save``.
+    This is the ``MAX_COLLECTION_DOCUMENTS`` budget as defined by ADR-0025
+    Decision 5 — "число документов, рождаемых элементами коллекций за один
+    прогон (сумма по всем ``multiple``-ключам)" — not the total document
+    count ``persist_run_outputs`` writes (which also includes one document
+    per plain, non-``multiple`` key and is uncapped). Mirrors the
+    ``collection_count`` accumulation in :func:`persist_run_outputs` and the
+    dry-run ``collection_lengths`` sum in
+    ``artifact_tools._try_finalize_output``. Used to enforce the same limit
+    in "на экран" mode too, not only when ``persist=True`` — ADR-0025
+    Decision 5 requires the run itself to finish ``failed`` with an explicit
+    reason, not just the later ``POST /runs/{id}/save``.
     """
     declared = {item.key: item for item in skill.outputs}
     persist_keys = _output_persist_keys(skill, artifacts, primary_text)
-    if not persist_keys:
-        return 1
     count = 0
     for key in persist_keys:
         item = declared.get(key)
         value = artifacts[key]
         if item is not None and item.multiple and isinstance(value, list):
             count += len(value)
-        else:
-            count += 1
     return count
 
 
@@ -361,6 +362,13 @@ def persist_run_outputs(
     workspace_path = Path(workspace_dir)
     title = primary_title or _primary_result_title(skill, docs)
     items: list[tuple[str, str, str]] = []
+    # ADR-0025 Decision 5: the budget is the sum of elements across
+    # ``multiple`` (collection) keys only — NOT the total document count
+    # (``len(items)``), which also includes one document per plain key and
+    # is uncapped. Mirrors ``_collection_element_count`` (preview-mode
+    # enforcement) and the dry-run sum in
+    # ``artifact_tools._try_finalize_output``.
+    collection_count = 0
     declared = {item.key: item for item in skill.outputs}
     persist_keys = _output_persist_keys(skill, artifacts, primary_text)
     if persist_keys:
@@ -376,6 +384,7 @@ def persist_run_outputs(
                 # element 0 (a pure ``multiple`` primary must not name its
                 # first chapter after the input document).
                 elements = value if isinstance(value, list) else [value]
+                collection_count += len(elements)
                 for pos, element_text in enumerate(elements):
                     item_title = _collection_item_title(
                         skill, item, key, element_text, pos
@@ -396,11 +405,11 @@ def persist_run_outputs(
     else:
         items.append(("", title, primary_text))
 
-    if len(items) > MAX_COLLECTION_DOCUMENTS:
+    if collection_count > MAX_COLLECTION_DOCUMENTS:
         # ADR-0025 (Decision 5): checked before any allocate_rel_path/touch
         # below so an over-limit run leaves no partial output on disk.
         raise CollectionLimitError(
-            f"too many output documents: {len(items)} "
+            f"too many collection documents: {collection_count} "
             f"(max {MAX_COLLECTION_DOCUMENTS})"
         )
 
@@ -1627,12 +1636,12 @@ async def _apply_core(
                         "apply_skill persisted output_doc_id=%s", output_doc_id
                     )
                 else:
-                    doc_count = _collection_document_count(
+                    collection_count = _collection_element_count(
                         skill, last_artifacts, last_text or ""
                     )
-                    if doc_count > MAX_COLLECTION_DOCUMENTS:
+                    if collection_count > MAX_COLLECTION_DOCUMENTS:
                         raise CollectionLimitError(
-                            f"too many output documents: {doc_count} "
+                            f"too many collection documents: {collection_count} "
                             f"(max {MAX_COLLECTION_DOCUMENTS})"
                         )
             except CollectionLimitError as exc:

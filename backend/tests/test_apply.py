@@ -4031,7 +4031,7 @@ def test_apply_script_collection_over_limit_fails_before_any_write(
     errors = [e for e in result.trace.entries if e.kind == "error"]
     assert errors
     assert any(
-        "too many output documents" in str(e.data.get("error", ""))
+        "too many collection documents" in str(e.data.get("error", ""))
         for e in errors
     )
     results_dir = workspace / "results"
@@ -4076,7 +4076,7 @@ def test_apply_script_collection_over_limit_fails_in_preview_mode_too(
     errors = [e for e in result.trace.entries if e.kind == "error"]
     assert errors
     assert any(
-        "too many output documents" in str(e.data.get("error", ""))
+        "too many collection documents" in str(e.data.get("error", ""))
         for e in errors
     )
     results_dir = workspace / "results"
@@ -4089,6 +4089,57 @@ def test_apply_script_collection_over_limit_fails_in_preview_mode_too(
     # be inspected even though it was refused.
     assert run["result_text"]
     assert len(run["result_artifacts"]["chapters"]) == MAX_COLLECTION_DOCUMENTS + 1
+
+
+def test_apply_script_collection_with_companion_key_at_exactly_the_limit_succeeds(
+    db: Database, workspace: Path
+) -> None:
+    """ADR-0025 Decision 5: the budget is the sum of elements across
+    ``multiple`` keys only, NOT the total document count. A skill declaring
+    a plain companion key alongside a collection key (the canonical
+    ``{index, chapters}`` shape) must succeed with exactly
+    ``MAX_COLLECTION_DOCUMENTS`` collection elements even though the total
+    document count (companion + elements) is one over that number."""
+    from catalog.skills.config import MAX_COLLECTION_DOCUMENTS
+
+    code = (
+        f"chapters = [str(i) for i in range({MAX_COLLECTION_DOCUMENTS})]\n"
+        "result = {'index': 'toc', 'chapters': chapters}\n"
+    )
+    skill = SkillConfig(
+        name="chaptered-with-index",
+        description="collection output with companion key",
+        system_prompt="",
+        allowed_tools=[],
+        model="test/model",
+        kind="script",
+        code=code,
+        outputs=[
+            SkillOutput(key="index", description="Индекс"),
+            SkillOutput(key="chapters", description="Глава", multiple=True),
+        ],
+    )
+    skill_id = create_skill(
+        db, name=skill.name, description=skill.description, config=skill
+    )
+    input_doc_id = _ingest_input(db, workspace)
+    result = asyncio.run(
+        apply_skill_collect(
+            provider=ScriptProvider([]),
+            db=db,
+            workspace_dir=str(workspace),
+            skill=skill,
+            skill_id=skill_id,
+            input_doc_ids=[input_doc_id],
+            base_tools=build_document_tools(db, workspace),
+        )
+    )
+    assert result.status == "ok"
+    assert result.output_doc_ids is not None
+    # index (1) + chapters (MAX_COLLECTION_DOCUMENTS) documents in total —
+    # over the naive "total document count" reading of the limit, but at
+    # exactly the ADR-0025 collection-elements budget.
+    assert len(result.output_doc_ids) == MAX_COLLECTION_DOCUMENTS + 1
 
 
 def test_apply_script_list_without_outputs_still_one_document(
@@ -4760,7 +4811,7 @@ def test_save_run_result_maps_collection_limit_error_to_409(client) -> None:
 
     resp = client.post(f"/runs/{run_id}/save")
     assert resp.status_code == 409
-    assert "too many output documents" in resp.json()["detail"]
+    assert "too many collection documents" in resp.json()["detail"]
     # No partial write — the run still has no output document.
     saved = client.get(f"/runs/{run_id}").json()
     assert saved["output_doc_id"] is None
