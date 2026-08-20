@@ -40,7 +40,14 @@ function itemsOf(a: RunArtifact): string[] {
   return Array.isArray(a.text) ? a.text : [a.text]
 }
 
-const ITEM_TITLE_RE = /^\s{0,3}#{1,6}\s+(.+)$/m
+// Mirrors the backend's ``_MD_HEADING_RE`` (apply.py, ADR-0025 Decision 7)
+// exactly: the `#` must be at column 0 (no leading-space tolerance) and only
+// space/tab (never a newline) may separate it from the heading text, so the
+// on-screen title always agrees with the title of the document "Сохранить"
+// creates for the same element. A CommonMark-correct `\s{0,3}#{1,6}\s+`
+// looked more permissive but let `\s+` swallow the newline after a bare
+// `#`, silently promoting the *next* line to the title.
+const ITEM_TITLE_RE = /^#{1,6}[ \t]+(.+)$/m
 const ITEM_TITLE_MAX_LEN = 80
 
 function itemTitle(text: string, index: number): string {
@@ -477,7 +484,7 @@ export function RunView({
               >
                 {Array.isArray(active.text) ? (
                   <CollectionPanel
-                    key={`${runId ?? ''} ${active.key} ${artifactKeys}`}
+                    key={`${runId ?? ''}\0${active.key}\0${artifactKeys}`}
                     items={active.text}
                     artifactKey={active.key}
                   />

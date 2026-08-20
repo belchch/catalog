@@ -144,6 +144,21 @@ describe('OutputsList — deferred focus model on mutation (CATALOG-157)', () =>
     )
   })
 
+  it('focuses the ↑ button of the row that moved to index-1 after ↑ (not disabled at the boundary)', () => {
+    render(
+      <Harness
+        initial={[row('brief', 'Резюме'), row('table', 'Таблица'), row('list', 'Список')]}
+      />,
+    )
+    fireEvent.click(screen.getByRole('button', { name: 'Поднять выход list' }))
+    // list moved from index 2 to index 1 — its ↑ button is not disabled
+    // there (index 0 is the only disabled position), so focus lands on it
+    // directly, no fallback to ↓ needed.
+    const upButton = screen.getByRole('button', { name: 'Поднять выход list' }) as HTMLButtonElement
+    expect(upButton.disabled).toBe(false)
+    expect(document.activeElement).toBe(upButton)
+  })
+
   it('focuses the ✕ of the row at min(index, newLength-1) after removing a middle row', () => {
     render(
       <Harness

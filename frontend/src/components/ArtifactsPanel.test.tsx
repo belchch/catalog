@@ -46,6 +46,7 @@ function tryResult(extra: Partial<ScriptTryResult> = {}): ScriptTryResult {
     output_preview: 'out',
     output_len: 3,
     output_kind: 'str',
+    output_count: null,
     duration_ms: 128,
     verify: null,
     line_no: null,

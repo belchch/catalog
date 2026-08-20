@@ -103,6 +103,66 @@ describe('SkillSettingsModal outputs block', () => {
     expect(screen.getAllByText('основной')).toHaveLength(1)
   })
 
+  it('renders the "несколько документов" checkbox checked for a multiple: true output', async () => {
+    const preview = basePreview({
+      outputs: [
+        { key: 'summary', description: 'Краткое резюме' },
+        { key: 'details', description: 'Подробности', multiple: true },
+      ],
+    })
+    renderModal(preview)
+    await waitForModelsLoaded()
+
+    const checkboxes = screen.getAllByRole('checkbox', { name: 'несколько документов' })
+    expect(checkboxes).toHaveLength(2)
+    expect((checkboxes[0] as HTMLInputElement).checked).toBe(false)
+    expect((checkboxes[1] as HTMLInputElement).checked).toBe(true)
+  })
+
+  it('round-trips a multiple: true output through Save unchanged', async () => {
+    // Regression: initialOutputs -> OutputsList -> outputsPayload must not
+    // silently drop the `multiple` flag, or a saved collection skill would
+    // be downgraded to a plain single-document output (and its config_hash
+    // would change, ADR-0025 Decision 1).
+    const preview = basePreview({
+      outputs: [{ key: 'chapters', description: 'Глава', multiple: true }],
+    })
+    renderModal(preview)
+    await waitForModelsLoaded()
+
+    vi.mocked(configureSkill).mockResolvedValue(builtFrom(preview))
+    fireEvent.click(screen.getByRole('button', { name: 'Сохранить' }))
+    await waitFor(() => expect(configureSkill).toHaveBeenCalledTimes(1))
+    expect(configureSkill).toHaveBeenCalledWith(
+      'skill-1',
+      expect.objectContaining({
+        outputs: [{ key: 'chapters', description: 'Глава', multiple: true }],
+      }),
+    )
+  })
+
+  it('toggling the checkbox on a plain output adds multiple: true to the Save payload', async () => {
+    const preview = basePreview({
+      outputs: [{ key: 'summary', description: 'Краткое резюме' }],
+    })
+    renderModal(preview)
+    await waitForModelsLoaded()
+
+    const checkbox = screen.getByRole('checkbox', { name: 'несколько документов' })
+    fireEvent.click(checkbox)
+    expect((checkbox as HTMLInputElement).checked).toBe(true)
+
+    vi.mocked(configureSkill).mockResolvedValue(builtFrom(preview))
+    fireEvent.click(screen.getByRole('button', { name: 'Сохранить' }))
+    await waitFor(() => expect(configureSkill).toHaveBeenCalledTimes(1))
+    expect(configureSkill).toHaveBeenCalledWith(
+      'skill-1',
+      expect.objectContaining({
+        outputs: [{ key: 'summary', description: 'Краткое резюме', multiple: true }],
+      }),
+    )
+  })
+
   it('shows the empty-state hint (not an error) and saves an unchanged empty list', async () => {
     const preview = basePreview({ outputs: [] })
     const { onSave, onClose } = renderModal(preview)

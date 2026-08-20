@@ -917,7 +917,8 @@ export interface ScriptTryResult {
   input_len: number
   output_preview: string
   output_len: number
-  output_kind: 'str' | 'list' | 'dict' | null
+  output_kind: 'str' | 'list' | 'dict' | 'collection' | null
+  output_count: number | null
   duration_ms: number
   verify: ScriptTryVerify | null
   line_no: number | null

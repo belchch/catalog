@@ -103,6 +103,7 @@ describe('usePlannerSession', () => {
       output_preview: '',
       output_len: 0,
       output_kind: 'str',
+      output_count: null,
       duration_ms: 1,
       verify: null,
       line_no: null,

@@ -369,19 +369,17 @@ def persist_run_outputs(
             value = artifacts[key]
             if item is not None and item.multiple:
                 # ADR-0025 (Decision 2/7): a collection key expands into N
-                # documents, one per element. The first element of the first
-                # persist key inherits the run-level title (today's
-                # ``index == 0`` semantics); every other element titles
-                # itself from its own first markdown heading, else a
-                # positional fallback.
+                # documents, one per element. Every element — including the
+                # first element of the first persist key — titles itself
+                # from its own first markdown heading, else a positional
+                # fallback; there is no run-level-title exception for
+                # element 0 (a pure ``multiple`` primary must not name its
+                # first chapter after the input document).
                 elements = value if isinstance(value, list) else [value]
                 for pos, element_text in enumerate(elements):
-                    if index == 0 and pos == 0:
-                        item_title = title
-                    else:
-                        item_title = _collection_item_title(
-                            skill, item, key, element_text, pos
-                        )
+                    item_title = _collection_item_title(
+                        skill, item, key, element_text, pos
+                    )
                     items.append((key, item_title, element_text))
             else:
                 # Defensive: a stale/undeclared key from an earlier run may
@@ -402,7 +400,7 @@ def persist_run_outputs(
         # ADR-0025 (Decision 5): checked before any allocate_rel_path/touch
         # below so an over-limit run leaves no partial output on disk.
         raise CollectionLimitError(
-            f"too many collection documents: {len(items)} "
+            f"too many output documents: {len(items)} "
             f"(max {MAX_COLLECTION_DOCUMENTS})"
         )
 
@@ -1051,6 +1049,17 @@ async def _apply_core(
                     )
                     llm_attempts = skill.max_retries + 1 if step_emits else 1
                     for llm_try in range(llm_attempts):
+                        # See the matching comment in the agent branch above:
+                        # a ``multiple`` key's bucket accumulates across
+                        # calls, so it must be dropped before each retry
+                        # re-runs the exchange or the retry's re-emission
+                        # duplicates the previous attempt's elements. Plain
+                        # keys are left as-is (they overwrite on re-emission
+                        # and may legitimately carry over unchanged).
+                        if step_emits:
+                            for _item in skill.outputs:
+                                if _item.multiple:
+                                    step_artifacts.pop(_item.key, None)
                         text = None
                         capped = False
                         before = len(trace.entries)
@@ -1475,6 +1484,20 @@ async def _apply_core(
 
             # max_retries = number of retries after the first attempt.
             for r in range(skill.max_retries + 1):
+                # ``register_emit_output`` accumulates a ``multiple`` key by
+                # appending to a list (emit_output.py) rather than
+                # overwriting, so a stale bucket from a failed attempt must
+                # be dropped before the retry re-runs the whole exchange —
+                # otherwise the retry's re-emission stacks on top of the
+                # previous attempt's elements instead of replacing them
+                # (silent duplicate documents on persist). Plain (non-
+                # ``multiple``) keys are intentionally left in place: they
+                # overwrite on re-emission already, and a retry's model
+                # reply commonly re-sends only the key(s) verify flagged,
+                # relying on an already-satisfied plain key to carry over.
+                for _item in skill.outputs:
+                    if _item.multiple:
+                        emit_artifacts.pop(_item.key, None)
                 text: str | None = None
                 capped = False
                 # Drive the agent loop directly: forward each inner event to the
@@ -1609,7 +1632,7 @@ async def _apply_core(
                     )
                     if doc_count > MAX_COLLECTION_DOCUMENTS:
                         raise CollectionLimitError(
-                            f"too many collection documents: {doc_count} "
+                            f"too many output documents: {doc_count} "
                             f"(max {MAX_COLLECTION_DOCUMENTS})"
                         )
             except CollectionLimitError as exc:

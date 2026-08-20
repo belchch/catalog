@@ -3666,6 +3666,75 @@ def test_apply_pipeline_last_llm_registers_emit_output(
     assert "brief: Текст" in start
 
 
+def test_apply_pipeline_llm_retry_does_not_duplicate_already_emitted_elements(
+    db: Database, workspace: Path
+) -> None:
+    """Same defect as the agent branch, in the pipeline ``llm`` step: the
+    step's emit sink is declared once outside the retry loop, so a stale
+    ``multiple`` bucket from a failed attempt must be cleared before the
+    retry re-emits, or ``chapters`` doubles up."""
+    skill = SkillConfig(
+        name="pipe-last-llm-collection",
+        description="script then llm collection output",
+        system_prompt="",
+        allowed_tools=[],
+        model="test/model",
+        max_retries=1,
+        max_iterations=8,
+        kind="pipeline",
+        outputs=[
+            SkillOutput(key="index", description="Оглавление"),
+            SkillOutput(key="chapters", description="Глава", multiple=True),
+        ],
+        steps=[
+            PipelineStep(
+                id="prep",
+                type="script",
+                input="documents",
+                code="result = document\n",
+            ),
+            PipelineStep(
+                id="emit",
+                type="llm",
+                input="previous",
+                system_prompt="emit",
+                allowed_tools=["read_document"],
+            ),
+        ],
+    )
+    skill_id = create_skill(
+        db, name=skill.name, description=skill.description, config=skill
+    )
+    input_doc_id = _ingest_input(db, workspace)
+    provider = ScriptProvider(
+        [
+            _emit_calls(("chapters", "# Глава 1\nA")),
+            _emit_calls(("chapters", "# Глава 2\nB")),
+            _result("nothing else"),  # first attempt: index stays missing
+            _emit_calls(("index", "Оглавление")),
+            _emit_calls(("chapters", "# Глава 1\nA")),
+            _emit_calls(("chapters", "# Глава 2\nB")),
+            _result("done"),
+        ]
+    )
+    result = asyncio.run(
+        apply_skill_collect(
+            provider=provider,
+            db=db,
+            workspace_dir=str(workspace),
+            skill=skill,
+            skill_id=skill_id,
+            input_doc_ids=[input_doc_id],
+            base_tools=build_document_tools(db, workspace),
+        )
+    )
+    assert result.status == "ok"
+    arts = result.result_artifacts or {}
+    assert len(arts["chapters"]) == 2
+    assert result.output_doc_ids is not None
+    assert len(result.output_doc_ids) == 3  # index + 2 chapters, not 5
+
+
 def test_apply_pipeline_last_llm_single_output_has_no_emit_tool(
     db: Database, workspace: Path
 ) -> None:
@@ -3962,7 +4031,7 @@ def test_apply_script_collection_over_limit_fails_before_any_write(
     errors = [e for e in result.trace.entries if e.kind == "error"]
     assert errors
     assert any(
-        "too many collection documents" in str(e.data.get("error", ""))
+        "too many output documents" in str(e.data.get("error", ""))
         for e in errors
     )
     results_dir = workspace / "results"
@@ -4007,7 +4076,7 @@ def test_apply_script_collection_over_limit_fails_in_preview_mode_too(
     errors = [e for e in result.trace.entries if e.kind == "error"]
     assert errors
     assert any(
-        "too many collection documents" in str(e.data.get("error", ""))
+        "too many output documents" in str(e.data.get("error", ""))
         for e in errors
     )
     results_dir = workspace / "results"
@@ -4177,6 +4246,49 @@ def test_apply_agent_empty_collection_retries_then_succeeds(
     assert any(not e.data.get("passed", True) for e in verify_entries)
 
 
+def test_apply_agent_retry_does_not_duplicate_already_emitted_elements(
+    db: Database, workspace: Path
+) -> None:
+    """Regression: attempt 1 emits both ``chapters`` elements but forgets
+    ``index`` -> verify fails on the missing key -> the retry re-emits
+    ``index`` *and* re-emits the same two chapters (the model's expected
+    "исправь и повтори" behaviour). The stale bucket from attempt 1 must be
+    cleared before the retry, or ``chapters`` ends up with 4 elements (2
+    duplicated) instead of 2, and persist writes duplicate documents."""
+    skill = _index_and_chapters_agent(max_retries=1, max_iterations=8)
+    skill_id = create_skill(
+        db, name=skill.name, description=skill.description, config=skill
+    )
+    input_doc_id = _ingest_input(db, workspace)
+    provider = ScriptProvider(
+        [
+            _emit_calls(("chapters", "# Глава 1\nA")),
+            _emit_calls(("chapters", "# Глава 2\nB")),
+            _result("nothing else"),  # first attempt: index stays missing
+            _emit_calls(("index", "Оглавление")),
+            _emit_calls(("chapters", "# Глава 1\nA")),
+            _emit_calls(("chapters", "# Глава 2\nB")),
+            _result("done"),
+        ]
+    )
+    result = asyncio.run(
+        apply_skill_collect(
+            provider=provider,
+            db=db,
+            workspace_dir=str(workspace),
+            skill=skill,
+            skill_id=skill_id,
+            input_doc_ids=[input_doc_id],
+            base_tools=build_document_tools(db, workspace),
+        )
+    )
+    assert result.status == "ok"
+    arts = result.result_artifacts or {}
+    assert len(arts["chapters"]) == 2
+    assert result.output_doc_ids is not None
+    assert len(result.output_doc_ids) == 3  # index + 2 chapters, not 5
+
+
 def test_apply_agent_capped_reports_collected_element_count(
     db: Database, workspace: Path
 ) -> None:
@@ -4274,6 +4386,14 @@ def test_apply_agent_primary_collection_persists_n_docs_and_joins_text(
     assert "Глава 1" in (result.result_text or "")
     assert "Глава 2" in (result.result_text or "")
     assert "\n\n---\n\n" in (result.result_text or "")
+    # ADR-0025 (Decision 7): no exception for element 0 of a pure ``multiple``
+    # primary — every element titles itself from its own markdown heading,
+    # not from the run-level title (which would otherwise name it after the
+    # input document).
+    first_doc = get_document(db, result.output_doc_ids[0])
+    second_doc = get_document(db, result.output_doc_ids[1])
+    assert first_doc is not None and first_doc.title == "Глава 1"
+    assert second_doc is not None and second_doc.title == "Глава 2"
 
 
 def test_apply_pipeline_intermediate_list_only_final_step_persists(
@@ -4535,11 +4655,14 @@ def test_split_by_chapters_with_index_preview_then_save(client) -> None:
     does — there is no HTTP apply-stream test helper), but the save step
     goes through the real ``POST /runs/{run_id}/save`` endpoint rather than
     re-implementing it, so the endpoint's own behaviour — the already-saved
-    409 guard, input-document resolution, the ``CollectionLimitError`` ->
-    409 mapping, and the ``DocumentOut`` response — is exercised for real
-    (plan 07 п.6). Uses ``client`` (the full FastAPI app + its own workspace
-    db) rather than this module's standalone ``db``/``workspace`` fixtures,
-    which are not wired to any HTTP endpoint.
+    409 guard, input-document resolution, and the ``DocumentOut`` response —
+    is exercised for real (plan 07 п.6). This fixture stays well under
+    ``MAX_COLLECTION_DOCUMENTS`` on purpose (it is the happy path); the
+    ``CollectionLimitError`` -> 409 mapping at runs.py has its own dedicated
+    test, ``test_save_run_result_maps_collection_limit_error_to_409`` below.
+    Uses ``client`` (the full FastAPI app + its own workspace db) rather than
+    this module's standalone ``db``/``workspace`` fixtures, which are not
+    wired to any HTTP endpoint.
     """
     db: Database = client.app.state.workspace_manager.current
     workspace = Path(client.app.state.workspace)
@@ -4595,6 +4718,53 @@ def test_split_by_chapters_with_index_preview_then_save(client) -> None:
     # The already-saved guard (409) — a second save must not duplicate.
     resp2 = client.post(f"/runs/{run_id}/save")
     assert resp2.status_code == 409
+
+
+def test_save_run_result_maps_collection_limit_error_to_409(client) -> None:
+    """The ``CollectionLimitError`` -> 409 mapping at runs.py:182-183, driven
+    through the real ``POST /runs/{run_id}/save`` endpoint (not a unit call
+    to ``persist_run_outputs``). A run that finished ``ok`` in "на экран"
+    mode always stays under ``MAX_COLLECTION_DOCUMENTS`` itself (apply.py
+    enforces the same cap before the run can report ``ok`` — ADR-0025
+    Decision 5), so to reach this specific endpoint code path the run row's
+    ``result_artifacts`` is written directly, the same way
+    ``test_get_run_reads_collection_result_artifacts_as_list`` seeds a run
+    without going through ``apply_skill_collect``."""
+    import json as _json
+
+    from catalog.skills.config import MAX_COLLECTION_DOCUMENTS
+    from catalog.skills.repo_run import create_run
+
+    db: Database = client.app.state.workspace_manager.current
+    workspace = Path(client.app.state.workspace)
+    skill = _sole_collection_agent()
+    skill_id = create_skill(
+        db, name=skill.name, description=skill.description, config=skill,
+        status="committed",
+    )
+    input_doc_id = _ingest_input(db, workspace)
+    run_id = create_run(
+        db, skill_id=skill_id, session_id=None, input_doc_ids=[input_doc_id]
+    )
+    chapters = [f"# Глава {i}\ntext" for i in range(MAX_COLLECTION_DOCUMENTS + 1)]
+    with db.connect() as conn:
+        conn.execute(
+            "UPDATE skill_run SET status = 'ok', result_text = ?, "
+            "result_artifacts = ? WHERE id = ?",
+            (
+                "\n\n---\n\n".join(chapters),
+                _json.dumps({"chapters": chapters}, ensure_ascii=False),
+                run_id,
+            ),
+        )
+
+    resp = client.post(f"/runs/{run_id}/save")
+    assert resp.status_code == 409
+    assert "too many output documents" in resp.json()["detail"]
+    # No partial write — the run still has no output document.
+    saved = client.get(f"/runs/{run_id}").json()
+    assert saved["output_doc_id"] is None
+    assert saved["output_doc_ids"] == []
 
 
 def test_split_by_chapters_with_index_visible_before_run(db: Database) -> None:

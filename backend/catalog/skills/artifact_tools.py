@@ -224,24 +224,39 @@ def _try_finalize_output(
                     len(primary_value),
                 )
             return primary, "dict", primary, None
+        declared_items = {item.key: item for item in outputs}
+        # Every ``multiple`` key gets the same ``[i/N]``-marked rendering as
+        # the single-key branch above (``_collection_preview``), not the
+        # unmarked ``_result_as_text`` join — otherwise the canonical
+        # {index, chapters} shape (a plain key alongside a collection key)
+        # silently took a different, marker-less preview format from a
+        # sole-collection output.
         preview = "\n\n---\n\n".join(
-            f"{key}:\n{_result_as_text(artifacts[key])}" for key in artifacts
+            f"{key}:\n"
+            + (
+                _collection_preview(artifacts[key])
+                if (item := declared_items.get(key)) is not None
+                and item.multiple
+                and isinstance(artifacts[key], list)
+                else _result_as_text(artifacts[key])
+            )
+            for key in artifacts
         )
         # A dry-run result can carry a collection alongside companion keys
         # (e.g. split_by_chapters_with_index: {index, chapters[]}) — the
         # planner still needs to see the split before build, so report the
-        # first declared collection key's element count rather than falling
-        # back to a plain "dict" (ADR-0025 / CATALOG-153 п.10).
-        collection_value = next(
-            (
-                artifacts[item.key]
-                for item in outputs
-                if item.multiple and isinstance(artifacts.get(item.key), list)
-            ),
-            None,
-        )
-        if collection_value is not None:
-            return preview, "collection", primary, len(collection_value)
+        # total element count across *every* declared collection key
+        # (ADR-0025 Decision 5 defines the budget as the sum over all
+        # ``multiple`` keys, mirrored by ``_collection_document_count`` on
+        # the enforcement path), not just the first one, or a second
+        # collection key's elements silently vanish from the dry-run count.
+        collection_lengths = [
+            len(artifacts[item.key])
+            for item in outputs
+            if item.multiple and isinstance(artifacts.get(item.key), list)
+        ]
+        if collection_lengths:
+            return preview, "collection", primary, sum(collection_lengths)
         return preview, "dict", primary, None
     if outputs and dict_allowed:
         raise ValueError("skill declared outputs but script did not return a dict")
