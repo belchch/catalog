@@ -141,4 +141,27 @@ describe('useRunStream', () => {
     expect(result.current.resultText).toBe('PRIMARY')
     expect(result.current.outputDocIds).toEqual(['doc-1', 'doc-2'])
   })
+
+  it('reads a collection artifact from the dict-shaped result_artifacts (WS wire shape)', () => {
+    const { result } = renderHook(() => useRunStream('run-1'))
+    act(() => {
+      captured.onEvent?.({
+        type: 'finish',
+        status: 'ok',
+        output_doc_id: 'doc-1',
+        output_doc_ids: ['doc-1', 'doc-2', 'doc-3'],
+        result_text: 'ignored-when-artifacts-present',
+        result_artifacts: {
+          index: 'INDEX',
+          chapters: ['Ch1', 'Ch2'],
+        },
+      })
+    })
+    expect(result.current.artifacts).toEqual([
+      { key: 'index', text: 'INDEX' },
+      { key: 'chapters', text: ['Ch1', 'Ch2'] },
+    ])
+    expect(result.current.resultText).toBe('INDEX')
+    expect(result.current.outputDocIds).toEqual(['doc-1', 'doc-2', 'doc-3'])
+  })
 })

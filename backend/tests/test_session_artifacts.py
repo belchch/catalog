@@ -1600,6 +1600,41 @@ def test_try_skill_script_collection_output_shows_kind_and_count(
     assert "Глава 3" in result["output_preview"]
 
 
+def test_try_skill_script_collection_output_with_companion_shows_kind_and_count(
+    mem_db: Database, tmp_path: Path
+) -> None:
+    """A collection alongside a companion key (index + chapters, ADR-0025's
+    canonical shape) must still surface as output_kind="collection" with the
+    element count — not degrade to output_kind="dict" the moment there is a
+    second key (CATALOG-153 п.10)."""
+    session_id = create_session(mem_db)
+    doc = ingest_file(mem_db, tmp_path, filename="note.md", content=b"hello world")
+    attach_documents(mem_db, session_id, [doc.id])
+    tools = _artifact_try_tools(mem_db, session_id, workspace=str(tmp_path))
+    _, save_script = tools.get("save_skill_script")
+    _, set_outputs = tools.get("set_skill_outputs")
+    _, try_fn = tools.get("try_skill_script")
+    code = (
+        'result = {"index": "# Индекс\\n1. Глава 1\\n2. Глава 2\\n3. Глава 3", '
+        '"chapters": ["# Глава 1\\nA", "# Глава 2\\nB", "# Глава 3\\nC"]}\n'
+    )
+
+    async def _run():
+        await set_outputs(
+            outputs=[
+                {"key": "index", "description": "Индекс"},
+                {"key": "chapters", "description": "Глава", "multiple": True},
+            ]
+        )
+        await save_script(code=code)
+        return await try_fn()
+
+    result = asyncio.run(_run())
+    assert result["ok"] is True
+    assert result["output_kind"] == "collection"
+    assert result["output_count"] == 3
+
+
 def test_try_skill_script_dict_without_outputs_fails(
     mem_db: Database, tmp_path: Path
 ) -> None:

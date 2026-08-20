@@ -257,6 +257,34 @@ def _output_persist_keys(
     return artifact_keys
 
 
+def _collection_document_count(
+    skill: SkillConfig, artifacts: dict[str, ArtifactValue], primary_text: str
+) -> int:
+    """Count of documents ``persist_run_outputs`` would create for this
+    result, without allocating anything on disk.
+
+    Mirrors the ``items`` construction in :func:`persist_run_outputs`
+    (one document per plain key, one per element of a ``multiple`` key's
+    list). Used to enforce ``MAX_COLLECTION_DOCUMENTS`` in "на экран" mode
+    too, not only when ``persist=True`` — ADR-0025 Decision 5 requires the
+    run itself to finish ``failed`` with an explicit reason, not just the
+    later ``POST /runs/{id}/save``.
+    """
+    declared = {item.key: item for item in skill.outputs}
+    persist_keys = _output_persist_keys(skill, artifacts, primary_text)
+    if not persist_keys:
+        return 1
+    count = 0
+    for key in persist_keys:
+        item = declared.get(key)
+        value = artifacts[key]
+        if item is not None and item.multiple and isinstance(value, list):
+            count += len(value)
+        else:
+            count += 1
+    return count
+
+
 def _ordered_artifacts(
     skill: SkillConfig, artifacts: dict[str, ArtifactValue]
 ) -> dict[str, ArtifactValue]:
@@ -764,6 +792,12 @@ async def _apply_core(
     last_capped = False
     passed = False
     deadline_stopped = False
+    collection_limit_exceeded = False
+    # Attempt number surfaced in a later _record_outputs_error call for the
+    # collection-limit check (shared tail, all skill.kind values): 1 for
+    # script (single deterministic attempt), the step count for pipeline,
+    # the current retry for agent — set inside each branch below.
+    outputs_attempt = 1
     pipeline_halted = False
     output_doc_id: str | None = None
     output_doc_ids: list[str] = []
@@ -870,6 +904,7 @@ async def _apply_core(
                     passed = result.passed
         elif skill.kind == "pipeline":
             current: PipelineValue | None = None
+            outputs_attempt = max(len(skill.steps), 1)
             for index, step in enumerate(skill.steps):
                 if _deadline_reached(trace, index + 1):
                     deadline_stopped = True
@@ -1468,6 +1503,7 @@ async def _apply_core(
 
                 last_text = text
                 last_capped = capped
+                outputs_attempt = r + 1
                 agent_emits = uses_emit_output(skill.outputs)
                 if agent_emits:
                     last_artifacts = _ordered_artifacts(skill, emit_artifacts)
@@ -1541,31 +1577,51 @@ async def _apply_core(
 
         # 5. Persist result on success (CATALOG-18: only in "persist" mode —
         # "preview" mode leaves the result on screen, materialized later via
-        # POST /runs/{id}/save if the user chooses to).
-        if passed and persist and docs:
+        # POST /runs/{id}/save if the user chooses to). Either way, the
+        # collection-document cap is enforced here, not only inside
+        # persist_run_outputs — ADR-0025 Decision 5 requires the run itself
+        # to finish failed with an explicit reason, so a "на экран" run must
+        # not look successful only to have the refusal surface later as a
+        # 409 from the save endpoint with nothing left to recover. ``docs``
+        # empty means a nested skill-as-tool call (ADR-0019 texts_mode),
+        # which never persists and passes its result up as text, not
+        # documents — the cap does not apply there.
+        if passed and docs:
             try:
-                output_doc_id, output_doc_ids, last_text, last_artifacts = (
-                    persist_run_outputs(
-                        db,
-                        workspace_dir,
-                        skill=skill,
-                        docs=docs,
-                        session_id=session_id,
-                        primary_text=last_text or "",
-                        artifacts=last_artifacts,
+                if persist:
+                    output_doc_id, output_doc_ids, last_text, last_artifacts = (
+                        persist_run_outputs(
+                            db,
+                            workspace_dir,
+                            skill=skill,
+                            docs=docs,
+                            session_id=session_id,
+                            primary_text=last_text or "",
+                            artifacts=last_artifacts,
+                        )
                     )
-                )
-                logger.info(
-                    "apply_skill persisted output_doc_id=%s", output_doc_id
-                )
+                    logger.info(
+                        "apply_skill persisted output_doc_id=%s", output_doc_id
+                    )
+                else:
+                    doc_count = _collection_document_count(
+                        skill, last_artifacts, last_text or ""
+                    )
+                    if doc_count > MAX_COLLECTION_DOCUMENTS:
+                        raise CollectionLimitError(
+                            f"too many collection documents: {doc_count} "
+                            f"(max {MAX_COLLECTION_DOCUMENTS})"
+                        )
             except CollectionLimitError as exc:
-                # ADR-0025 (Decision 5): fail-closed, no partial output — the
-                # limit check inside persist_run_outputs already ran before
-                # any file was written.
-                _record_outputs_error(trace, 1, str(exc))
+                # Fail-closed. ``result_text``/``result_artifacts`` are kept
+                # (not wiped) so the already-computed result can still be
+                # inspected — matches the invariant a few lines below that
+                # result_text is stored regardless of persist. A persist-mode
+                # failure here rolled back before any file was written; a
+                # preview-mode failure never wrote anything to begin with.
+                _record_outputs_error(trace, outputs_attempt, str(exc))
                 passed = False
-                last_text = None
-                last_artifacts = {}
+                collection_limit_exceeded = True
                 output_doc_id = None
                 output_doc_ids = []
 
@@ -1602,6 +1658,8 @@ async def _apply_core(
             apply_reason = "deadline"
         elif passed:
             apply_reason = "stop"
+        elif collection_limit_exceeded:
+            apply_reason = "collection_limit"
         elif last_capped:
             apply_reason = "capped"
         else:

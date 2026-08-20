@@ -829,9 +829,15 @@ export function normalizeRunArtifacts(raw: unknown): RunArtifact[] {
     return out
   }
   if (raw && typeof raw === 'object') {
-    return Object.entries(raw as Record<string, unknown>).flatMap(([key, text]) =>
-      typeof text === 'string' ? [{ key, text }] : [],
-    )
+    const out: RunArtifact[] = []
+    for (const [key, text] of Object.entries(raw as Record<string, unknown>)) {
+      if (typeof text === 'string') {
+        out.push({ key, text })
+      } else if (Array.isArray(text)) {
+        out.push({ key, text: text.filter((el): el is string => typeof el === 'string') })
+      }
+    }
+    return out
   }
   return []
 }

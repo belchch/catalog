@@ -271,4 +271,16 @@ describe('normalizeRunArtifacts', () => {
       { key: 'chapters', text: [] },
     ])
   })
+
+  it('reads a collection output from the key-to-value dictionary shape (the WS finish frame)', () => {
+    expect(
+      normalizeRunArtifacts({
+        index: 'HELLO',
+        chapters: ['Ch1', 'Ch2', 'Ch3'],
+      }),
+    ).toEqual([
+      { key: 'index', text: 'HELLO' },
+      { key: 'chapters', text: ['Ch1', 'Ch2', 'Ch3'] },
+    ])
+  })
 })

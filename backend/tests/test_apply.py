@@ -3969,6 +3969,59 @@ def test_apply_script_collection_over_limit_fails_before_any_write(
     assert not results_dir.exists() or list(results_dir.glob("*.md")) == []
 
 
+def test_apply_script_collection_over_limit_fails_in_preview_mode_too(
+    db: Database, workspace: Path
+) -> None:
+    """ADR-0025 Decision 5: the run itself must finish ``failed`` with an
+    explicit reason regardless of persist mode — a "на экран" run must not
+    look successful only to be rejected later by ``POST /runs/{id}/save``
+    with nothing left to recover. Unlike the persist=True over-limit case,
+    ``result_text``/``result_artifacts`` are kept (not wiped) so the
+    already-computed — if too large — result can still be inspected."""
+    from catalog.skills.config import MAX_COLLECTION_DOCUMENTS
+
+    code = (
+        f"chapters = [str(i) for i in range({MAX_COLLECTION_DOCUMENTS + 1})]\n"
+        "result = {'chapters': chapters}\n"
+    )
+    skill = _collection_script(code)
+    skill_id = create_skill(
+        db, name=skill.name, description=skill.description, config=skill
+    )
+    input_doc_id = _ingest_input(db, workspace)
+    result = asyncio.run(
+        apply_skill_collect(
+            provider=ScriptProvider([]),
+            db=db,
+            workspace_dir=str(workspace),
+            skill=skill,
+            skill_id=skill_id,
+            input_doc_ids=[input_doc_id],
+            base_tools=build_document_tools(db, workspace),
+            persist=False,
+        )
+    )
+    assert result.status == "failed"
+    assert result.output_doc_id is None
+    assert result.output_doc_ids in (None, [])
+    errors = [e for e in result.trace.entries if e.kind == "error"]
+    assert errors
+    assert any(
+        "too many collection documents" in str(e.data.get("error", ""))
+        for e in errors
+    )
+    results_dir = workspace / "results"
+    assert not results_dir.exists() or list(results_dir.glob("*.md")) == []
+
+    run = get_run(db, result.run_id)
+    assert run is not None
+    assert run["status"] == "failed"
+    # The already-computed result is preserved, not wiped, so it can still
+    # be inspected even though it was refused.
+    assert run["result_text"]
+    assert len(run["result_artifacts"]["chapters"]) == MAX_COLLECTION_DOCUMENTS + 1
+
+
 def test_apply_script_list_without_outputs_still_one_document(
     db: Database, workspace: Path
 ) -> None:
@@ -4476,14 +4529,27 @@ def test_split_by_chapters_with_index_persist_creates_eight_documents(
     assert set(result.output_doc_ids) <= session_docs
 
 
-def test_split_by_chapters_with_index_preview_then_save(
-    db: Database, workspace: Path
-) -> None:
-    from catalog.skills.repo_run import set_output_doc_id
-
+def test_split_by_chapters_with_index_preview_then_save(client) -> None:
+    """End-to-end acceptance for the «на экран» + save path: the run itself
+    goes through ``apply_skill_collect`` (as every other test in this module
+    does — there is no HTTP apply-stream test helper), but the save step
+    goes through the real ``POST /runs/{run_id}/save`` endpoint rather than
+    re-implementing it, so the endpoint's own behaviour — the already-saved
+    409 guard, input-document resolution, the ``CollectionLimitError`` ->
+    409 mapping, and the ``DocumentOut`` response — is exercised for real
+    (plan 07 п.6). Uses ``client`` (the full FastAPI app + its own workspace
+    db) rather than this module's standalone ``db``/``workspace`` fixtures,
+    which are not wired to any HTTP endpoint.
+    """
+    db: Database = client.app.state.workspace_manager.current
+    workspace = Path(client.app.state.workspace)
     skill = _split_by_chapters_with_index_skill()
     skill_id = create_skill(
-        db, name=skill.name, description=skill.description, config=skill
+        db,
+        name=skill.name,
+        description=skill.description,
+        config=skill,
+        status="committed",
     )
     input_doc_id = _ingest_seven_chapter_document(db, workspace)
     result = asyncio.run(
@@ -4502,36 +4568,33 @@ def test_split_by_chapters_with_index_preview_then_save(
     # DoD: preview mode creates no documents.
     assert result.output_doc_id is None
     assert result.output_doc_ids is None
-    run = get_run(db, result.run_id)
-    assert run is not None
+    run_id = result.run_id
+    run = client.get(f"/runs/{run_id}").json()
     assert run["output_doc_id"] is None
     assert run["output_doc_ids"] == []
     assert len(run["result_artifacts"]["chapters"]) == 7
     results_dir = workspace / "results"
     assert not results_dir.exists() or list(results_dir.glob("*.md")) == []
 
-    docs = [get_document(db, input_doc_id)]
-    primary_id, output_ids, _text, _rewritten = persist_run_outputs(
-        db,
-        str(workspace),
-        skill=skill,
-        docs=docs,
-        session_id=None,
-        primary_text=run["result_text"],
-        artifacts=run["result_artifacts"],
-        primary_title=f"{skill.name} — результат",
-    )
-    set_output_doc_id(db, result.run_id, primary_id, output_ids)
+    # DoD: the subsequent save creates all 8 atomically, through the real
+    # endpoint — not a hand-rolled re-implementation of it.
+    resp = client.post(f"/runs/{run_id}/save")
+    assert resp.status_code == 200, resp.text
+    saved_doc = resp.json()
+    assert saved_doc["kind"] == "result_md"
 
-    # DoD: the subsequent save creates all 8 atomically.
+    saved = client.get(f"/runs/{run_id}").json()
+    output_ids = saved["output_doc_ids"]
     assert len(output_ids) == 8
+    primary_id = saved["output_doc_id"]
     assert primary_id == output_ids[0]
+    assert primary_id == saved_doc["id"]
     for doc_id in output_ids:
         assert get_document(db, doc_id) is not None
-    saved = get_run(db, result.run_id)
-    assert saved is not None
-    assert saved["output_doc_id"] == primary_id
-    assert saved["output_doc_ids"] == output_ids
+
+    # The already-saved guard (409) — a second save must not duplicate.
+    resp2 = client.post(f"/runs/{run_id}/save")
+    assert resp2.status_code == 409
 
 
 def test_split_by_chapters_with_index_visible_before_run(db: Database) -> None:

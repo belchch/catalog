@@ -1410,6 +1410,59 @@ def test_configure_outputs_survive_rebuild_from_same_session(client, provider, d
     assert skill.config.outputs[0].description == "Human-edited description."
 
 
+def test_configure_outputs_syncs_all_linked_edit_sessions(client, provider, db) -> None:
+    """A skill can have several live edit sessions at once (every ``edit``
+    call opens a new one, none are ever closed). configure() must sync the
+    ``outputs`` artifact into ALL of them, not just the most recently
+    touched one — otherwise rebuilding from an older session silently
+    restores the stale artifact and discards the human's edit (ADR-0015,
+    CATALOG-155).
+    """
+    config = SkillConfig(
+        name="Extractor",
+        description="Extracts fields.",
+        system_prompt="Extract the requested fields from the document.",
+        allowed_tools=["read_document"],
+        model="test/model",
+        outputs=[SkillOutput(key="summary", description="Set by the model.")],
+    )
+    skill_id = create_skill(
+        db,
+        name=config.name,
+        description=config.description,
+        config=config,
+        status="draft",
+    )
+
+    # Open edit twice — two live sessions linked to the same skill.
+    session_a = client.post(f"/skills/{skill_id}/edit").json()["session_id"]
+    session_b = client.post(f"/skills/{skill_id}/edit").json()["session_id"]
+    assert session_a != session_b
+
+    resp = client.patch(
+        f"/skills/{skill_id}/configure",
+        json={
+            "outputs": [
+                {"key": "summary", "description": "Human-edited description."},
+            ]
+        },
+    )
+    assert resp.status_code == 200, resp.text
+
+    for session_id in (session_a, session_b):
+        artifacts = client.get(f"/sessions/{session_id}/artifacts").json()
+        outputs_artifact = next(a for a in artifacts if a["type"] == "outputs")
+        assert json.loads(outputs_artifact["content"]) == [
+            {"key": "summary", "description": "Human-edited description."},
+        ]
+
+    # Rebuilding from the OLDER session must not discard the human edit.
+    rebuild = client.post(f"/sessions/{session_a}/skills")
+    assert rebuild.status_code == 200, rebuild.text
+    rebuilt_outputs = rebuild.json()["config"]["outputs"]
+    assert rebuilt_outputs[0]["description"] == "Human-edited description."
+
+
 def test_configure_outputs_skip_sync_when_no_linked_session(client, provider, db) -> None:
     """No linked edit session (fresh, never-edited draft) -> configure still
     succeeds; the artifact sync is a no-op, not a failure (CATALOG-155).

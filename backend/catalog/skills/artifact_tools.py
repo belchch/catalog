@@ -52,7 +52,7 @@ from catalog.storage.repo_session_artifact import (
     upsert_artifact,
     upsert_script_dry_run,
 )
-from catalog.storage.repo_session import get_session_by_skill_id
+from catalog.storage.repo_session import get_sessions_by_skill_id
 from catalog.storage.repo_session_document import list_session_documents
 
 NotifyFn = Callable[[], Awaitable[None]]
@@ -109,22 +109,29 @@ def sync_draft_outputs_artifact(
     Only edit sessions (``POST /skills/{id}/edit``, CATALOG-17) carry
     ``session.skill_id``; a draft that was never opened for editing has no
     linked session and nothing to sync — this is a no-op, not an error, so
-    configure never fails because of it.
+    configure never fails because of it. A skill can have several live edit
+    sessions at once (every ``edit`` call opens a new one, none are ever
+    closed), and build can rebuild from any of them — so every linked
+    session's artifact is synced, not just the most recently touched one,
+    otherwise a build from an older session would silently restore the
+    stale ``outputs`` artifact and discard the human's edit (ADR-0015).
     """
-    session_row = get_session_by_skill_id(db, skill_id)
-    if session_row is None:
+    session_rows = get_sessions_by_skill_id(db, skill_id)
+    if not session_rows:
         return
-    upsert_artifact(
-        db,
-        session_id=session_row.id,
-        type="outputs",
-        content=json.dumps(
-            [skill_output_to_dict(item) for item in outputs], ensure_ascii=False
-        ),
-        source="user",
-        is_valid=True,
-        error=None,
+    content = json.dumps(
+        [skill_output_to_dict(item) for item in outputs], ensure_ascii=False
     )
+    for session_row in session_rows:
+        upsert_artifact(
+            db,
+            session_id=session_row.id,
+            type="outputs",
+            content=content,
+            source="user",
+            is_valid=True,
+            error=None,
+        )
 
 
 def _try_dict_allowed(
@@ -220,6 +227,21 @@ def _try_finalize_output(
         preview = "\n\n---\n\n".join(
             f"{key}:\n{_result_as_text(artifacts[key])}" for key in artifacts
         )
+        # A dry-run result can carry a collection alongside companion keys
+        # (e.g. split_by_chapters_with_index: {index, chapters[]}) — the
+        # planner still needs to see the split before build, so report the
+        # first declared collection key's element count rather than falling
+        # back to a plain "dict" (ADR-0025 / CATALOG-153 п.10).
+        collection_value = next(
+            (
+                artifacts[item.key]
+                for item in outputs
+                if item.multiple and isinstance(artifacts.get(item.key), list)
+            ),
+            None,
+        )
+        if collection_value is not None:
+            return preview, "collection", primary, len(collection_value)
         return preview, "dict", primary, None
     if outputs and dict_allowed:
         raise ValueError("skill declared outputs but script did not return a dict")
@@ -337,7 +359,9 @@ def _try_payload(
     output_len: int = 0,
     output_kind: str | None = None,
     # ADR-0025: element count for a collection output (``output_kind ==
-    # "collection"``) or a plain list result; ``None`` for str/dict.
+    # "collection"``); ``None`` for str/dict/list (a plain ``list`` result
+    # with no declared outputs is joined into one document, so it has no
+    # separate element count here).
     output_count: int | None = None,
     duration_ms: int = 0,
     verify: dict | None = None,

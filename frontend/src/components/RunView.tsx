@@ -198,12 +198,15 @@ function CreatedDocsChips({
   if (!collapsible) return chips
 
   if (!expanded) {
+    // No `aria-controls` here: the chip container it would reference
+    // (id="run-created-docs") is only mounted once `expanded` is true —
+    // pointing at a non-existent element would leave a screen reader with
+    // nothing to announce before the list is actually shown.
     return (
       <button
         type="button"
         className="btn-secondary mt-1"
         aria-expanded={false}
-        aria-controls="run-created-docs"
         onClick={() => setExpanded(true)}
       >
         {`Показать ${countLabel}`}

@@ -62,16 +62,18 @@ export function OutputsList({
   const rowRefs = useRef<RowRefs[]>([])
   const addRef = useRef<HTMLButtonElement | null>(null)
 
-  // Ссылки на строки, вышедшие за пределы текущей длины списка (после remove),
-  // не должны накапливаться — иначе следующее add/move может случайно
-  // сфокусировать давно удалённый узел из старой записи.
-  if (rowRefs.current.length > value.length) {
-    rowRefs.current.length = value.length
-  }
-
   // Зависимость эффекта — сам массив `value` (не value.length): перестановка
   // ↑/↓ длину не меняет, но всё равно должна разбудить отложенную фокусировку.
   useEffect(() => {
+    // Ссылки на строки, вышедшие за пределы текущей длины списка (после
+    // remove), не должны накапливаться — иначе следующее add/move может
+    // случайно сфокусировать давно удалённый узел из старой записи. Done
+    // here (post-commit), not during render, per the rules-of-react ban on
+    // ref writes in the render body.
+    if (rowRefs.current.length > value.length) {
+      rowRefs.current.length = value.length
+    }
+
     const intent = pendingFocus.current
     if (!intent) return
     pendingFocus.current = null
