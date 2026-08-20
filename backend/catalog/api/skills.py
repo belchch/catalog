@@ -1216,6 +1216,7 @@ async def rename_skill_endpoint(
         input_arity=updated.config.input_arity,
         estimated_llm_calls=estimate_skill_llm_calls(updated.config),
         outputs_count=len(updated.config.outputs),
+        outputs_has_collection=any(o.multiple for o in updated.config.outputs),
     )
 
 
@@ -1250,6 +1251,7 @@ async def list_skills_endpoint(
             reasoning=r.get("reasoning"),
             estimated_llm_calls=r.get("estimated_llm_calls", 0),
             outputs_count=r.get("outputs_count", 0),
+            outputs_has_collection=r.get("outputs_has_collection", False),
         )
         for r in rows
     ]

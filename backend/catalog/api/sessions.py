@@ -436,6 +436,7 @@ def _session_skill_out(row) -> SkillOut:
         reasoning=row.config.reasoning or None,
         estimated_llm_calls=estimate_skill_llm_calls(row.config),
         outputs_count=len(row.config.outputs),
+        outputs_has_collection=any(o.multiple for o in row.config.outputs),
     )
 
 

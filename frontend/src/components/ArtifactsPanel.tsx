@@ -317,6 +317,7 @@ export function ArtifactsPanel({
       const parsed = parseOutputsArtifact(outputsArt?.content ?? '')
       setOutputsDraft(parsed.outputs)
       setServerOutputsSnap(serializeOutputs(parsed.outputs))
+      setOutputsRowErrors(parsed.rowErrors)
     } else if (outputsArt) {
       setServerOutputsSnap(serializeOutputs(parseOutputsArtifact(outputsArt.content).outputs))
     }
@@ -452,7 +453,11 @@ export function ArtifactsPanel({
       setOutputsRowErrors(checked.rowErrors)
       const idx = checked.rowErrors.findIndex((item) => item != null)
       const err = idx >= 0 ? checked.rowErrors[idx] : null
-      const elId = err?.key ? `outputs-key-${idx}` : `outputs-desc-${idx}`
+      const elId = err?.key
+        ? `outputs-key-${idx}`
+        : err?.description
+          ? `outputs-desc-${idx}`
+          : `outputs-multiple-${idx}`
       document.getElementById(elId)?.focus()
       return
     }
@@ -464,6 +469,7 @@ export function ArtifactsPanel({
       const parsed = parseOutputsArtifact(art.content)
       setOutputsDraft(parsed.outputs)
       setServerOutputsSnap(serializeOutputs(parsed.outputs))
+      setOutputsRowErrors(parsed.rowErrors)
       flashSaved('outputs')
       clearHighlightIf('outputs')
     } catch (e) {

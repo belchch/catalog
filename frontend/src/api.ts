@@ -24,6 +24,7 @@ export interface SkillOut {
   reasoning: string | null
   estimated_llm_calls: number
   outputs_count?: number
+  outputs_has_collection?: boolean
 }
 
 export interface RunOut {
@@ -687,52 +688,72 @@ export const MAX_SKILL_OUTPUTS = 8
 export interface OutputDraft {
   key: string
   description: string
+  multiple?: boolean
 }
 
 export interface OutputRowError {
   key?: string
   description?: string
+  multiple?: string
 }
 
 export interface RunArtifact {
   key: string
   description?: string | null
-  text: string
+  text: string | string[]
 }
+
+const OUTPUT_MULTIPLE_TYPE_ERROR = 'несколько документов: только true или false'
 
 export function parseOutputsArtifact(content: string): {
   outputs: OutputDraft[]
   parseError: string | null
+  rowErrors: (OutputRowError | null)[]
 } {
   const trimmed = content.trim()
-  if (!trimmed) return { outputs: [], parseError: null }
+  if (!trimmed) return { outputs: [], parseError: null, rowErrors: [] }
   let parsed: unknown
   try {
     parsed = JSON.parse(trimmed)
   } catch {
-    return { outputs: [], parseError: 'outputs must be JSON' }
+    return { outputs: [], parseError: 'outputs must be JSON', rowErrors: [] }
   }
   if (!Array.isArray(parsed)) {
-    return { outputs: [], parseError: 'outputs must be a JSON array' }
+    return { outputs: [], parseError: 'outputs must be a JSON array', rowErrors: [] }
   }
   const outputs: OutputDraft[] = []
+  const rowErrors: (OutputRowError | null)[] = []
   for (const item of parsed) {
     if (!item || typeof item !== 'object' || Array.isArray(item)) continue
     const rec = item as Record<string, unknown>
-    outputs.push({
+    const draft: OutputDraft = {
       key: typeof rec.key === 'string' ? rec.key : '',
       description: typeof rec.description === 'string' ? rec.description : '',
-    })
+    }
+    let rowError: OutputRowError | null = null
+    if ('multiple' in rec) {
+      if (typeof rec.multiple === 'boolean') {
+        draft.multiple = rec.multiple
+      } else {
+        rowError = { multiple: OUTPUT_MULTIPLE_TYPE_ERROR }
+      }
+    }
+    outputs.push(draft)
+    rowErrors.push(rowError)
   }
-  return { outputs, parseError: null }
+  return { outputs, parseError: null, rowErrors }
 }
 
 export function serializeOutputs(outputs: OutputDraft[]): string {
   return JSON.stringify(
-    outputs.map((item) => ({
-      key: item.key.trim(),
-      description: item.description.trim(),
-    })),
+    outputs.map((item) => {
+      const out: { key: string; description: string; multiple?: boolean } = {
+        key: item.key.trim(),
+        description: item.description.trim(),
+      }
+      if (item.multiple === true) out.multiple = true
+      return out
+    }),
   )
 }
 
@@ -756,7 +777,11 @@ export function validateOutputs(outputs: OutputDraft[]): {
     if (!description) {
       err.description = 'описание не может быть пустым'
     }
-    if (err.key || err.description) rowErrors[i] = err
+    const multiple = outputs[i].multiple
+    if (multiple !== undefined && typeof multiple !== 'boolean') {
+      err.multiple = OUTPUT_MULTIPLE_TYPE_ERROR
+    }
+    if (err.key || err.description || err.multiple) rowErrors[i] = err
   }
   return { ok: rowErrors.every((item) => item == null), rowErrors }
 }
@@ -767,14 +792,21 @@ export function normalizeRunArtifacts(raw: unknown): RunArtifact[] {
     for (const item of raw) {
       if (!item || typeof item !== 'object' || Array.isArray(item)) continue
       const rec = item as Record<string, unknown>
-      if (typeof rec.key !== 'string' || typeof rec.text !== 'string') continue
+      if (typeof rec.key !== 'string') continue
+      let text: string | string[] | null = null
+      if (typeof rec.text === 'string') {
+        text = rec.text
+      } else if (Array.isArray(rec.text)) {
+        text = rec.text.filter((el): el is string => typeof el === 'string')
+      }
+      if (text === null) continue
       const description =
         typeof rec.description === 'string'
           ? rec.description
           : rec.description === null
             ? null
             : undefined
-      out.push({ key: rec.key, text: rec.text, description })
+      out.push({ key: rec.key, text, description })
     }
     return out
   }

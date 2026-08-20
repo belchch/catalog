@@ -112,6 +112,7 @@ def list_skills(db: Database, status: str | None = None) -> list[dict]:
             config_reasoning = config.reasoning or None
             config_cost = estimate_skill_llm_calls(config)
             config_outputs_count = len(config.outputs)
+            config_outputs_has_collection = any(o.multiple for o in config.outputs)
         except (ValueError, KeyError):
             # Unparseable/legacy config: degrade to the agent defaults so the
             # row still renders on the UI with an ``ai`` tag.
@@ -123,6 +124,7 @@ def list_skills(db: Database, status: str | None = None) -> list[dict]:
             config_reasoning = None
             config_cost = 24
             config_outputs_count = 0
+            config_outputs_has_collection = False
         result.append(
             {
                 "id": r["id"],
@@ -139,6 +141,7 @@ def list_skills(db: Database, status: str | None = None) -> list[dict]:
                 "reasoning": config_reasoning,
                 "estimated_llm_calls": config_cost,
                 "outputs_count": config_outputs_count,
+                "outputs_has_collection": config_outputs_has_collection,
             }
         )
     return result

@@ -60,7 +60,7 @@ export function OutputsList({
   const add = () => {
     if (value.length >= MAX_SKILL_OUTPUTS || disabled) return
     pendingFocus.current = value.length
-    onChange([...value, { key: '', description: '' }])
+    onChange([...value, { key: '', description: '', multiple: false }])
   }
 
   return (
@@ -71,6 +71,9 @@ export function OutputsList({
         const descId = `outputs-desc-${index}`
         const keyErrId = `outputs-key-error-${index}`
         const descErrId = `outputs-desc-error-${index}`
+        const multiId = `outputs-multiple-${index}`
+        const multiHintId = `outputs-multiple-hint-${index}`
+        const multiErrId = `outputs-multiple-error-${index}`
         const label = row.key.trim() || String(index + 1)
         return (
           <div key={`${index}-${row.key}`} className={ROW_CLS}>
@@ -109,6 +112,29 @@ export function OutputsList({
                     onChange={(e) => updateRow(index, { description: e.target.value })}
                   />
                 </label>
+                <label
+                  className={
+                    'mt-1 flex items-start gap-1.5 text-[11px] text-ink-faint' +
+                    (disabled ? ' cursor-not-allowed' : '')
+                  }
+                >
+                  <input
+                    id={multiId}
+                    type="checkbox"
+                    className="mt-0.5 h-3 w-3 shrink-0 accent-brand"
+                    checked={row.multiple === true}
+                    disabled={disabled}
+                    aria-invalid={Boolean(err?.multiple)}
+                    aria-describedby={
+                      err?.multiple ? `${multiHintId} ${multiErrId}` : multiHintId
+                    }
+                    onChange={(e) => updateRow(index, { multiple: e.target.checked })}
+                  />
+                  несколько документов
+                </label>
+                <p id={multiHintId} className="ml-[1.125rem] text-[10px] text-ink-faint">
+                  число документов определяется при прогоне
+                </p>
                 {err?.key && (
                   <p id={keyErrId} className="mt-1 text-[11px] text-danger-ink">
                     {err.key}
@@ -117,6 +143,11 @@ export function OutputsList({
                 {err?.description && (
                   <p id={descErrId} className="mt-1 text-[11px] text-danger-ink">
                     {err.description}
+                  </p>
+                )}
+                {err?.multiple && (
+                  <p id={multiErrId} className="mt-1 text-[11px] text-danger-ink">
+                    {err.multiple}
                   </p>
                 )}
               </div>

@@ -89,6 +89,11 @@ class SkillOut(BaseModel):
     reasoning: str | None = None
     estimated_llm_calls: int = 0
     outputs_count: int = 0
+    # ADR-0025 / CATALOG-154: True when at least one declared output is a
+    # collection (``multiple``) — the client must not render outputs_count as
+    # a trustworthy exact document count in that case. Absent/False for
+    # skills without a collection output.
+    outputs_has_collection: bool = False
 
 
 class ApplyRequest(BaseModel):

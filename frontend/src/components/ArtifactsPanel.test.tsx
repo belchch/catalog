@@ -471,4 +471,35 @@ describe('ArtifactsPanel outputs', () => {
       )
     })
   })
+
+  it('persists the "несколько документов" toggle through the outputs PATCH', async () => {
+    const onSaveOutputs = vi.fn(async (content: string) => art('outputs', content))
+    renderPanel(
+      [art('outputs', JSON.stringify([{ key: 'chapters', description: 'Главы' }]))],
+      { onSaveOutputs },
+    )
+    const checkbox = screen.getByRole('checkbox', { name: 'несколько документов' })
+    expect((checkbox as HTMLInputElement).checked).toBe(false)
+    fireEvent.click(checkbox)
+    expect((checkbox as HTMLInputElement).checked).toBe(true)
+    fireEvent.click(screen.getByRole('button', { name: 'Сохранить outputs' }))
+    await waitFor(() => {
+      expect(onSaveOutputs).toHaveBeenCalledWith(
+        JSON.stringify([{ key: 'chapters', description: 'Главы', multiple: true }]),
+      )
+    })
+  })
+
+  it('shows a row error for a non-boolean multiple value from the artifact', () => {
+    renderPanel([
+      art(
+        'outputs',
+        JSON.stringify([{ key: 'chapters', description: 'Главы', multiple: 'yes' }]),
+      ),
+    ])
+    expect(screen.getByText('несколько документов: только true или false')).toBeTruthy()
+    expect(
+      screen.getByRole('checkbox', { name: 'несколько документов' }).getAttribute('aria-invalid'),
+    ).toBe('true')
+  })
 })

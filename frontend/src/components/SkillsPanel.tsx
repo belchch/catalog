@@ -489,10 +489,19 @@ export function SkillsPanel({
                         {extraTags > 0 && (
                           <span className="badge-neutral">+{extraTags}</span>
                         )}
-                        {(s.outputs_count ?? 0) > 1 && (
-                          <span className="badge-neutral shrink-0">
-                            {s.outputs_count} вых.
+                        {s.outputs_has_collection === true ? (
+                          <span
+                            className="badge-neutral shrink-0"
+                            title={`выходов: ${s.outputs_count ?? 1}, один из них коллекционный — число документов известно только после прогона`}
+                          >
+                            {s.outputs_count ?? 1}+ вых.
                           </span>
+                        ) : (
+                          (s.outputs_count ?? 0) > 1 && (
+                            <span className="badge-neutral shrink-0">
+                              {s.outputs_count} вых.
+                            </span>
+                          )
                         )}
                       </span>
                       <span
