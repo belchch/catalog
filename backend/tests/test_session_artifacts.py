@@ -1525,6 +1525,179 @@ def test_try_skill_script_ok_on_attached_document(
     assert result["output_len"] > 0
 
 
+def test_try_skill_script_named_outputs_dict_ok(
+    mem_db: Database, tmp_path: Path
+) -> None:
+    session_id = create_session(mem_db)
+    doc = ingest_file(mem_db, tmp_path, filename="note.md", content=b"hello world")
+    attach_documents(mem_db, session_id, [doc.id])
+    tools = _artifact_try_tools(mem_db, session_id, workspace=str(tmp_path))
+    _, save_script = tools.get("save_skill_script")
+    _, set_outputs = tools.get("set_skill_outputs")
+    _, set_meta = tools.get("set_skill_meta")
+    _, try_fn = tools.get("try_skill_script")
+    _, read_draft = tools.get("read_skill_draft")
+    code = 'result = {"brief": document.upper(), "table": "A -> a"}\n'
+
+    async def _run():
+        await set_meta(
+            name="splitter",
+            description="two outputs",
+            kind="script",
+            verify_checks=[
+                {
+                    "check": "regex_matches",
+                    "params": {"pattern": "^HELLO WORLD$"},
+                }
+            ],
+        )
+        await set_outputs(
+            outputs=_outputs_payload(("brief", "Текст"), ("table", "Таблица"))
+        )
+        await save_script(code=code)
+        result = await try_fn()
+        draft = await read_draft()
+        return result, draft
+
+    result, draft = asyncio.run(_run())
+    assert result["ok"] is True
+    assert result["output_kind"] == "dict"
+    assert "HELLO WORLD" in result["output_preview"]
+    assert "A -> a" in result["output_preview"]
+    assert result["verify"] is not None
+    assert result["verify"]["passed"] is True
+    script = next(item for item in draft["artifacts"] if item["type"] == "script")
+    assert script["dry_run"]["ok"] is True
+    assert script["dry_run"]["stage"] == "verify"
+
+
+def test_try_skill_script_dict_without_outputs_fails(
+    mem_db: Database, tmp_path: Path
+) -> None:
+    session_id = create_session(mem_db)
+    doc = ingest_file(mem_db, tmp_path, filename="note.md", content=b"hello")
+    attach_documents(mem_db, session_id, [doc.id])
+    tools = _artifact_try_tools(mem_db, session_id, workspace=str(tmp_path))
+    _, save_script = tools.get("save_skill_script")
+    _, try_fn = tools.get("try_skill_script")
+    _, read_draft = tools.get("read_skill_draft")
+    code = 'result = {"brief": document, "table": "x"}\n'
+
+    async def _run():
+        await save_script(code=code)
+        result = await try_fn()
+        draft = await read_draft()
+        return result, draft
+
+    result, draft = asyncio.run(_run())
+    assert result["ok"] is False
+    assert result["stage"] == "run"
+    assert "outputs is empty" in (result["error"] or "")
+    script = next(item for item in draft["artifacts"] if item["type"] == "script")
+    assert script["dry_run"]["ok"] is False
+
+
+def test_try_skill_script_declared_outputs_require_dict(
+    mem_db: Database, tmp_path: Path
+) -> None:
+    session_id = create_session(mem_db)
+    doc = ingest_file(mem_db, tmp_path, filename="note.md", content=b"hello")
+    attach_documents(mem_db, session_id, [doc.id])
+    tools = _artifact_try_tools(mem_db, session_id, workspace=str(tmp_path))
+    _, set_outputs = tools.get("set_skill_outputs")
+    _, try_fn = tools.get("try_skill_script")
+
+    async def _run():
+        await set_outputs(
+            outputs=_outputs_payload(("brief", "Текст"), ("table", "Таблица"))
+        )
+        return await try_fn(code="result = document.upper()\n")
+
+    result = asyncio.run(_run())
+    assert result["ok"] is False
+    assert result["stage"] == "run"
+    assert "did not return a dict" in (result["error"] or "")
+
+
+def test_try_skill_script_intermediate_step_rejects_dict(
+    mem_db: Database, tmp_path: Path
+) -> None:
+    session_id = create_session(mem_db)
+    doc = ingest_file(mem_db, tmp_path, filename="note.md", content=b"hello")
+    attach_documents(mem_db, session_id, [doc.id])
+    tools = _artifact_try_tools(mem_db, session_id, workspace=str(tmp_path))
+    _, save_steps = tools.get("save_skill_steps")
+    _, set_outputs = tools.get("set_skill_outputs")
+    _, try_fn = tools.get("try_skill_script")
+    first = 'result = {"brief": document, "table": "x"}\n'
+
+    async def _run():
+        await set_outputs(
+            outputs=_outputs_payload(("brief", "Текст"), ("table", "Таблица"))
+        )
+        await save_steps(
+            steps=[
+                {
+                    "id": "split",
+                    "type": "script",
+                    "input": "documents",
+                    "code": first,
+                },
+                {
+                    "id": "tail",
+                    "type": "script",
+                    "input": "previous",
+                    "code": "result = document\n",
+                },
+            ]
+        )
+        return await try_fn(step_index=0)
+
+    result = asyncio.run(_run())
+    assert result["ok"] is False
+    assert "last pipeline step" in (result["error"] or "")
+
+
+def test_try_skill_script_last_step_named_outputs_ok(
+    mem_db: Database, tmp_path: Path
+) -> None:
+    session_id = create_session(mem_db)
+    doc = ingest_file(mem_db, tmp_path, filename="note.md", content=b"hello world")
+    attach_documents(mem_db, session_id, [doc.id])
+    tools = _artifact_try_tools(mem_db, session_id, workspace=str(tmp_path))
+    _, save_steps = tools.get("save_skill_steps")
+    _, set_outputs = tools.get("set_skill_outputs")
+    _, try_fn = tools.get("try_skill_script")
+
+    async def _run():
+        await set_outputs(
+            outputs=_outputs_payload(("brief", "Текст"), ("table", "Таблица"))
+        )
+        await save_steps(
+            steps=[
+                {
+                    "id": "prep",
+                    "type": "script",
+                    "input": "documents",
+                    "code": "result = document\n",
+                },
+                {
+                    "id": "split",
+                    "type": "script",
+                    "input": "previous",
+                    "code": 'result = {"brief": document.upper(), "table": "A -> a"}\n',
+                },
+            ]
+        )
+        return await try_fn(step_index=1)
+
+    result = asyncio.run(_run())
+    assert result["ok"] is True
+    assert result["output_kind"] == "dict"
+    assert "HELLO WORLD" in result["output_preview"]
+    assert "A -> a" in result["output_preview"]
+
+
 def test_try_skill_script_run_error_includes_line(
     mem_db: Database, tmp_path: Path
 ) -> None:
@@ -1683,6 +1856,52 @@ def test_try_skill_script_http_ok_and_same_payload(
     assert resp2.status_code == 200
     assert _count_rows(db, "skill_run") == 0
     assert _count_rows(db, "document") == docs_after
+
+
+def test_try_skill_script_http_named_outputs_dict(
+    client, db, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    async def _fake_run(code, doc_texts, params=None, **kwargs):
+        text = (doc_texts[0] if doc_texts else "").upper()
+        return {"brief": text, "table": "A -> a"}
+
+    monkeypatch.setattr(
+        "catalog.skills.artifact_tools.run_skill_script_async",
+        _fake_run,
+    )
+    session_id = client.post("/sessions").json()["id"]
+    uploaded = client.post(
+        "/documents",
+        files={"file": ("note.md", b"hello world", "text/markdown")},
+    )
+    assert uploaded.status_code == 200
+    attach_documents(db, session_id, [uploaded.json()["id"]])
+    patched = client.patch(
+        f"/sessions/{session_id}/artifacts/outputs",
+        json={
+            "content": json.dumps(
+                _outputs_payload(("brief", "Текст"), ("table", "Таблица")),
+                ensure_ascii=False,
+            )
+        },
+    )
+    assert patched.status_code == 200
+    client.patch(
+        f"/sessions/{session_id}/artifacts/script",
+        json={
+            "content": 'result = {"brief": document.upper(), "table": "A -> a"}\n'
+        },
+    )
+    resp = client.post(f"/sessions/{session_id}/artifacts/script/try")
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["ok"] is True
+    assert body["output_kind"] == "dict"
+    assert "HELLO WORLD" in body["output_preview"]
+    assert "A -> a" in body["output_preview"]
+    listed = client.get(f"/sessions/{session_id}/artifacts").json()
+    script = next(item for item in listed if item["type"] == "script")
+    assert script["dry_run"]["ok"] is True
 
 
 def test_try_skill_script_http_validate_and_foreign_doc(client, db) -> None:

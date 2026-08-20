@@ -360,7 +360,7 @@ class ScriptTryOut(BaseModel):
     input_len: int = 0
     output_preview: str = ""
     output_len: int = 0
-    output_kind: Literal["str", "list"] | None = None
+    output_kind: Literal["str", "list", "dict"] | None = None
     duration_ms: int = 0
     verify: dict | None = None
     line_no: int | None = None
