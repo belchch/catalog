@@ -144,6 +144,12 @@ export interface EditStarted {
   skill_id: string
 }
 
+export interface SkillOutputOut {
+  key: string
+  description: string
+  multiple?: boolean
+}
+
 export interface SkillPreview {
   name: string
   description: string | null
@@ -153,6 +159,11 @@ export interface SkillPreview {
   reasoning: string
   input_arity: number | null
   allowed_tools: string[]
+  // CATALOG-155: named outputs declared via set_skill_outputs / the settings
+  // modal. Optional on the client: the backend always sends an array, but
+  // the client stays tolerant of an absent field and reads it as "no
+  // outputs" (same presence semantics as elsewhere, ADR-0024).
+  outputs?: SkillOutputOut[]
 }
 
 export interface SkillBuilt {
@@ -543,6 +554,7 @@ export function configureSkill(
     reasoning?: string
     input_arity?: number | null
     name?: string
+    outputs?: SkillOutputOut[]
   },
 ): Promise<SkillBuilt> {
   return jsonFetch<SkillBuilt>(`/skills/${skillId}/configure`, {
@@ -744,17 +756,23 @@ export function parseOutputsArtifact(content: string): {
   return { outputs, parseError: null, rowErrors }
 }
 
+/** Single normalization point for outputs sent to the backend (CATALOG-155):
+ * key/description trimmed, `multiple` present only when `true`, order kept
+ * 1:1 with the input array. Used by both `serializeOutputs` (artifact card)
+ * and `configureSkill` callers (settings modal). */
+export function outputsPayload(outputs: OutputDraft[]): SkillOutputOut[] {
+  return outputs.map((item) => {
+    const out: SkillOutputOut = {
+      key: item.key.trim(),
+      description: item.description.trim(),
+    }
+    if (item.multiple === true) out.multiple = true
+    return out
+  })
+}
+
 export function serializeOutputs(outputs: OutputDraft[]): string {
-  return JSON.stringify(
-    outputs.map((item) => {
-      const out: { key: string; description: string; multiple?: boolean } = {
-        key: item.key.trim(),
-        description: item.description.trim(),
-      }
-      if (item.multiple === true) out.multiple = true
-      return out
-    }),
-  )
+  return JSON.stringify(outputsPayload(outputs))
 }
 
 export function validateOutputs(outputs: OutputDraft[]): {
