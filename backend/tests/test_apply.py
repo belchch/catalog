@@ -51,7 +51,7 @@ from catalog.skills.config import (
 )
 from catalog.skills.skill_tools import config_hash
 from catalog.skills.repo_run import get_run
-from catalog.skills.repo_skill import create_skill, get_skill
+from catalog.skills.repo_skill import create_skill, get_skill, list_skills
 from catalog.storage.db import Database
 from catalog.storage.repo_custom_check import create_custom_check
 from catalog.storage.repo_session import create_session
@@ -4309,3 +4309,251 @@ def test_get_run_reads_collection_result_artifacts_as_list(db: Database) -> None
     row = get_run(db, run_id)
     assert row is not None
     assert row["result_artifacts"] == {"chapters": ["a", "b", "c"]}
+
+
+# --------------------------------------------------------------------------- #
+# CATALOG-150: theme acceptance — split_by_chapters_with_index sample skill
+# --------------------------------------------------------------------------- #
+#
+# These tests do NOT re-implement collection-output logic (that lives in
+# apply.py / config.py / emit_output.py, covered by the ADR-0025 tests above).
+# They only wire a real ``script`` skill — [{index}, {chapters, multiple}] —
+# through the existing runtime on a 7-chapter fixture, closing the theme's
+# end-to-end DoD: one run produces 8 documents, wiki-linked, with a duplicate
+# chapter heading proving the collision is handled, and the skill list
+# surfaces "more than one output" before the run.
+
+# Two chapters intentionally share the heading "Итоги" (positions 3 and 6) to
+# exercise allocate_rel_path's filename disambiguation.
+_SEVEN_CHAPTERS = [
+    ("Введение", "Документ описывает процесс приёмки коллекционных выходов."),
+    ("Постановка задачи", "Нужно разбить документ на главы и построить индекс."),
+    ("Итоги", "Промежуточные итоги: подготовлена декларация multiple."),
+    ("Реализация", "Скрипт делит текст по markdown-заголовкам верхнего уровня."),
+    ("Тестирование", "Тесты проверяют восемь документов за один прогон."),
+    ("Итоги", "Финальные итоги: сценарий закреплён тестом test_apply.py."),
+    ("Заключение", "Коллекционный выход работает по декларации ADR-0025."),
+]
+
+_SEVEN_CHAPTER_DOCUMENT = "\n\n".join(
+    f"# {heading}\n\n{body}" for heading, body in _SEVEN_CHAPTERS
+)
+
+# Deterministic, no LLM call (ADR-0014 / CATALOG-153 ТЗ note: an ``agent``
+# skill would need one emit_output call per chapter — 30 chapters would risk
+# max_iterations — so the sample is ``script``). Splits on top-level markdown
+# headings; ``re.compile`` is unavailable in the script sandbox
+# (script_runner._FORBIDDEN_BUILTINS blocks the ``.compile`` attribute call
+# even module-qualified), so this calls ``re.finditer`` directly.
+_SPLIT_BY_CHAPTERS_WITH_INDEX_CODE = (
+    'matches = list(re.finditer(r"^# (.+)$", document, re.MULTILINE))\n'
+    "titles = []\n"
+    "chapters = []\n"
+    "for i, m in enumerate(matches):\n"
+    "    start = m.start()\n"
+    "    end = matches[i + 1].start() if i + 1 < len(matches) else len(document)\n"
+    "    titles.append(m.group(1).strip())\n"
+    "    chapters.append(document[start:end].strip())\n"
+    'index_lines = ["# Оглавление", ""]\n'
+    "for i, title in enumerate(titles):\n"
+    '    index_lines.append(f"{i + 1}. {title}")\n'
+    'result = {"index": "\\n".join(index_lines), "chapters": chapters}\n'
+)
+
+
+def _split_by_chapters_with_index_skill() -> SkillConfig:
+    return SkillConfig(
+        name="split_by_chapters_with_index",
+        description=(
+            "Делит документ на главы по markdown-заголовкам верхнего уровня "
+            "и строит индекс"
+        ),
+        system_prompt="",
+        allowed_tools=[],
+        model="test/model",
+        verify_checks=[VerifyCheck("non_empty")],
+        kind="script",
+        code=_SPLIT_BY_CHAPTERS_WITH_INDEX_CODE,
+        # Order matters (ADR-0025 п.3): index first == primary is the single
+        # index document; chapters is the collection.
+        outputs=[
+            SkillOutput(key="index", description="Индекс"),
+            SkillOutput(key="chapters", description="Глава", multiple=True),
+        ],
+    )
+
+
+def _ingest_seven_chapter_document(db: Database, workspace: Path) -> str:
+    row = ingest_file(
+        db,
+        workspace,
+        filename="chapters-source.md",
+        content=_SEVEN_CHAPTER_DOCUMENT.encode("utf-8"),
+    )
+    return row.id
+
+
+def test_split_by_chapters_with_index_declares_collection_shape() -> None:
+    skill = _split_by_chapters_with_index_skill()
+    assert skill.kind == "script"
+    assert [item.key for item in skill.outputs] == ["index", "chapters"]
+    assert skill.outputs[0].multiple is False
+    assert skill.outputs[1].multiple is True
+
+
+def test_split_by_chapters_with_index_persist_creates_eight_documents(
+    db: Database, workspace: Path
+) -> None:
+    skill = _split_by_chapters_with_index_skill()
+    skill_id = create_skill(
+        db, name=skill.name, description=skill.description, config=skill
+    )
+    session_id = create_session(db)
+    input_doc_id = _ingest_seven_chapter_document(db, workspace)
+    result = asyncio.run(
+        apply_skill_collect(
+            provider=ScriptProvider([]),
+            db=db,
+            workspace_dir=str(workspace),
+            skill=skill,
+            skill_id=skill_id,
+            input_doc_ids=[input_doc_id],
+            base_tools=build_document_tools(db, workspace),
+            session_id=session_id,
+        )
+    )
+    assert result.status == "ok"
+    assert result.output_doc_ids is not None
+    # DoD: 8 documents from one run — 7 chapters + 1 index.
+    assert len(result.output_doc_ids) == 8
+    # DoD: primary (the index) is first.
+    assert result.output_doc_id == result.output_doc_ids[0]
+
+    run = get_run(db, result.run_id)
+    assert run is not None
+    assert run["output_doc_ids"] == result.output_doc_ids
+    assert len(run["result_artifacts"]["chapters"]) == 7
+
+    index_doc = get_document(db, result.output_doc_ids[0])
+    assert index_doc is not None
+    chapter_docs = [get_document(db, doc_id) for doc_id in result.output_doc_ids[1:]]
+    assert all(doc is not None for doc in chapter_docs)
+
+    # DoD: chapter titles come from the chapter text (its first markdown
+    # heading), not a positional "глава 1..7" placeholder.
+    chapter_titles = [doc.title for doc in chapter_docs]
+    assert chapter_titles == [heading for heading, _ in _SEVEN_CHAPTERS]
+
+    # DoD: two chapters share the heading "Итоги" — neither overwrites the
+    # other on disk, and each keeps its own body text.
+    itogi_positions = [i for i, t in enumerate(chapter_titles) if t == "Итоги"]
+    assert len(itogi_positions) == 2
+    itogi_docs = [chapter_docs[i] for i in itogi_positions]
+    assert itogi_docs[0].path != itogi_docs[1].path
+    itogi_texts = [
+        (workspace / doc.path).read_text(encoding="utf-8") for doc in itogi_docs
+    ]
+    assert "Промежуточные итоги" in itogi_texts[0]
+    assert "Финальные итоги" in itogi_texts[1]
+
+    # DoD / ADR-0025 (Consequences: wiki-links) — every chapter links back to
+    # the primary (index), the index links to every chapter, and chapters do
+    # not link to each other (avoids an N^2 link fan-out for large N).
+    index_text = (workspace / index_doc.path).read_text(encoding="utf-8")
+    index_stem = Path(index_doc.path).stem
+    chapter_stems = [Path(doc.path).stem for doc in chapter_docs]
+    for stem in chapter_stems:
+        assert f"[[{stem}]]" in index_text
+    for doc, stem in zip(chapter_docs, chapter_stems):
+        text = (workspace / doc.path).read_text(encoding="utf-8")
+        assert f"[[{index_stem}]]" in text
+        for other_stem in chapter_stems:
+            if other_stem == stem:
+                continue
+            assert f"[[{other_stem}]]" not in text
+
+    session_docs = {doc.id for doc in list_session_documents(db, session_id)}
+    assert set(result.output_doc_ids) <= session_docs
+
+
+def test_split_by_chapters_with_index_preview_then_save(
+    db: Database, workspace: Path
+) -> None:
+    from catalog.skills.repo_run import set_output_doc_id
+
+    skill = _split_by_chapters_with_index_skill()
+    skill_id = create_skill(
+        db, name=skill.name, description=skill.description, config=skill
+    )
+    input_doc_id = _ingest_seven_chapter_document(db, workspace)
+    result = asyncio.run(
+        apply_skill_collect(
+            provider=ScriptProvider([]),
+            db=db,
+            workspace_dir=str(workspace),
+            skill=skill,
+            skill_id=skill_id,
+            input_doc_ids=[input_doc_id],
+            base_tools=build_document_tools(db, workspace),
+            persist=False,
+        )
+    )
+    assert result.status == "ok"
+    # DoD: preview mode creates no documents.
+    assert result.output_doc_id is None
+    assert result.output_doc_ids is None
+    run = get_run(db, result.run_id)
+    assert run is not None
+    assert run["output_doc_id"] is None
+    assert run["output_doc_ids"] == []
+    assert len(run["result_artifacts"]["chapters"]) == 7
+    results_dir = workspace / "results"
+    assert not results_dir.exists() or list(results_dir.glob("*.md")) == []
+
+    docs = [get_document(db, input_doc_id)]
+    primary_id, output_ids, _text, _rewritten = persist_run_outputs(
+        db,
+        str(workspace),
+        skill=skill,
+        docs=docs,
+        session_id=None,
+        primary_text=run["result_text"],
+        artifacts=run["result_artifacts"],
+        primary_title=f"{skill.name} — результат",
+    )
+    set_output_doc_id(db, result.run_id, primary_id, output_ids)
+
+    # DoD: the subsequent save creates all 8 atomically.
+    assert len(output_ids) == 8
+    assert primary_id == output_ids[0]
+    for doc_id in output_ids:
+        assert get_document(db, doc_id) is not None
+    saved = get_run(db, result.run_id)
+    assert saved is not None
+    assert saved["output_doc_id"] == primary_id
+    assert saved["output_doc_ids"] == output_ids
+
+
+def test_split_by_chapters_with_index_visible_before_run(db: Database) -> None:
+    """DoD: before any run, the skills list already shows more than one
+    output, and the exact count is not presented as a trustworthy document
+    count — ``outputs_count`` is the number of *declared keys* (2: index +
+    chapters), not the number of documents a run will produce (8, for the
+    7-chapter fixture above)."""
+    skill = _split_by_chapters_with_index_skill()
+    skill_id = create_skill(
+        db,
+        name=skill.name,
+        description=skill.description,
+        config=skill,
+        status="committed",
+    )
+    record = get_skill(db, skill_id)
+    assert record is not None
+    assert len(record.config.outputs) == 2
+    assert record.config.outputs[1].multiple is True
+
+    rows = {row["id"]: row for row in list_skills(db)}
+    row = rows[skill_id]
+    assert row["outputs_count"] == 2
+    assert row["outputs_has_collection"] is True
