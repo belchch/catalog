@@ -155,27 +155,27 @@ export function OutputsList({
           <div key={index} className={ROW_CLS}>
             <div className="flex items-start gap-2">
               <div className="min-w-0 flex-1">
-                <div className="mb-1 flex items-center gap-2">
-                  {index === 0 && <span className="badge-neutral">основной</span>}
-                  <label className="block min-w-0 flex-1 text-[11px] text-ink-faint">
-                    ключ
-                    <input
-                      id={keyId}
-                      ref={(el) => {
-                        setRowRef(rowRefs, index, 'key', el)
-                        if (index === 0) setRef(firstKeyRef, el)
-                      }}
-                      type="text"
-                      className="field mt-1"
-                      value={row.key}
-                      disabled={disabled}
-                      aria-invalid={Boolean(err?.key)}
-                      aria-describedby={err?.key ? keyErrId : undefined}
-                      onChange={(e) => updateRow(index, { key: e.target.value })}
-                    />
-                  </label>
-                </div>
+                {index === 0 && (
+                  <span className="badge-neutral mb-1">основной</span>
+                )}
                 <label className="block text-[11px] text-ink-faint">
+                  ключ
+                  <input
+                    id={keyId}
+                    ref={(el) => {
+                      setRowRef(rowRefs, index, 'key', el)
+                      if (index === 0) setRef(firstKeyRef, el)
+                    }}
+                    type="text"
+                    className="field mt-1"
+                    value={row.key}
+                    disabled={disabled}
+                    aria-invalid={Boolean(err?.key)}
+                    aria-describedby={err?.key ? keyErrId : undefined}
+                    onChange={(e) => updateRow(index, { key: e.target.value })}
+                  />
+                </label>
+                <label className="mt-1.5 block text-[11px] text-ink-faint">
                   описание
                   <input
                     id={descId}
@@ -190,7 +190,7 @@ export function OutputsList({
                 </label>
                 <label
                   className={
-                    'mt-1 flex items-start gap-1.5 text-[11px] text-ink-faint' +
+                    'mt-1.5 flex items-start gap-1.5 text-[11px] text-ink-faint' +
                     (disabled ? ' cursor-not-allowed' : '')
                   }
                 >
