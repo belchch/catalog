@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+
 from catalog.api.skills import (
     BUILD_SKILL_SYSTEM_PROMPT,
     PROPOSE_SKILL_TRACKS_SYSTEM_PROMPT,
@@ -53,22 +55,63 @@ def _build_call(
     description: str = "Сравнивает два документа по общим темам",
     system_prompt: str = "Сравни входные документы по темам и выдай различия.",
     input_arity: int | None = 2,
+    outputs: list[dict] | None = None,
 ) -> ToolCall:
+    arguments: dict = {
+        "name": name,
+        "description": description,
+        "kind": "agent",
+        "system_prompt": system_prompt,
+        "allowed_tools": ["read_document"],
+        "model": "test/model",
+        "verify_checks": [{"check": "non_empty"}],
+        "input_arity": input_arity,
+        "non_determinism_reason": "нужно суждение о темах",
+    }
+    if outputs is not None:
+        arguments["outputs"] = outputs
     return ToolCall(
         id="build-1",
         name="build_skill",
-        arguments={
-            "name": name,
-            "description": description,
+        arguments=arguments,
+    )
+
+
+def _pack_draft(
+    client, session_id: str, *, outputs: list[dict] | None = None
+) -> None:
+    meta = client.patch(
+        f"/sessions/{session_id}/skill-meta",
+        json={
+            "name": "DraftSkill",
+            "description": "draft meta",
             "kind": "agent",
-            "system_prompt": system_prompt,
             "allowed_tools": ["read_document"],
-            "model": "test/model",
             "verify_checks": [{"check": "non_empty"}],
-            "input_arity": input_arity,
-            "non_determinism_reason": "нужно суждение о темах",
+            "input_arity": 1,
         },
     )
+    assert meta.status_code == 200, meta.text
+    prompt = client.patch(
+        f"/sessions/{session_id}/artifacts/prompt",
+        json={"content": "Собери выходы из черновика."},
+    )
+    assert prompt.status_code == 200, prompt.text
+    if outputs is None:
+        return
+    patched = client.patch(
+        f"/sessions/{session_id}/artifacts/outputs",
+        json={"content": json.dumps(outputs, ensure_ascii=False)},
+    )
+    assert patched.status_code == 200, patched.text
+
+
+def _select_track(client, session_id: str) -> None:
+    select = client.post(
+        f"/sessions/{session_id}/skill-tracks/select",
+        json={"track": _track()},
+    )
+    assert select.status_code == 200, select.text
 
 
 def test_anti_domain_prompts_contain_rules_and_few_shot() -> None:
@@ -358,6 +401,78 @@ def test_build_with_track_intent_skips_artifact_pack(client, provider, db) -> No
     assert "Dart" not in skill.config.description
     assert "Go" not in skill.config.system_prompt
     assert "Dart" not in skill.config.system_prompt
+
+
+def test_build_with_track_keeps_draft_outputs(client, provider, db) -> None:
+    session_id = client.post("/sessions").json()["id"]
+    draft = [
+        {"key": "brief", "description": "Резюме"},
+        {"key": "chapters", "description": "Глава", "multiple": True},
+    ]
+    _pack_draft(client, session_id, outputs=draft)
+    _select_track(client, session_id)
+    provider.script = [_completion(tool_calls=[_build_call()])]
+    resp = client.post(f"/sessions/{session_id}/skills")
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["config"]["outputs"] == [
+        {"key": "brief", "description": "Резюме", "multiple": False},
+        {"key": "chapters", "description": "Глава", "multiple": True},
+    ]
+    skill = get_skill(db, resp.json()["skill_id"])
+    assert skill is not None
+    assert [item.key for item in skill.config.outputs] == ["brief", "chapters"]
+    assert skill.config.outputs[0].description == "Резюме"
+    assert skill.config.outputs[1].description == "Глава"
+    assert skill.config.outputs[0].multiple is False
+    assert skill.config.outputs[1].multiple is True
+
+
+def test_build_with_track_rejects_invalid_outputs(client, provider, db) -> None:
+    invalid = [
+        {"key": "brief", "description": "a"},
+        {"key": "brief", "description": "b"},
+    ]
+    packed = client.post("/sessions").json()["id"]
+    _pack_draft(client, packed, outputs=invalid)
+    provider.script = []
+    artifact_resp = client.post(f"/sessions/{packed}/skills")
+    assert artifact_resp.status_code == 422
+    expected = artifact_resp.json()["detail"]
+
+    tracked = client.post("/sessions").json()["id"]
+    _pack_draft(client, tracked, outputs=invalid)
+    _select_track(client, tracked)
+    provider.script = [_completion(tool_calls=[_build_call()])]
+    resp = client.post(f"/sessions/{tracked}/skills")
+    assert resp.status_code == 422
+    assert resp.json()["detail"] == expected
+
+
+def test_build_with_track_without_outputs_artifact_uses_tool_args(
+    client, provider, db
+) -> None:
+    empty = client.post("/sessions").json()["id"]
+    _pack_draft(client, empty)
+    _select_track(client, empty)
+    provider.script = [_completion(tool_calls=[_build_call()])]
+    resp = client.post(f"/sessions/{empty}/skills")
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["config"]["outputs"] == []
+
+    proposed = client.post("/sessions").json()["id"]
+    _pack_draft(client, proposed)
+    _select_track(client, proposed)
+    model_outputs = [
+        {"key": "summary", "description": "The summary."},
+        {"key": "details", "description": "The details.", "multiple": True},
+    ]
+    provider.script = [_completion(tool_calls=[_build_call(outputs=model_outputs)])]
+    resp = client.post(f"/sessions/{proposed}/skills")
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["config"]["outputs"] == [
+        {"key": "summary", "description": "The summary.", "multiple": False},
+        {"key": "details", "description": "The details.", "multiple": True},
+    ]
 
 
 def test_build_history_annotated_in_memory(client, provider, db) -> None:
