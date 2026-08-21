@@ -3,12 +3,12 @@ export const meta = {
   description: 'Прогон шагов NN-CATALOG-*.md: designer → generator ↔ (reviewer ‖ ui-reviewer), git/PR/STATE через steward.',
   whenToUse: 'Явный запуск смены по планам Catalog. args: { plansDir, state, branch, cyclesMax, steps, maxSteps }. plansDir и state ОБЯЗАТЕЛЬНЫ (например plansDir: "docs/plan/<RUN_NAME>/", state: ".claude/state/<RUN_NAME>.json") — без них скрипт сразу останавливается.',
   phases: [
-    { title: 'Preflight', model: 'sonnet' },
+    { title: 'Preflight', model: 'haiku' },
     { title: 'Design', model: 'opus' },
     { title: 'Generate', model: 'sonnet' },
     { title: 'Review', model: 'opus' },
     { title: 'UI review', model: 'sonnet' },
-    { title: 'Finalize', model: 'sonnet' },
+    { title: 'Finalize', model: 'haiku' },
   ],
 }
 
@@ -44,7 +44,10 @@ const ROLES = {
   generator: { model: 'sonnet', effort: 'high' },
   reviewer: { model: 'opus', effort: 'high' },
   uiReviewer: { model: 'sonnet', effort: 'high' },
-  steward: { model: 'sonnet', effort: 'medium' },
+  // Стюард — чистая механика (git, STATE, прогон команд), решений не принимает.
+  // haiku здесь — осознанная экономия; если preflight начнёт путаться в разборе
+  // планов, первым делом вернуть sonnet.
+  steward: { model: 'haiku', effort: 'medium' },
 }
 
 // ---------------------------------------------------------------- схемы
@@ -278,13 +281,17 @@ for (let n = 0; n < queue.length; n++) {
     handoff = gen.handoff || handoff
 
     // Оба ревьюера readonly и независимы — единственное место, где параллель безопасна.
+    // Проверки ревьюеры не гоняют: CHECKS — отчёт генератора, авторитетный прогон у
+    // стюарда в finalize. Третий прогон за цикл — измеренные ~20 минут потерь на смену.
     const reviewPrompt = suffix =>
       `PLAN=${PLANS_DIR}${step.file}\n` +
       (designPath ? `DESIGN=${designPath}\n` : '') +
-      `DIFF_BASE=${base}\nCYCLE=${cycle}\n\nPRIOR_ISSUES:\n${issuesText(issues)}\n\n${suffix}`
+      `DIFF_BASE=${base}\nCYCLE=${cycle}\n\n` +
+      `CHECKS (отчёт генератора, сам не перепрогоняй):\n${gen.checks || 'генератор отчёт не дал'}\n\n` +
+      `PRIOR_ISSUES:\n${issuesText(issues)}\n\n${suffix}`
 
     const jobs = [
-      () => agent(reviewPrompt('Отревьюй дифф шага против плана и ADR, прогони проверки, верни вердикт.'), {
+      () => agent(reviewPrompt('Отревьюй дифф шага против плана и ADR, верни вердикт.'), {
         label: `review:${stem}#${cycle}`, phase: 'Review',
         agentType: 'catalog-reviewer', schema: REVIEW_SCHEMA, ...ROLES.reviewer,
       }),
@@ -301,7 +308,7 @@ for (let n = 0; n < queue.length; n++) {
     // Мёртвый ревьюер — это не APPROVED. Отсутствующий ui-ревьюер на code-шаге — APPROVED.
     const codeVerdict = code ? code.verdict : 'CHANGES_REQUESTED'
     const uiVerdict = (isUi && designPath) ? (ui ? ui.verdict : 'CHANGES_REQUESTED') : 'APPROVED'
-    lastChecks = (code && code.checks) || gen.checks || ''
+    lastChecks = gen.checks || lastChecks
 
     issues = fmtIssues('CODE', code && code.issues).concat(fmtIssues('UI', ui && ui.issues))
     const hard = blocking(code && code.issues).length + blocking(ui && ui.issues).length
