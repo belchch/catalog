@@ -60,3 +60,6 @@ backend/uv.lock
 # Claude pipeline state (local orchestrator state, not shared via git)
 .claude/state/
 .claude/steps-results/
+
+# Personal permission overrides, not shared via git
+.claude/settings.local.json
