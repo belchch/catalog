@@ -3,6 +3,7 @@
 - **Date:** 2026-08-20
 - **Status:** Accepted
 - **Extends:** ADR-0024
+- **Revises:** ADR-0024 (частично)
 - **Does not change:** ADR-0018, ADR-0019, ADR-0022
 - **Related:** CATALOG-150, CATALOG-152, CATALOG-153, CATALOG-154
 
