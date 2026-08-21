@@ -1,7 +1,7 @@
 # ADR 0012: Data-root вне репо исходников + два app-owned git-репозитория
 
 - **Date:** 2026-07-16
-- **Status:** Accepted (частично superseded ADR-0016: модель воркспейса = user-folder + `.catalog/index.db`; отказ от dulwich git-репо и единого `catalog.db` как модели пользовательского воркспейса)
+- **Status:** Accepted (частично superseded ADR-0016)
 - **Supersedes:** частично ADR-0005 (реализует отложенный там git)
 - **Superseded by:** частично ADR-0016
 
