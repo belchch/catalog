@@ -56,6 +56,8 @@ from catalog.skills.artifact_tools import (
 )
 from catalog.skills.budget import estimate_skill_llm_calls
 from catalog.skills.config import (
+    MAX_SKILL_OUTPUTS,
+    OUTPUT_KEY_RE,
     SKILL_KINDS,
     SkillConfig,
     VerifyCheck,
@@ -264,6 +266,25 @@ _BUILD_SKILL_PARAMETERS = {
             },
         },
         "output_kind": {"type": "string"},
+        "outputs": {
+            "type": "array",
+            "maxItems": MAX_SKILL_OUTPUTS,
+            "items": {
+                "type": "object",
+                "properties": {
+                    "key": {
+                        "type": "string",
+                        "pattern": OUTPUT_KEY_RE.pattern,
+                    },
+                    "description": {
+                        "type": "string",
+                        "minLength": 1,
+                    },
+                    "multiple": {"type": "boolean"},
+                },
+                "required": ["key", "description"],
+            },
+        },
     },
     "required": ["name", "description", "kind"],
 }
@@ -496,6 +517,24 @@ def _persist_built_skill(
     return skill_id
 
 
+def _session_outputs_args(db: Database, session_id: str) -> list[dict] | None:
+    outputs_row = get_artifact(db, session_id, "outputs")
+    if outputs_row is None:
+        return None
+    if not outputs_row.is_valid:
+        raise HTTPException(
+            status_code=422,
+            detail=f"outputs are invalid: {outputs_row.error or 'validation failed'}",
+        )
+    parsed_outputs, output_errors = parse_skill_outputs(outputs_row.content)
+    if output_errors:
+        raise HTTPException(
+            status_code=422,
+            detail="outputs artifact is invalid: " + "; ".join(output_errors),
+        )
+    return [skill_output_to_dict(item) for item in parsed_outputs]
+
+
 def _build_skill_from_artifacts(
     *,
     db: Database,
@@ -621,22 +660,8 @@ def _build_skill_from_artifacts(
         args["system_prompt"] = prompt.content
         args["code"] = ""
 
-    outputs_row = get_artifact(db, session_id, "outputs")
-    if outputs_row is None:
-        args["outputs"] = []
-    elif not outputs_row.is_valid:
-        raise HTTPException(
-            status_code=422,
-            detail=f"outputs are invalid: {outputs_row.error or 'validation failed'}",
-        )
-    else:
-        parsed_outputs, output_errors = parse_skill_outputs(outputs_row.content)
-        if output_errors:
-            raise HTTPException(
-                status_code=422,
-                detail="outputs artifact is invalid: " + "; ".join(output_errors),
-            )
-        args["outputs"] = [skill_output_to_dict(item) for item in parsed_outputs]
+    session_outputs = _session_outputs_args(db, session_id)
+    args["outputs"] = [] if session_outputs is None else session_outputs
 
     try:
         config = _args_to_config(args, model_default)
@@ -676,6 +701,7 @@ async def _build_skill_from_session_llm(
 
     available_tools = base_tools.names()
     available_checks = registered_checks()
+    session_outputs = _session_outputs_args(db, session_id)
 
     with prompt_log_context(session_id=session_id, run_id=None, purpose="build_skill"):
         for _attempt in range(MAX_BUILD_ATTEMPTS):
@@ -709,6 +735,11 @@ async def _build_skill_from_session_llm(
                     )
                 )
                 continue
+
+            if session_outputs is not None:
+                config = replace(
+                    config, outputs=skill_outputs_from_value(session_outputs)
+                )
 
             errors = _validate_config(
                 config,
