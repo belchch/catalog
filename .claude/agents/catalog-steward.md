@@ -54,10 +54,11 @@ tools: Read, Grep, Glob, Write, Edit, Bash
 1. Прогони финальные проверки по всему коду (не только по диффу шага): backend `ruff check .` + `pytest` из `backend/`; frontend `pnpm run build`, `pnpm run lint`, `pnpm run typecheck`, `pnpm run test` из `frontend/`.
    Если что-то красное — **не коммить**: верни `ok: false`, в `checks` — фактический статус каждой из шести команд, в `reason` — короткую причину. Это значит, что ревьюер одобрил зря, и workflow вернёт шаг в цикл генератор↔ревьюеры, если лимит циклов не исчерпан.
    Это последний гейт **Definition of Done** шага: критерии приёмки из файла плана + все шесть проверок зелёные + нет Critical/Medium от `catalog-reviewer` (для UI-шага дополнительно: нет Critical/Medium от `catalog-ui-reviewer` и выполнены критерии визуальной приёмки из `<stem плана>.design.md`). Шаг, у которого хоть одна часть не закрыта, не коммить.
+   `REVIEW_NOTES` во входе — замечания ревью, накопленные за циклы шага (в том числе уже закрытые). Чинить их не твоя задача: запиши как есть в `STATE.steps[STEP].advisory` (пустой список, если замечаний нет).
 2. `git add` только файлы, относящиеся к шагу. `git commit -m "<CATALOG-NN>: <краткое summary>"`.
 3. `git push` (первый пуш ветки — `git push -u origin <BRANCH>`).
 4. Если PR ещё нет — `gh pr create --base main --head <BRANCH> --title "Pipeline: <slug>" --body "Шаги — см. <STATE> (не в git)."`. Если есть — PR обновится пушем сам, ничего не вызывай.
-5. `STATE.steps[STEP] = { status: "done", verdict: "APPROVED", commit: <sha>, updated }`. Запиши STATE.
+5. `STATE.steps[STEP] = { status: "done", commit: <sha>, advisory: <REVIEW_NOTES как есть>, updated }`. Запиши STATE.
 
 ## Задача `fail`
 1. `STATE.steps[STEP].status = "failed"`, `failure_reason = <краткое summary ISSUES>`, `updated`. Запиши STATE.

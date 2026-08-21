@@ -6,6 +6,8 @@ from typing import Literal
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
+from catalog.skills.config import skill_outputs_from_value
+
 
 class ScanReport(BaseModel):
     added: list[str] = Field(default_factory=list)
@@ -89,6 +91,11 @@ class SkillOut(BaseModel):
     reasoning: str | None = None
     estimated_llm_calls: int = 0
     outputs_count: int = 0
+    # ADR-0025 / CATALOG-154: True when at least one declared output is a
+    # collection (``multiple``) — the client must not render outputs_count as
+    # a trustworthy exact document count in that case. Absent/False for
+    # skills without a collection output.
+    outputs_has_collection: bool = False
 
 
 class ApplyRequest(BaseModel):
@@ -140,7 +147,9 @@ class RunOut(BaseModel):
     trace: list | None = None
     # Raw agent/script output, kept even when persist=False (CATALOG-18).
     result_text: str | None = None
-    result_artifacts: dict[str, str] | None = None
+    # ADR-0025: a ``multiple`` output key's value is list[str] (one element
+    # per persisted document); a regular key's value is str.
+    result_artifacts: dict[str, str | list[str]] | None = None
     parent_run_id: str | None = None
 
 
@@ -221,6 +230,19 @@ class SkillBuilt(BaseModel):
     config: SkillPreview
 
 
+class SkillOutputOut(BaseModel):
+    """A single declared skill output (CATALOG-155).
+
+    Mirrors :class:`catalog.skills.config.SkillOutput`. ``multiple`` marks a
+    collection output (ADR-0025 / CATALOG-153) whose run-time value is a list
+    of documents rather than one.
+    """
+
+    key: str
+    description: str
+    multiple: bool = False
+
+
 class SkillPreview(BaseModel):
     name: str
     description: str | None = None
@@ -230,6 +252,9 @@ class SkillPreview(BaseModel):
     reasoning: str = ""
     input_arity: int | None = None
     allowed_tools: list[str] = Field(default_factory=list)
+    # CATALOG-155: named outputs declared via set_skill_outputs / the settings
+    # modal, primary-first (order is significant — see SkillOutput).
+    outputs: list[SkillOutputOut] = Field(default_factory=list)
 
 
 class SkillConfigureRequest(BaseModel):
@@ -238,6 +263,12 @@ class SkillConfigureRequest(BaseModel):
     Only the supplied fields are overridden; the rest of the config is kept.
     ``input_arity`` uses presence in the request body: omitted = leave
     unchanged; ``1`` / ``2`` = fixed count; ``null`` = document list (any >= 1).
+
+    ``outputs`` (CATALOG-155) follows the same presence semantics: omitted =
+    leave the declared outputs unchanged; an explicit list (``[]`` included,
+    meaning "no outputs") replaces them. Validated with
+    :func:`catalog.skills.config.parse_skill_outputs` — the same rules and
+    error messages as the OUTPUTS artifact card — so the two never drift.
     """
 
     model: str | None = None
@@ -245,12 +276,24 @@ class SkillConfigureRequest(BaseModel):
     reasoning: str | None = None
     input_arity: int | None = None
     name: str | None = None
+    outputs: list[dict] | None = None
 
     @field_validator("input_arity")
     @classmethod
     def _allowed_input_arity(cls, value: int | None) -> int | None:
         if value is not None and value not in (1, 2):
             raise ValueError("input_arity must be 1, 2, or null (document list)")
+        return value
+
+    @field_validator("outputs")
+    @classmethod
+    def _valid_outputs(cls, value: list[dict] | None) -> list[dict] | None:
+        if value is None:
+            return None
+        # Reuses the artifact-card validation so a 422 here carries the same
+        # messages; the parsed SkillOutput list itself is rebuilt in the
+        # endpoint from this validated raw form.
+        skill_outputs_from_value(value)
         return value
 
     @field_validator("name")
@@ -360,7 +403,9 @@ class ScriptTryOut(BaseModel):
     input_len: int = 0
     output_preview: str = ""
     output_len: int = 0
-    output_kind: Literal["str", "list", "dict"] | None = None
+    output_kind: Literal["str", "list", "dict", "collection"] | None = None
+    # ADR-0025: element count when output_kind == "collection"; None otherwise.
+    output_count: int | None = None
     duration_ms: int = 0
     verify: dict | None = None
     line_no: int | None = None

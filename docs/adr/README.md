@@ -30,6 +30,7 @@
 | [0022](0022-pipeline-skill-step.md) | Шаг pipeline типа skill: снапшот на сборке, вложенный apply в рантайме | Accepted |
 | [0023](0023-script-dry-run.md) | Dry-run script-скилла до заморозки: прогон черновика в той же песочнице | Accepted |
 | [0024](0024-named-skill-outputs.md) | Именованные выходы скилла: primary + companions, общий контракт для agent / script / pipeline | Accepted |
+| [0025](0025-collection-skill-outputs.md) | Коллекционный выход скилла: `multiple: true` и N документов на элемент | Accepted |
 
 ## Связанные материалы
 - Исходные транскрипции: `../pre-design/` (`opus-chat.json` — фундаментальные решения; `fable-review.json` — критика и уточнения).

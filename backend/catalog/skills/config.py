@@ -17,16 +17,29 @@ PIPELINE_STEP_TYPES = ("script", "llm", "skill")
 PIPELINE_STEP_INPUTS = ("documents", "previous")
 OUTPUT_KEY_RE = re.compile(r"^[a-z][a-z0-9_]{0,31}$")
 MAX_SKILL_OUTPUTS = 8
+# ADR-0025: cap on the number of documents born from *collection* (``multiple``)
+# output keys in a single run (sum of ``len(value)`` across ``multiple`` keys).
+# Separate from MAX_SKILL_OUTPUTS, which caps the number of *declared* keys.
+MAX_COLLECTION_DOCUMENTS = 50
 
 
 @dataclass
 class SkillOutput:
     key: str
     description: str
+    # ADR-0025: a collection output — the runtime value is ``list[str]``
+    # (one element per document) instead of a single ``str``. Part of the
+    # frozen config (participates in config_hash via to_json). Absent in
+    # config_json (the common case) defaults to ``False`` so old configs and
+    # their config_hash are unaffected.
+    multiple: bool = False
 
 
 def skill_output_to_dict(item: SkillOutput) -> dict:
-    return {"key": item.key, "description": item.description}
+    data = {"key": item.key, "description": item.description}
+    if item.multiple:
+        data["multiple"] = True
+    return data
 
 
 def parse_skill_outputs(value: object) -> tuple[list[SkillOutput], list[str]]:
@@ -71,8 +84,15 @@ def parse_skill_outputs(value: object) -> tuple[list[SkillOutput], list[str]]:
             description = desc_raw.strip()
             if not description:
                 errors.append(f"{label}.description must be non-empty")
-        if key_ok and description:
-            items.append(SkillOutput(key=key, description=description))
+        multiple_raw = entry.get("multiple", False)
+        multiple_ok = isinstance(multiple_raw, bool)
+        if not multiple_ok:
+            errors.append(f"{label}.multiple must be a boolean")
+        multiple = multiple_raw if multiple_ok else False
+        if key_ok and description and multiple_ok:
+            items.append(
+                SkillOutput(key=key, description=description, multiple=multiple)
+            )
     return items, errors
 
 

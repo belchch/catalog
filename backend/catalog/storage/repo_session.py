@@ -96,6 +96,48 @@ def get_session(db: Database, session_id: str) -> SessionRow | None:
     return _row_to_session(row) if row is not None else None
 
 
+def get_session_by_skill_id(db: Database, skill_id: str) -> SessionRow | None:
+    """Find the most recently touched session linked to a draft skill.
+
+    Only edit sessions (``POST /skills/{id}/edit``, CATALOG-17) set
+    ``session.skill_id``, so a skill that has never been through an edit
+    session has no linked session and this returns ``None`` — callers must
+    treat that as "nothing to sync", not an error (CATALOG-155). A skill can
+    have several live edit sessions at once (every ``POST /skills/{id}/edit``
+    call opens a new one); use :func:`get_sessions_by_skill_id` when a caller
+    needs to reach all of them rather than picking one.
+    """
+    with db.connect() as conn:
+        row = conn.execute(
+            f"SELECT {_SESSION_COLUMNS} FROM session WHERE skill_id = ? "
+            "ORDER BY COALESCE(updated_at, created_at) DESC, created_at DESC "
+            "LIMIT 1",
+            (skill_id,),
+        ).fetchone()
+    return _row_to_session(row) if row is not None else None
+
+
+def get_sessions_by_skill_id(db: Database, skill_id: str) -> list[SessionRow]:
+    """Find every session linked to a draft skill via ``session.skill_id``.
+
+    A skill can have several live edit sessions at once — ``POST
+    /skills/{id}/edit`` (CATALOG-17) opens a new session on every call and
+    none of them are ever closed out when a new one starts. Build can rebuild
+    the skill from *any* of them (``session.skill_id`` set), so anything that
+    needs to keep the frozen config and the session artifacts in sync (e.g.
+    ``sync_draft_outputs_artifact``, CATALOG-155) must update all of them,
+    not just the newest — otherwise a build from an older session silently
+    restores stale artifact content (ADR-0015).
+    """
+    with db.connect() as conn:
+        rows = conn.execute(
+            f"SELECT {_SESSION_COLUMNS} FROM session WHERE skill_id = ? "
+            "ORDER BY COALESCE(updated_at, created_at) DESC, created_at DESC",
+            (skill_id,),
+        ).fetchall()
+    return [_row_to_session(row) for row in rows]
+
+
 def list_sessions(
     db: Database,
     *,

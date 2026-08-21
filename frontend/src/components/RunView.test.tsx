@@ -179,3 +179,105 @@ describe('RunView named outputs', () => {
     expect(screen.queryByRole('button', { name: 'Сохранить как новый документ' })).toBeNull()
   })
 })
+
+describe('RunView collection outputs', () => {
+  function chapterArtifacts(n: number) {
+    return [
+      { key: 'index', description: 'Оглавление', text: 'INDEX' },
+      {
+        key: 'chapters',
+        description: 'Главы',
+        text: Array.from({ length: n }, (_, i) => `# Глава ${i + 1}\n\ntext ${i + 1}`),
+      },
+    ]
+  }
+
+  it('groups a 7-chapter collection output into two tabs, not eight', () => {
+    renderRun({
+      run: runResult({ artifacts: chapterArtifacts(7) }),
+    })
+    const tabs = screen.getAllByRole('tab')
+    expect(tabs).toHaveLength(2)
+    expect(tabs[1].textContent).toBe('Главы · 7')
+    expect(screen.getByRole('button', { name: 'Сохранить как 8 документов' })).toBeTruthy()
+  })
+
+  it('moves keyboard focus across the two output tabs, not the seven chapters', () => {
+    renderRun({
+      run: runResult({ artifacts: chapterArtifacts(7) }),
+    })
+    fireEvent.keyDown(screen.getByRole('tablist'), { key: 'ArrowRight' })
+    expect(screen.getByRole('tab', { name: 'Главы · 7' }).getAttribute('aria-selected')).toBe(
+      'true',
+    )
+    expect(screen.getByText('элементов: 7')).toBeTruthy()
+    fireEvent.keyDown(screen.getByRole('tablist'), { key: 'ArrowRight' })
+    expect(screen.getByRole('tab', { name: 'Оглавление' }).getAttribute('aria-selected')).toBe(
+      'true',
+    )
+  })
+
+  it('expands the first chapter and keeps the rest collapsed and unmounted', () => {
+    renderRun({
+      run: runResult({ artifacts: chapterArtifacts(3) }),
+    })
+    fireEvent.click(screen.getByRole('tab', { name: 'Главы · 3' }))
+    expect(screen.getByText('text 1')).toBeTruthy()
+    expect(screen.queryByText('text 2')).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: '2. Глава 2' }))
+    expect(screen.getByText('text 2')).toBeTruthy()
+  })
+
+  it('shows a single collection output without a tablist', () => {
+    renderRun({
+      run: runResult({
+        artifacts: [
+          { key: 'chapters', description: 'Главы', text: ['# Глава 1\n\ntext 1', 'text 2'] },
+        ],
+      }),
+    })
+    expect(screen.queryByRole('tablist')).toBeNull()
+    expect(screen.getByText('элементов: 2')).toBeTruthy()
+    expect(screen.getByText('text 1')).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Сохранить как 2 документа' })).toBeTruthy()
+  })
+
+  it('renders a run without collections exactly as before', () => {
+    renderRun({
+      run: runResult({
+        resultText: 'PRIMARY',
+        artifacts: [
+          { key: 'brief', description: 'Краткое резюме', text: 'PRIMARY' },
+          { key: 'table', description: 'Таблица перекодировки', text: 'TABLE' },
+        ],
+      }),
+    })
+    const tabs = screen.getAllByRole('tab')
+    expect(tabs[0].textContent).toBe('Краткое резюме')
+    expect(screen.getByRole('button', { name: 'Сохранить как новые документы' })).toBeTruthy()
+    expect(screen.queryByText(/элементов:/)).toBeNull()
+  })
+
+  it('collapses the created-docs chip list beyond the six-chip limit', () => {
+    const docs = Array.from({ length: 8 }, (_, i) => ({
+      id: `doc-${i}`,
+      title: `Глава ${i + 1}`,
+      kind: 'result_md',
+      created_at: '2026-08-20T00:00:00Z',
+    }))
+    renderRun({
+      run: runResult({
+        artifacts: chapterArtifacts(7),
+        outputDocIds: docs.map((d) => d.id),
+      }),
+      documents: docs,
+    })
+    expect(screen.getByRole('status').textContent).toContain('Создано 8 документов')
+    expect(screen.queryByRole('button', { name: 'Глава 1' })).toBeNull()
+    const toggle = screen.getByRole('button', { name: 'Показать 8 документов' })
+    expect(toggle.getAttribute('aria-expanded')).toBe('false')
+    fireEvent.click(toggle)
+    expect(screen.getByRole('button', { name: 'Скрыть список' })).toBeTruthy()
+    expect(screen.getByText('Глава 1')).toBeTruthy()
+  })
+})

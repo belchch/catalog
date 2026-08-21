@@ -24,6 +24,7 @@ export interface SkillOut {
   reasoning: string | null
   estimated_llm_calls: number
   outputs_count?: number
+  outputs_has_collection?: boolean
 }
 
 export interface RunOut {
@@ -143,6 +144,12 @@ export interface EditStarted {
   skill_id: string
 }
 
+export interface SkillOutputOut {
+  key: string
+  description: string
+  multiple?: boolean
+}
+
 export interface SkillPreview {
   name: string
   description: string | null
@@ -152,6 +159,11 @@ export interface SkillPreview {
   reasoning: string
   input_arity: number | null
   allowed_tools: string[]
+  // CATALOG-155: named outputs declared via set_skill_outputs / the settings
+  // modal. Optional on the client: the backend always sends an array, but
+  // the client stays tolerant of an absent field and reads it as "no
+  // outputs" (same presence semantics as elsewhere, ADR-0024).
+  outputs?: SkillOutputOut[]
 }
 
 export interface SkillBuilt {
@@ -542,6 +554,7 @@ export function configureSkill(
     reasoning?: string
     input_arity?: number | null
     name?: string
+    outputs?: SkillOutputOut[]
   },
 ): Promise<SkillBuilt> {
   return jsonFetch<SkillBuilt>(`/skills/${skillId}/configure`, {
@@ -687,53 +700,79 @@ export const MAX_SKILL_OUTPUTS = 8
 export interface OutputDraft {
   key: string
   description: string
+  multiple?: boolean
 }
 
 export interface OutputRowError {
   key?: string
   description?: string
+  multiple?: string
 }
 
 export interface RunArtifact {
   key: string
   description?: string | null
-  text: string
+  text: string | string[]
 }
+
+const OUTPUT_MULTIPLE_TYPE_ERROR = 'несколько документов: только true или false'
 
 export function parseOutputsArtifact(content: string): {
   outputs: OutputDraft[]
   parseError: string | null
+  rowErrors: (OutputRowError | null)[]
 } {
   const trimmed = content.trim()
-  if (!trimmed) return { outputs: [], parseError: null }
+  if (!trimmed) return { outputs: [], parseError: null, rowErrors: [] }
   let parsed: unknown
   try {
     parsed = JSON.parse(trimmed)
   } catch {
-    return { outputs: [], parseError: 'outputs must be JSON' }
+    return { outputs: [], parseError: 'outputs must be JSON', rowErrors: [] }
   }
   if (!Array.isArray(parsed)) {
-    return { outputs: [], parseError: 'outputs must be a JSON array' }
+    return { outputs: [], parseError: 'outputs must be a JSON array', rowErrors: [] }
   }
   const outputs: OutputDraft[] = []
+  const rowErrors: (OutputRowError | null)[] = []
   for (const item of parsed) {
     if (!item || typeof item !== 'object' || Array.isArray(item)) continue
     const rec = item as Record<string, unknown>
-    outputs.push({
+    const draft: OutputDraft = {
       key: typeof rec.key === 'string' ? rec.key : '',
       description: typeof rec.description === 'string' ? rec.description : '',
-    })
+    }
+    let rowError: OutputRowError | null = null
+    if ('multiple' in rec) {
+      if (typeof rec.multiple === 'boolean') {
+        draft.multiple = rec.multiple
+      } else {
+        rowError = { multiple: OUTPUT_MULTIPLE_TYPE_ERROR }
+      }
+    }
+    outputs.push(draft)
+    rowErrors.push(rowError)
   }
-  return { outputs, parseError: null }
+  return { outputs, parseError: null, rowErrors }
+}
+
+/** Single normalization point for outputs sent to the backend (CATALOG-155):
+ * key/description trimmed, `multiple` present only when `true`, order kept
+ * 1:1 with the input array. Used by both `serializeOutputs` (artifact card)
+ * and `configureSkill` callers (settings modal). */
+export function outputsPayload(outputs: OutputDraft[]): SkillOutputOut[] {
+  return outputs.map((item) => {
+    const out: SkillOutputOut = {
+      key: item.key.trim(),
+      description: item.description.trim(),
+    }
+    if (item.multiple === true) out.multiple = true
+    return out
+  })
 }
 
 export function serializeOutputs(outputs: OutputDraft[]): string {
-  return JSON.stringify(
-    outputs.map((item) => ({
-      key: item.key.trim(),
-      description: item.description.trim(),
-    })),
-  )
+  return JSON.stringify(outputsPayload(outputs))
 }
 
 export function validateOutputs(outputs: OutputDraft[]): {
@@ -756,7 +795,11 @@ export function validateOutputs(outputs: OutputDraft[]): {
     if (!description) {
       err.description = 'описание не может быть пустым'
     }
-    if (err.key || err.description) rowErrors[i] = err
+    const multiple = outputs[i].multiple
+    if (multiple !== undefined && typeof multiple !== 'boolean') {
+      err.multiple = OUTPUT_MULTIPLE_TYPE_ERROR
+    }
+    if (err.key || err.description || err.multiple) rowErrors[i] = err
   }
   return { ok: rowErrors.every((item) => item == null), rowErrors }
 }
@@ -767,21 +810,34 @@ export function normalizeRunArtifacts(raw: unknown): RunArtifact[] {
     for (const item of raw) {
       if (!item || typeof item !== 'object' || Array.isArray(item)) continue
       const rec = item as Record<string, unknown>
-      if (typeof rec.key !== 'string' || typeof rec.text !== 'string') continue
+      if (typeof rec.key !== 'string') continue
+      let text: string | string[] | null = null
+      if (typeof rec.text === 'string') {
+        text = rec.text
+      } else if (Array.isArray(rec.text)) {
+        text = rec.text.filter((el): el is string => typeof el === 'string')
+      }
+      if (text === null) continue
       const description =
         typeof rec.description === 'string'
           ? rec.description
           : rec.description === null
             ? null
             : undefined
-      out.push({ key: rec.key, text: rec.text, description })
+      out.push({ key: rec.key, text, description })
     }
     return out
   }
   if (raw && typeof raw === 'object') {
-    return Object.entries(raw as Record<string, unknown>).flatMap(([key, text]) =>
-      typeof text === 'string' ? [{ key, text }] : [],
-    )
+    const out: RunArtifact[] = []
+    for (const [key, text] of Object.entries(raw as Record<string, unknown>)) {
+      if (typeof text === 'string') {
+        out.push({ key, text })
+      } else if (Array.isArray(text)) {
+        out.push({ key, text: text.filter((el): el is string => typeof el === 'string') })
+      }
+    }
+    return out
   }
   return []
 }
@@ -861,7 +917,8 @@ export interface ScriptTryResult {
   input_len: number
   output_preview: string
   output_len: number
-  output_kind: 'str' | 'list' | 'dict' | null
+  output_kind: 'str' | 'list' | 'dict' | 'collection' | null
+  output_count: number | null
   duration_ms: number
   verify: ScriptTryVerify | null
   line_no: number | null

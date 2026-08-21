@@ -141,4 +141,50 @@ describe('useRunStream', () => {
     expect(result.current.resultText).toBe('PRIMARY')
     expect(result.current.outputDocIds).toEqual(['doc-1', 'doc-2'])
   })
+
+  it('reads a collection artifact from the dict-shaped result_artifacts (WS wire shape)', () => {
+    const { result } = renderHook(() => useRunStream('run-1'))
+    act(() => {
+      captured.onEvent?.({
+        type: 'finish',
+        status: 'ok',
+        output_doc_id: 'doc-1',
+        output_doc_ids: ['doc-1', 'doc-2', 'doc-3'],
+        result_text: 'ignored-when-artifacts-present',
+        result_artifacts: {
+          index: 'INDEX',
+          chapters: ['Ch1', 'Ch2'],
+        },
+      })
+    })
+    expect(result.current.artifacts).toEqual([
+      { key: 'index', text: 'INDEX' },
+      { key: 'chapters', text: ['Ch1', 'Ch2'] },
+    ])
+    expect(result.current.resultText).toBe('INDEX')
+    expect(result.current.outputDocIds).toEqual(['doc-1', 'doc-2', 'doc-3'])
+  })
+
+  it('joins the primary artifact when it is itself the collection (array-first key)', () => {
+    // ADR-0025 Decision 3: outputs[0].multiple is allowed — the primary
+    // artifact's own value is an array, so primaryArtifactText must take the
+    // Array.isArray branch (not just the string else-branch every other
+    // artifact test exercises) and join it with the backend's separator.
+    const { result } = renderHook(() => useRunStream('run-1'))
+    act(() => {
+      captured.onEvent?.({
+        type: 'finish',
+        status: 'ok',
+        output_doc_id: 'doc-1',
+        output_doc_ids: ['doc-1', 'doc-2'],
+        result_text: 'ignored-when-artifacts-present',
+        result_artifacts: {
+          chapters: ['Ch1', 'Ch2'],
+        },
+      })
+    })
+    expect(result.current.artifacts).toEqual([{ key: 'chapters', text: ['Ch1', 'Ch2'] }])
+    expect(result.current.resultText).toBe('Ch1\n\n---\n\nCh2')
+    expect(result.current.outputDocIds).toEqual(['doc-1', 'doc-2'])
+  })
 })

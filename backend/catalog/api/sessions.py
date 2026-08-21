@@ -123,11 +123,22 @@ PLANNER_SYSTEM_PROMPT = (
     "списке привязанных скиллов или через list_session_skills; затем "
     "save_skill_script / save_skill_prompt по шагам). "
     "Если скилл должен вернуть несколько документов с разными ролями — "
-    "объяви их через set_skill_outputs: список {key, description}, "
+    "объяви их через set_skill_outputs: список {key, description, multiple?}, "
     "не больше 8, ключ ^[a-z][a-z0-9_]{0,31}$, первый элемент — primary. "
     "Описания пиши так, чтобы их понял и человек, и автор кода. "
     "Ключи сверяются с фактическим возвратом; для script верни dict "
     "с теми же ключами. Один безымянный выход объявлять не нужно. "
+    "Роль и кратность — разные измерения: если документов несколько разных "
+    "ролей (текст + таблица) — это разные ключи; если число документов "
+    "заранее неизвестно и зависит от входа (например, одна глава — один "
+    "документ, а глав в исходнике может быть сколько угодно) — это один "
+    "ключ с multiple: true, а не список ролей. Для multiple-ключа script "
+    "возвращает list[str] по этому ключу; agent вызывает emit_output(key, "
+    "text) отдельно на каждый элемент — вызовы копятся в список, а не "
+    "перезаписывают друг друга. Для коллекций предпочитай kind=script: у "
+    "agent один emit_output — одна итерация, и общий max_iterations может "
+    "не хватить на длинную коллекцию; agent для коллекций — только если "
+    "разбиение требует понимания смысла текста. "
     "Для kind=script: "
     + SCRIPT_CODE_CONTRACT_RU
     + ". "
@@ -425,6 +436,7 @@ def _session_skill_out(row) -> SkillOut:
         reasoning=row.config.reasoning or None,
         estimated_llm_calls=estimate_skill_llm_calls(row.config),
         outputs_count=len(row.config.outputs),
+        outputs_has_collection=any(o.multiple for o in row.config.outputs),
     )
 
 

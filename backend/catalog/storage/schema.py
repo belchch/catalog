@@ -102,7 +102,7 @@ CREATE TABLE IF NOT EXISTS skill_run(
   trace_json TEXT, started_at TEXT NOT NULL, ended_at TEXT,
   persist INTEGER NOT NULL DEFAULT 1,                            -- 1 = auto-persist result_md (CATALOG-18)
   result_text TEXT,                                              -- raw agent/script output, kept even when persist=0
-  result_artifacts TEXT,                                         -- JSON object key→text (CATALOG-145)
+  result_artifacts TEXT,                                         -- JSON object key→(text|text[]); array for a multiple output (CATALOG-145, ADR-0025)
   output_doc_ids TEXT,                                           -- JSON array of result doc ids, primary first
   user_prompt TEXT,
   parent_run_id TEXT                                             -- nested skill-as-tool run (ADR-0019)

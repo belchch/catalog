@@ -1,4 +1,4 @@
-import { useEffect, useRef, type Ref } from 'react'
+import { useEffect, useRef, type MutableRefObject, type Ref } from 'react'
 import {
   MAX_SKILL_OUTPUTS,
   type OutputDraft,
@@ -23,6 +23,34 @@ function setRef(ref: Ref<HTMLInputElement> | undefined, el: HTMLInputElement | n
   else ref.current = el
 }
 
+interface RowRefs {
+  key: HTMLInputElement | null
+  up: HTMLButtonElement | null
+  down: HTMLButtonElement | null
+  remove: HTMLButtonElement | null
+}
+
+function emptyRowRefs(): RowRefs {
+  return { key: null, up: null, down: null, remove: null }
+}
+
+function setRowRef<K extends keyof RowRefs>(
+  rowRefs: MutableRefObject<RowRefs[]>,
+  index: number,
+  slot: K,
+  el: RowRefs[K],
+) {
+  const entry = rowRefs.current[index] ?? (rowRefs.current[index] = emptyRowRefs())
+  entry[slot] = el
+}
+
+// Намерение фокусировки, выставляемое обработчиками мутаций (add/move/remove) и
+// отрабатываемое в эффекте после коммита DOM — см. дизайн-спеку, раздел
+// «Модель фокуса при мутациях списка».
+type FocusIntent =
+  | { type: 'add' }
+  | { type: 'row'; index: number; target: 'key' | 'up' | 'down' | 'remove'; fallback?: 'up' | 'down' }
+
 export function OutputsList({
   value,
   onChange,
@@ -30,15 +58,52 @@ export function OutputsList({
   rowErrors = [],
   firstKeyRef,
 }: OutputsListProps) {
-  const pendingFocus = useRef<number | null>(null)
-  const keyRefs = useRef<(HTMLInputElement | null)[]>([])
+  const pendingFocus = useRef<FocusIntent | null>(null)
+  const rowRefs = useRef<RowRefs[]>([])
+  const addRef = useRef<HTMLButtonElement | null>(null)
 
+  // Зависимость эффекта — сам массив `value` (не value.length): перестановка
+  // ↑/↓ длину не меняет, но всё равно должна разбудить отложенную фокусировку.
   useEffect(() => {
-    const idx = pendingFocus.current
-    if (idx == null) return
+    // Ссылки на строки, вышедшие за пределы текущей длины списка (после
+    // remove), не должны накапливаться — иначе следующее add/move может
+    // случайно сфокусировать давно удалённый узел из старой записи. Done
+    // here (post-commit), not during render, per the rules-of-react ban on
+    // ref writes in the render body.
+    if (rowRefs.current.length > value.length) {
+      rowRefs.current.length = value.length
+    }
+
+    const intent = pendingFocus.current
+    if (!intent) return
     pendingFocus.current = null
-    keyRefs.current[idx]?.focus()
-  }, [value.length])
+
+    if (intent.type === 'add') {
+      addRef.current?.focus()
+      return
+    }
+
+    const row = rowRefs.current[intent.index]
+    if (!row) return
+
+    if (intent.target === 'key') {
+      row.key?.focus()
+      return
+    }
+
+    if (intent.target === 'up' || intent.target === 'down') {
+      const isDisabled =
+        intent.target === 'up' ? intent.index === 0 : intent.index === value.length - 1
+      if (isDisabled && intent.fallback) {
+        row[intent.fallback]?.focus()
+      } else {
+        row[intent.target]?.focus()
+      }
+      return
+    }
+
+    row.remove?.focus()
+  }, [value])
 
   const updateRow = (index: number, patch: Partial<OutputDraft>) => {
     onChange(value.map((row, i) => (i === index ? { ...row, ...patch } : row)))
@@ -50,17 +115,28 @@ export function OutputsList({
     const copy = value.slice()
     const [row] = copy.splice(index, 1)
     copy.splice(next, 0, row)
+    pendingFocus.current = {
+      type: 'row',
+      index: next,
+      target: dir === -1 ? 'up' : 'down',
+      fallback: dir === -1 ? 'down' : 'up',
+    }
     onChange(copy)
   }
 
   const remove = (index: number) => {
-    onChange(value.filter((_, i) => i !== index))
+    const next = value.filter((_, i) => i !== index)
+    pendingFocus.current =
+      next.length === 0
+        ? { type: 'add' }
+        : { type: 'row', index: Math.min(index, next.length - 1), target: 'remove' }
+    onChange(next)
   }
 
   const add = () => {
     if (value.length >= MAX_SKILL_OUTPUTS || disabled) return
-    pendingFocus.current = value.length
-    onChange([...value, { key: '', description: '' }])
+    pendingFocus.current = { type: 'row', index: value.length, target: 'key' }
+    onChange([...value, { key: '', description: '', multiple: false }])
   }
 
   return (
@@ -71,9 +147,12 @@ export function OutputsList({
         const descId = `outputs-desc-${index}`
         const keyErrId = `outputs-key-error-${index}`
         const descErrId = `outputs-desc-error-${index}`
+        const multiId = `outputs-multiple-${index}`
+        const multiHintId = `outputs-multiple-hint-${index}`
+        const multiErrId = `outputs-multiple-error-${index}`
         const label = row.key.trim() || String(index + 1)
         return (
-          <div key={`${index}-${row.key}`} className={ROW_CLS}>
+          <div key={index} className={ROW_CLS}>
             <div className="flex items-start gap-2">
               <div className="min-w-0 flex-1">
                 <div className="mb-1 flex items-center gap-2">
@@ -83,7 +162,7 @@ export function OutputsList({
                     <input
                       id={keyId}
                       ref={(el) => {
-                        keyRefs.current[index] = el
+                        setRowRef(rowRefs, index, 'key', el)
                         if (index === 0) setRef(firstKeyRef, el)
                       }}
                       type="text"
@@ -109,6 +188,29 @@ export function OutputsList({
                     onChange={(e) => updateRow(index, { description: e.target.value })}
                   />
                 </label>
+                <label
+                  className={
+                    'mt-1 flex items-start gap-1.5 text-[11px] text-ink-faint' +
+                    (disabled ? ' cursor-not-allowed' : '')
+                  }
+                >
+                  <input
+                    id={multiId}
+                    type="checkbox"
+                    className="mt-0.5 h-3 w-3 shrink-0 accent-brand"
+                    checked={row.multiple === true}
+                    disabled={disabled}
+                    aria-invalid={Boolean(err?.multiple)}
+                    aria-describedby={
+                      err?.multiple ? `${multiHintId} ${multiErrId}` : multiHintId
+                    }
+                    onChange={(e) => updateRow(index, { multiple: e.target.checked })}
+                  />
+                  несколько документов
+                </label>
+                <p id={multiHintId} className="ml-[1.125rem] text-[10px] text-ink-faint">
+                  число документов определяется при прогоне
+                </p>
                 {err?.key && (
                   <p id={keyErrId} className="mt-1 text-[11px] text-danger-ink">
                     {err.key}
@@ -119,10 +221,16 @@ export function OutputsList({
                     {err.description}
                   </p>
                 )}
+                {err?.multiple && (
+                  <p id={multiErrId} className="mt-1 text-[11px] text-danger-ink">
+                    {err.multiple}
+                  </p>
+                )}
               </div>
               <div className="flex shrink-0 flex-col gap-0.5">
                 <button
                   type="button"
+                  ref={(el) => setRowRef(rowRefs, index, 'up', el)}
                   className={MOVE_DISABLED}
                   disabled={disabled || index === 0}
                   aria-label={`Поднять выход ${label}`}
@@ -132,6 +240,7 @@ export function OutputsList({
                 </button>
                 <button
                   type="button"
+                  ref={(el) => setRowRef(rowRefs, index, 'down', el)}
                   className={MOVE_DISABLED}
                   disabled={disabled || index === value.length - 1}
                   aria-label={`Опустить выход ${label}`}
@@ -141,6 +250,7 @@ export function OutputsList({
                 </button>
                 <button
                   type="button"
+                  ref={(el) => setRowRef(rowRefs, index, 'remove', el)}
                   className={MOVE_DISABLED}
                   disabled={disabled}
                   aria-label={`Удалить выход ${label}`}
@@ -155,6 +265,7 @@ export function OutputsList({
       })}
       <button
         type="button"
+        ref={addRef}
         className="btn-secondary self-start disabled:cursor-not-allowed disabled:bg-surface-muted disabled:text-ink-faint"
         disabled={disabled || value.length >= MAX_SKILL_OUTPUTS}
         title={value.length >= MAX_SKILL_OUTPUTS ? 'максимум 8 выходов' : undefined}

@@ -130,7 +130,7 @@ describe('parseStepsArtifact', () => {
 
 describe('parseOutputsArtifact', () => {
   it('treats empty content as an empty list', () => {
-    expect(parseOutputsArtifact('')).toEqual({ outputs: [], parseError: null })
+    expect(parseOutputsArtifact('')).toEqual({ outputs: [], parseError: null, rowErrors: [] })
   })
 
   it('parses a key/description list', () => {
@@ -151,6 +151,23 @@ describe('parseOutputsArtifact', () => {
     expect(parseOutputsArtifact('{not json').parseError).toBe('outputs must be JSON')
     expect(parseOutputsArtifact('{"key":"x"}').parseError).toBe('outputs must be a JSON array')
   })
+
+  it('reads a real boolean multiple flag', () => {
+    const { outputs, rowErrors } = parseOutputsArtifact(
+      JSON.stringify([{ key: 'chapters', description: 'Главы', multiple: true }]),
+    )
+    expect(outputs).toEqual([{ key: 'chapters', description: 'Главы', multiple: true }])
+    expect(rowErrors).toEqual([null])
+  })
+
+  it('does not truthy-coerce a non-boolean multiple and reports a row error', () => {
+    const { outputs, parseError, rowErrors } = parseOutputsArtifact(
+      JSON.stringify([{ key: 'chapters', description: 'Главы', multiple: 'yes' }]),
+    )
+    expect(parseError).toBeNull()
+    expect(outputs).toEqual([{ key: 'chapters', description: 'Главы' }])
+    expect(rowErrors[0]?.multiple).toBe('несколько документов: только true или false')
+  })
 })
 
 describe('validateOutputs', () => {
@@ -169,6 +186,16 @@ describe('validateOutputs', () => {
     expect(rowErrors[1]?.description).toBe('описание не может быть пустым')
     expect(rowErrors[2]?.key).toBe('такой ключ уже есть')
   })
+
+  it('accepts a boolean multiple and rejects a non-boolean one', () => {
+    const { ok } = validateOutputs([{ key: 'chapters', description: 'Главы', multiple: true }])
+    expect(ok).toBe(true)
+    const bad = validateOutputs([
+      { key: 'chapters', description: 'Главы', multiple: 'yes' as unknown as boolean },
+    ])
+    expect(bad.ok).toBe(false)
+    expect(bad.rowErrors[0]?.multiple).toBe('несколько документов: только true или false')
+  })
 })
 
 describe('serializeOutputs', () => {
@@ -182,6 +209,26 @@ describe('serializeOutputs', () => {
       { key: 'a', description: 'one' },
       { key: 'b', description: 'two' },
     ]))
+  })
+
+  it('omits multiple entirely when false or unset, keeping legacy drafts byte-identical', () => {
+    expect(
+      serializeOutputs([
+        { key: 'a', description: 'one', multiple: false },
+        { key: 'b', description: 'two' },
+      ]),
+    ).toBe(
+      JSON.stringify([
+        { key: 'a', description: 'one' },
+        { key: 'b', description: 'two' },
+      ]),
+    )
+  })
+
+  it('writes multiple only when true', () => {
+    expect(
+      serializeOutputs([{ key: 'chapters', description: 'Главы', multiple: true }]),
+    ).toBe(JSON.stringify([{ key: 'chapters', description: 'Главы', multiple: true }]))
   })
 })
 
@@ -209,5 +256,31 @@ describe('normalizeRunArtifacts', () => {
     expect(normalizeRunArtifacts(undefined)).toEqual([])
     expect(normalizeRunArtifacts(null)).toEqual([])
     expect(normalizeRunArtifacts('x')).toEqual([])
+  })
+
+  it('reads a collection output as a string array and drops non-string elements', () => {
+    expect(
+      normalizeRunArtifacts([
+        { key: 'chapters', text: ['Ch1', 'Ch2', 1, null], description: 'Главы' },
+      ]),
+    ).toEqual([{ key: 'chapters', text: ['Ch1', 'Ch2'], description: 'Главы' }])
+  })
+
+  it('keeps an empty array as a collection with zero elements', () => {
+    expect(normalizeRunArtifacts([{ key: 'chapters', text: [] }])).toEqual([
+      { key: 'chapters', text: [] },
+    ])
+  })
+
+  it('reads a collection output from the key-to-value dictionary shape (the WS finish frame)', () => {
+    expect(
+      normalizeRunArtifacts({
+        index: 'HELLO',
+        chapters: ['Ch1', 'Ch2', 'Ch3'],
+      }),
+    ).toEqual([
+      { key: 'index', text: 'HELLO' },
+      { key: 'chapters', text: ['Ch1', 'Ch2', 'Ch3'] },
+    ])
   })
 })

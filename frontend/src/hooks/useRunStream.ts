@@ -76,6 +76,19 @@ function uniqueId(prefix: string): string {
   return `${prefix}-${stepCounter}`
 }
 
+// The primary artifact's text is a plain string for a regular output and a
+// list of documents for a collection output (ADR-0025). resultText only
+// needs a flat preview (it is used as the presence check for the "save
+// result" button and as the display fallback when there is no artifact
+// detail view), so a collection's items are joined for that purpose — with
+// the same separator the backend uses to build the canonical result_text
+// for a collection primary (_value_as_text, ADR-0025 Decision 3/9), so the
+// preview matches what a single-element collection stores verbatim and
+// keeps a visible boundary between chapters for a multi-element one.
+function primaryArtifactText(artifact: RunArtifact): string {
+  return Array.isArray(artifact.text) ? artifact.text.join('\n\n---\n\n') : artifact.text
+}
+
 export function useRunStream(runId: string | null): UseRunStreamResult {
   const [steps, setSteps] = useState<RunStep[]>([])
   const [meta, setMeta] = useState<RunMeta | null>(null)
@@ -208,7 +221,7 @@ export function useRunStream(runId: string | null): UseRunStreamResult {
         {
           const arts = normalizeRunArtifacts(e.result_artifacts)
           setArtifacts(arts)
-          if (arts.length > 0) setResultText(arts[0].text)
+          if (arts.length > 0) setResultText(primaryArtifactText(arts[0]))
           else if (e.result_text != null) setResultText(e.result_text)
         }
         setFinished(true)

@@ -3,12 +3,12 @@ export const meta = {
   description: 'Прогон шагов NN-CATALOG-*.md: designer → generator ↔ (reviewer ‖ ui-reviewer), git/PR/STATE через steward.',
   whenToUse: 'Явный запуск смены по планам Catalog. args: { plansDir, state, branch, cyclesMax, steps, maxSteps }. plansDir и state ОБЯЗАТЕЛЬНЫ (например plansDir: "docs/plan/<RUN_NAME>/", state: ".claude/state/<RUN_NAME>.json") — без них скрипт сразу останавливается.',
   phases: [
-    { title: 'Preflight', model: 'sonnet' },
+    { title: 'Preflight', model: 'haiku' },
     { title: 'Design', model: 'opus' },
     { title: 'Generate', model: 'sonnet' },
     { title: 'Review', model: 'opus' },
     { title: 'UI review', model: 'sonnet' },
-    { title: 'Finalize', model: 'sonnet' },
+    { title: 'Finalize', model: 'haiku' },
   ],
 }
 
@@ -44,7 +44,10 @@ const ROLES = {
   generator: { model: 'sonnet', effort: 'high' },
   reviewer: { model: 'opus', effort: 'high' },
   uiReviewer: { model: 'sonnet', effort: 'high' },
-  steward: { model: 'sonnet', effort: 'medium' },
+  // Стюард — чистая механика (git, STATE, прогон команд), решений не принимает.
+  // haiku здесь — осознанная экономия; если preflight начнёт путаться в разборе
+  // планов, первым делом вернуть sonnet.
+  steward: { model: 'haiku', effort: 'medium' },
 }
 
 // ---------------------------------------------------------------- схемы
@@ -242,10 +245,12 @@ for (let n = 0; n < queue.length; n++) {
     if (!designPath) log(`${tag}: дизайнер не вернул спеку — шаг пойдёт без DESIGN`)
   }
 
-  // Цикл generator ↔ ревьюеры. Финализация живёт ВНУТРИ цикла: красные финальные
-  // проверки означают, что ревьюер одобрил зря, — шаг возвращается в цикл, пока не
-  // исчерпан лимит (SKILL.md, «Финализация при APPROVED»; catalog-steward, finalize п.1).
+  // Цикл generator ↔ ревьюеры. Шаг коммитится только при APPROVED от обоих
+  // ревьюеров И зелёных финальных проверках; иначе возвращается генератору, пока
+  // не исчерпан лимит циклов. advisory копится сквозь циклы и пишется в STATE —
+  // по нему видно, что именно чинилось по дороге.
   let issues = []
+  let advisory = []
   let handoff = 'первый цикл, предыдущей работы нет'
   let verdict = 'CHANGES_REQUESTED'
   let cycle = 0
@@ -276,13 +281,17 @@ for (let n = 0; n < queue.length; n++) {
     handoff = gen.handoff || handoff
 
     // Оба ревьюера readonly и независимы — единственное место, где параллель безопасна.
+    // Проверки ревьюеры не гоняют: CHECKS — отчёт генератора, авторитетный прогон у
+    // стюарда в finalize. Третий прогон за цикл — измеренные ~20 минут потерь на смену.
     const reviewPrompt = suffix =>
       `PLAN=${PLANS_DIR}${step.file}\n` +
       (designPath ? `DESIGN=${designPath}\n` : '') +
-      `DIFF_BASE=${base}\nCYCLE=${cycle}\n\nPRIOR_ISSUES:\n${issuesText(issues)}\n\n${suffix}`
+      `DIFF_BASE=${base}\nCYCLE=${cycle}\n\n` +
+      `CHECKS (отчёт генератора, сам не перепрогоняй):\n${gen.checks || 'генератор отчёт не дал'}\n\n` +
+      `PRIOR_ISSUES:\n${issuesText(issues)}\n\n${suffix}`
 
     const jobs = [
-      () => agent(reviewPrompt('Отревьюй дифф шага против плана и ADR, прогони проверки, верни вердикт.'), {
+      () => agent(reviewPrompt('Отревьюй дифф шага против плана и ADR, верни вердикт.'), {
         label: `review:${stem}#${cycle}`, phase: 'Review',
         agentType: 'catalog-reviewer', schema: REVIEW_SCHEMA, ...ROLES.reviewer,
       }),
@@ -299,20 +308,22 @@ for (let n = 0; n < queue.length; n++) {
     // Мёртвый ревьюер — это не APPROVED. Отсутствующий ui-ревьюер на code-шаге — APPROVED.
     const codeVerdict = code ? code.verdict : 'CHANGES_REQUESTED'
     const uiVerdict = (isUi && designPath) ? (ui ? ui.verdict : 'CHANGES_REQUESTED') : 'APPROVED'
-    lastChecks = (code && code.checks) || gen.checks || ''
+    lastChecks = gen.checks || lastChecks
 
     issues = fmtIssues('CODE', code && code.issues).concat(fmtIssues('UI', ui && ui.issues))
-    const hardCode = blocking(code && code.issues).length
-    const hardUi = blocking(ui && ui.issues).length
+    const hard = blocking(code && code.issues).length + blocking(ui && ui.issues).length
+    for (const line of issues) if (advisory.indexOf(line) === -1) advisory.push(line)
 
     verdict = (codeVerdict === 'APPROVED' && uiVerdict === 'APPROVED') ? 'APPROVED' : 'CHANGES_REQUESTED'
-    log(`${tag}: code=${codeVerdict} ui=${uiVerdict} · блокирующих ${hardCode + hardUi}`)
+    log(`${tag}: code=${codeVerdict} ui=${uiVerdict} · блокирующих ${hard}`)
     if (verdict !== 'APPROVED') continue
 
     // Финализация — единственная точка коммита шага.
     const fin = await agent(
       `Задача: finalize.\n${CTX}\nSTEP=${step.file}\nTICKET=${step.ticket}\n` +
       `PR_NUMBER=${prNumber === null ? 'нет' : prNumber}\n\n` +
+      `REVIEW_NOTES — замечания ревью, накопленные за циклы шага (уже закрытые в том числе). ` +
+      `Запиши их в STATE шага как есть:\n${issuesText(advisory)}\n\n` +
       `Прогони финальные проверки, закоммить только файлы шага, запушь, при необходимости создай PR, обнови STATE.`,
       { label: `finalize:${stem}#${cycle}`, phase: 'Finalize', agentType: 'catalog-steward', schema: FINALIZE_SCHEMA, ...ROLES.steward },
     )
@@ -321,13 +332,13 @@ for (let n = 0; n < queue.length; n++) {
       break
     }
 
-    // Ревьюер одобрил зря — финальные проверки красные. Не коммитим, дописываем
-    // issue и возвращаемся в цикл; в fail проваливаемся только исчерпав лимит.
+    // Финальные проверки красные — не коммитим, дописываем issue и возвращаемся
+    // в цикл; в fail проваливаемся только исчерпав лимит.
     const why = fin ? (fin.reason || fin.checks) : 'steward не вернул результат'
     verdict = 'CHANGES_REQUESTED'
     issues = issues.concat([`- [CODE] [Critical] финальные проверки — ${why}`])
     lastChecks = (fin && fin.checks) || lastChecks
-    handoff = `${handoff}\n\nЦикл ${cycle}: ревью одобрило, но финальные проверки красные — ${why}. Чини именно проверки, одобренное не переписывай.`
+    handoff = `${handoff}\n\nЦикл ${cycle}: финальные проверки красные — ${why}. Ревью одобрило, но финальные проверки красные. Чини именно проверки, одобренное не переписывай.`
     log(
       cycle < CYCLES_MAX
         ? `${tag}: финализация отклонена — ${why} · возврат в цикл`
@@ -338,8 +349,11 @@ for (let n = 0; n < queue.length; n++) {
   if (finalized) {
     prUrl = finalized.prUrl || prUrl
     prNumber = (finalized.prNumber === null || finalized.prNumber === undefined) ? prNumber : finalized.prNumber
-    log(`${tag}: done · ${finalized.commit || 'commit?'}`)
-    results.push({ step: step.file, status: 'done', cycles: cycle, commit: finalized.commit || null })
+    log(`${tag}: done · ${finalized.commit || 'commit?'}${advisory.length ? ` · замечаний за циклы ${advisory.length}` : ''}`)
+    results.push({
+      step: step.file, status: 'done', cycles: cycle,
+      commit: finalized.commit || null, advisory,
+    })
     continue
   }
 
@@ -348,12 +362,13 @@ for (let n = 0; n < queue.length; n++) {
     { label: `fail:${stem}`, phase: 'Finalize', agentType: 'catalog-steward', ...ROLES.steward },
   )
   log(`${tag}: failed после ${cycle} циклов`)
-  results.push({ step: step.file, status: 'failed', cycles: cycle, issues })
+  results.push({ step: step.file, status: 'failed', cycles: cycle, issues, advisory })
   markBlocking(step.ticket)
 }
 
 const done = results.filter(r => r.status === 'done').length
-log(`итог: done ${done} · failed ${results.filter(r => r.status === 'failed').length} · skipped ${results.filter(r => r.status === 'skipped').length}`)
+const advisoryTotal = results.reduce((n, r) => n + ((r.advisory && r.advisory.length) || 0), 0)
+log(`итог: done ${done} · failed ${results.filter(r => r.status === 'failed').length} · skipped ${results.filter(r => r.status === 'skipped').length} · замечаний за циклы ${advisoryTotal}`)
 
 return {
   branch: pre.branch,
@@ -362,5 +377,6 @@ return {
   prUrl,
   prNumber,
   stepsDone: done,
+  advisoryTotal,
   results,
 }

@@ -337,7 +337,7 @@ def _call_main(main: Any, namespace: dict[str, Any]) -> Any:
     return main(*bound.args, **bound.kwargs)
 
 
-ScriptResult = str | list[str] | dict[str, str]
+ScriptResult = str | list[str] | dict[str, str | list[str]]
 
 
 def _as_str_list(value: Any) -> list[str] | None:
@@ -346,13 +346,20 @@ def _as_str_list(value: Any) -> list[str] | None:
     return None
 
 
-def _as_str_dict(value: Any) -> dict[str, str] | None:
+def _as_str_dict(value: Any) -> dict[str, str | list[str]] | None:
     if not isinstance(value, dict):
         return None
-    if all(isinstance(key, str) and isinstance(item, str) for key, item in value.items()):
+    # ADR-0025: a dict value may be a plain string (regular output) or a
+    # list[str] (a ``multiple`` output — one element per document). Any other
+    # value type is a hard error, same as before.
+    if all(
+        isinstance(key, str)
+        and (isinstance(item, str) or _as_str_list(item) is not None)
+        for key, item in value.items()
+    ):
         return value
     raise ScriptRuntimeError(
-        "script result dict must have string keys and string values"
+        "script result dict must have string keys and string or list[str] values"
     )
 
 

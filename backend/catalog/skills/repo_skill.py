@@ -16,7 +16,7 @@ from datetime import datetime, timezone
 from typing import cast
 
 from catalog.skills.budget import estimate_skill_llm_calls
-from catalog.skills.config import SkillConfig, compute_tags
+from catalog.skills.config import SkillConfig, SkillOutput, compute_tags
 from catalog.skills.repo_run import delete_runs_for_skill
 from catalog.storage.db import Database
 
@@ -112,6 +112,7 @@ def list_skills(db: Database, status: str | None = None) -> list[dict]:
             config_reasoning = config.reasoning or None
             config_cost = estimate_skill_llm_calls(config)
             config_outputs_count = len(config.outputs)
+            config_outputs_has_collection = any(o.multiple for o in config.outputs)
         except (ValueError, KeyError):
             # Unparseable/legacy config: degrade to the agent defaults so the
             # row still renders on the UI with an ``ai`` tag.
@@ -123,6 +124,7 @@ def list_skills(db: Database, status: str | None = None) -> list[dict]:
             config_reasoning = None
             config_cost = 24
             config_outputs_count = 0
+            config_outputs_has_collection = False
         result.append(
             {
                 "id": r["id"],
@@ -139,6 +141,7 @@ def list_skills(db: Database, status: str | None = None) -> list[dict]:
                 "reasoning": config_reasoning,
                 "estimated_llm_calls": config_cost,
                 "outputs_count": config_outputs_count,
+                "outputs_has_collection": config_outputs_has_collection,
             }
         )
     return result
@@ -218,13 +221,17 @@ def update_skill_config(
     reasoning: str | None = None,
     input_arity: int | None | object = _UNSET,
     name: str | None = None,
+    outputs: list[SkillOutput] | object = _UNSET,
 ) -> SkillRecord | None:
     """Override selected config fields and persist (CATALOG-6 settings modal).
 
     For ``model``/``provider``/``reasoning``/``name``, only non-``None``
     arguments are applied. For ``input_arity``, pass an explicit value
     (including ``None`` for the document-list mode) or omit the argument to
-    leave it unchanged. When ``name`` is set, both the ``skill.name`` column
+    leave it unchanged. ``outputs`` (CATALOG-155) follows the same
+    presence semantics as ``input_arity``: omit to leave the declared outputs
+    untouched, or pass an explicit list (``[]`` included) to replace them.
+    When ``name`` is set, both the ``skill.name`` column
     and ``config.name`` are updated. Returns the updated record (or ``None``
     if the skill does not exist). Intended for ``draft`` skills before
     commit; ``name`` alone is also used for committed rename (CATALOG-30).
@@ -241,6 +248,8 @@ def update_skill_config(
         config.reasoning = reasoning
     if input_arity is not _UNSET:
         config.input_arity = cast(int | None, input_arity)
+    if outputs is not _UNSET:
+        config.outputs = cast(list[SkillOutput], outputs)
     new_name = record.name
     if name is not None:
         config.name = name
