@@ -11,6 +11,12 @@ You describe a task in chat, refine the plan, and save it as a skill. A skill ca
 
 ![Catalog main screen](docs/assets/catalog-overview.png)
 
+## Video demo
+
+[![Watch the Catalog product demo](docs/assets/catalog-demo-cover.jpg)](https://github.com/belchch/catalog/releases/download/catalog-demo-v1/catalog-demo-v5.mp4)
+
+[Watch the 4-minute product walkthrough](https://github.com/belchch/catalog/releases/download/catalog-demo-v1/catalog-demo-v5.mp4) — from opening a local workspace to building, checking, and reusing a skill, with Obsidian-compatible results.
+
 [Quick start](#quick-start) · [Run and setup](README-RUN.md) · [Architecture decisions](docs/adr/README.md) · [License](#license)
 
 ## How it works

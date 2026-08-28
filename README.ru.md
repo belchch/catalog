@@ -11,6 +11,12 @@
 
 ![Основной экран Catalog](docs/assets/catalog-overview.png)
 
+## Видеодемо
+
+[![Смотреть видеодемо Catalog](docs/assets/catalog-demo-cover.jpg)](https://github.com/belchch/catalog/releases/download/catalog-demo-v1/catalog-demo-v5.mp4)
+
+[Посмотреть четырёхминутную демонстрацию](https://github.com/belchch/catalog/releases/download/catalog-demo-v1/catalog-demo-v5.mp4) — от открытия локального воркспейса до создания, проверки и повторного использования скилла с результатами, совместимыми с Obsidian.
+
 [Быстрый старт](#быстрый-старт) · [Запуск и настройка](README-RUN.ru.md) · [Архитектурные решения](docs/adr/README.md) · [Лицензия](#лицензия)
 
 ## Как это работает
